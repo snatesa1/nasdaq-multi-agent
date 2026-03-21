@@ -1,0 +1,24 @@
+# === Core Framework ===
+fastapi
+uvicorn[standard]
+python-dotenv
+
+# === Data Sources ===
+alpaca-py
+yfinance
+requests
+feedparser
+fredapi
+
+# === ML / Numerics ===
+numpy
+pandas
+
+# === GCP ===
+google-cloud-secret-manager
+
+# === Slack ===
+slack-sdk
+
+# === Vertex AI (for Gemini) ===
+google-cloud-aiplatform

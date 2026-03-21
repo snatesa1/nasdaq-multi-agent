@@ -1,0 +1,14 @@
+.env
+*.json
+github-actions-key.json
+__pycache__/
+*.pyc
+tests/__pycache__/
+.pytest_cache/
+.DS_Store
+*.sh
+!deploy_app.sh
+!init_gcp.sh
+!destroy_app.sh
+!upload_secrets.sh
+!setup_gh_actions_sa.sh
