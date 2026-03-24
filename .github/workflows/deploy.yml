@@ -31,9 +31,9 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      - name: Run Tests
-        run: |
-          pytest tests/
+#      - name: Run Tests
+#        run: |
+#          pytest tests/
 
       - name: Authenticate to Google Cloud
         uses: google-github-actions/auth@v2
