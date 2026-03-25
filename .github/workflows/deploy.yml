@@ -46,7 +46,7 @@ jobs:
 
       - name: Build and Push Image (Cloud Build)
         run: |
-          gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/nasdaq-multi-agent
+          gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/nasdaq-multi-agent --suppress-logs
 
       - name: Deploy to Cloud Run
         id: deploy
