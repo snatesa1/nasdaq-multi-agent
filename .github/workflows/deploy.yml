@@ -69,9 +69,10 @@ jobs:
           SCHEDULER_JOB="nasdaq-analysis-daily"
           REGION="asia-southeast1"
           SERVICE_URL="${{ steps.deploy.outputs.url }}"
+          SA_EMAIL="${{ secrets.WIF_SERVICE_ACCOUNT }}"
           
           # Delete existing job if present
-          gcloud scheduler jobs delete $SCHEDULER_JOB --location=$REGION --quiet || true
+          gcloud scheduler jobs delete $SCHEDULER_JOB --location=$REGION --quiet 2>/dev/null || true
           
           gcloud scheduler jobs create http $SCHEDULER_JOB \
             --location=$REGION \
@@ -79,5 +80,8 @@ jobs:
             --uri="$SERVICE_URL/cron/analyze" \
             --http-method=POST \
             --headers="X-Cron-Secret=${{ secrets.CRON_SECRET }}" \
+            --oidc-service-account-email=$SA_EMAIL \
+            --oidc-token-audience=$SERVICE_URL \
             --time-zone="Asia/Singapore" \
             --attempt-deadline=300s
+
