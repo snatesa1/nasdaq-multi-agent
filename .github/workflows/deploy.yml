@@ -36,6 +36,7 @@ jobs:
 #          pytest tests/
 
       - name: Authenticate to Google Cloud
+        id: auth
         uses: google-github-actions/auth@v2
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
@@ -46,17 +47,17 @@ jobs:
 
       - name: Build and Push Image (Cloud Build)
         run: |
-          gcloud builds submit --tag gcr.io/${{ secrets.GCP_PROJECT_ID }}/nasdaq-multi-agent --suppress-logs
+          gcloud builds submit --tag gcr.io/${{ steps.auth.outputs.project_id }}/nasdaq-multi-agent --logging=cloud-logging
 
       - name: Deploy to Cloud Run
         id: deploy
         uses: google-github-actions/deploy-cloudrun@v2
         with:
           service: nasdaq-multi-agent
-          image: gcr.io/${{ secrets.GCP_PROJECT_ID }}/nasdaq-multi-agent
+          image: gcr.io/${{ steps.auth.outputs.project_id }}/nasdaq-multi-agent
           region: asia-southeast1
           env_vars: |
-            GCP_PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+            GCP_PROJECT_ID=${{ steps.auth.outputs.project_id }}
             SLACK_CHANNEL_ID=${{ secrets.SLACK_CHANNEL_ID }}
             EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}
             EMAIL_RECIPIENT=${{ secrets.EMAIL_RECIPIENT }}
