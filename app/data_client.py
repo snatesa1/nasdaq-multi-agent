@@ -193,7 +193,7 @@ class YFinanceClient:
             Dict mapping year → DataFrame with 'indexed_close' column.
         """
         if years is None:
-            years = [1999, 2008, 2024, 2025, 2026]
+            years = [1999, 2008, 2011, 2016, 2018, 2024, 2025, 2026]
 
         today = datetime.now()
         month, day = today.month, today.day
