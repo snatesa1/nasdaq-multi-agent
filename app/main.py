@@ -52,6 +52,18 @@ async def cron_analyze(request: Request, background_tasks: BackgroundTasks):
     return {"status": "analysis_started", "delivery": "slack"}
 
 
+@app.post("/analyze")
+async def manual_analyze(background_tasks: BackgroundTasks):
+    """Simple manual trigger for ad-hoc analysis."""
+    logger.info("🚀 Manual trigger received")
+    background_tasks.add_task(
+        _run_and_deliver, 
+        channel_id=settings.SLACK_CHANNEL_ID, 
+        send_email=True
+    )
+    return {"status": "analysis_started"}
+
+
 # ═══════════════════════════════════════════════════════════
 #  Slack Slash Command (/nasdaqscan)
 # ═══════════════════════════════════════════════════════════
@@ -116,7 +128,7 @@ async def _run_and_deliver(
             if settings.EMAIL_SENDER and settings.EMAIL_RECIPIENT and settings.EMAIL_APP_PASSWORD:
                 email_body = format_email(result)
                 _send_email(
-                    subject="📊 NASDAQ Multi-Agent Analysis",
+                    subject="📊 NASDAQ + Holy Grail Multi-Asset Analysis",
                     body=email_body,
                 )
                 logger.info(f"📧 Email sent to {settings.EMAIL_RECIPIENT}")

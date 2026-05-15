@@ -116,6 +116,10 @@ def format_slack_blocks(result: Dict) -> List[Dict]:
     blocks.extend(_build_fred_blocks(result))
     blocks.append({"type": "divider"})
 
+    # ── Tier 1.5: Holy Grail (Correlation) ────────────────
+    blocks.extend(_build_correlation_blocks(result))
+    blocks.append({"type": "divider"})
+
     # ── Tier 2: Technical Analysis ───────────────────────
     blocks.extend(_build_technical_blocks(result))
     blocks.append({"type": "divider"})
@@ -334,6 +338,47 @@ def _build_fred_blocks(result: Dict) -> List[Dict]:
         blocks.append({
             "type": "context",
             "elements": [{"type": "mrkdwn", "text": assessment}]
+        })
+
+    return blocks
+
+
+def _build_correlation_blocks(result: Dict) -> List[Dict]:
+    """Build Slack blocks for Correlation (Holy Grail) section."""
+    tier1 = result.get("tier1", {})
+    corr = tier1.get("holy_grail", {})
+    score = corr.get("score", 0)
+    data = corr.get("data", {})
+    uncorrelated = data.get("uncorrelated_assets", [])
+    
+    blocks = []
+    blocks.append({
+        "type": "section",
+        "text": {
+            "type": "mrkdwn",
+            "text": f"⚖️ *Holy Grail (Correlation)*  {_score_emoji(score)} *{score:.2f}*"
+        }
+    })
+
+    if uncorrelated:
+        assets_text = ", ".join([f"`{a['symbol']}` ({a['correlation']:.2f})" for a in uncorrelated[:10]])
+        blocks.append({
+            "type": "section",
+            "text": {"type": "mrkdwn", "text": f"*Uncorrelated Assets (< 0.2):*\n{assets_text}"}
+        })
+        
+        overlaps = result.get("tier3", {}).get("holy_grail_selections", [])
+        if overlaps:
+            blocks.append({
+                "type": "section",
+                "text": {"type": "mrkdwn", "text": f"🎯 *Holy Grail Overlaps:* {', '.join([f'`{s}`' for s in overlaps])}"}
+            })
+
+    rationale = corr.get("rationale", "")
+    if rationale:
+        blocks.append({
+            "type": "context",
+            "elements": [{"type": "mrkdwn", "text": rationale}]
         })
 
     return blocks
@@ -599,6 +644,9 @@ def format_email(result: Dict) -> str:
 <tr><td style="padding:5px 30px 15px;">
   {_email_tech_table(tech_results)}
 </td></tr>
+
+<!-- Holy Grail Section -->
+{_email_correlation_section(result)}
 
 <!-- Fundamental Section (Phase 2) -->
 {_email_fundamental_section(result)}
@@ -892,6 +940,57 @@ def _email_fundamental_section(result: Dict) -> str:
     {rows}
     </table>
     {guide_html}
+</td></tr>
+"""
+
+def _email_correlation_section(result: Dict) -> str:
+    """Render correlation (Holy Grail) section for email."""
+    tier1 = result.get("tier1", {})
+    corr = tier1.get("holy_grail", {})
+    data = corr.get("data", {})
+    uncorrelated = data.get("uncorrelated_assets", [])
+    
+    if not uncorrelated:
+        return ""
+
+    rows = ""
+    for i, a in enumerate(uncorrelated[:12]):
+        bg = "#161b22" if i % 2 == 0 else "#0d1117"
+        rows += f"""<tr style="background:{bg}; border-bottom:1px solid #21262d;">
+            <td style="padding:8px; color:#c9d1d9; font-weight:700; font-size:13px;">{a['symbol']}</td>
+            <td style="padding:8px; text-align:right; color:#3fb950; font-size:12px; font-weight:600;">{a['correlation']:.3f}</td>
+        </tr>"""
+
+    overlaps = result.get("tier3", {}).get("holy_grail_selections", [])
+    overlap_html = ""
+    if overlaps:
+        overlap_html = f"""
+        <div style="margin-top:12px; background:#1c2128; border-radius:8px; padding:10px; border-left:4px solid #3fb950;">
+            <div style="color:#8b949e; font-size:11px; text-transform:uppercase;">🎯 Holy Grail Overlaps</div>
+            <div style="color:#e6edf3; font-size:14px; font-weight:700; margin-top:4px;">{', '.join(overlaps)}</div>
+        </div>
+        """
+
+    return f"""
+<tr><td style="padding:15px 30px 5px;">
+  <h2 style="margin:0; color:#e6edf3; font-size:16px; border-bottom:1px solid #30363d; padding-bottom:8px;">
+    ⚖️ Holy Grail — Uncorrelated Assets
+  </h2>
+</td></tr>
+<tr><td style="padding:5px 30px 15px;">
+    <div style="display:flex; gap:20px;">
+        <table style="width:100%; border-collapse:collapse; background:#0d1117; border-radius:6px; overflow:hidden;">
+            <tr style="background:#161b22; border-bottom:1px solid #30363d;">
+                <th style="padding:8px; text-align:left; color:#8b949e; font-size:11px;">Asset</th>
+                <th style="padding:8px; text-align:right; color:#8b949e; font-size:11px;">Correlation (to SPY)</th>
+            </tr>
+            {rows}
+        </table>
+    </div>
+    {overlap_html}
+    <p style="color:#8b949e; font-size:12px; margin-top:8px; font-style:italic;">
+        {corr.get('rationale', '')}
+    </p>
 </td></tr>
 """
 
