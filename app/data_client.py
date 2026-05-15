@@ -111,6 +111,15 @@ class FMPClient:
             {"symbol": symbol, "periodLength": period, "timeframe": timeframe},
         )
 
+    # ── Index Constituents ──────────────────────────────
+    def get_sp500_constituents(self) -> List[Dict]:
+        """Fetch list of S&P 500 stocks."""
+        return self._get("sp500_constituent")
+
+    def get_nasdaq_constituents(self) -> List[Dict]:
+        """Fetch list of NASDAQ 100 stocks."""
+        return self._get("nasdaq_constituent")
+
 
 # ═══════════════════════════════════════════════════════════
 #  Alpaca Client — OHLCV Price Data
@@ -184,7 +193,7 @@ class YFinanceClient:
             Dict mapping year → DataFrame with 'indexed_close' column.
         """
         if years is None:
-            years = [1999, 2008, 2024, 2025, 2026]
+            years = [1999, 2001, 2003, 2008, 2011, 2016, 2018, 2024, 2025, 2026]
 
         today = datetime.now()
         month, day = today.month, today.day

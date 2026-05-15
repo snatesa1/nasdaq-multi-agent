@@ -6,7 +6,7 @@ if [ -f .env ]; then
     while IFS= read -r line || [ -n "$line" ]; do
         clean_line=$(echo "$line" | tr -d '\r')
         if [[ $clean_line == GCP_PROJECT_ID=* ]]; then
-            PROJECT_ID="${clean_line#*=}"
+            PROJECT_ID="optimal-aurora-495912-n0"
             break
         fi
     done < .env

@@ -11,7 +11,7 @@ if [ -f .env ]; then
     done < .env
 fi
 
-PROJECT_ID=${GCP_PROJECT_ID:-$(gcloud config get-value project)}
+PROJECT_ID="optimal-aurora-495912-n0"
 SERVICE_NAME="nasdaq-multi-agent"
 REGION="asia-southeast1"
 
@@ -58,25 +58,8 @@ gcloud run deploy $SERVICE_NAME \
 # 4. Get Service URL
 SERVICE_URL=$(gcloud run services describe $SERVICE_NAME --region $REGION --format 'value(status.url)')
 
-# 5. Create/Update Cloud Scheduler Job (7 PM SGT = 11:00 UTC)
-SCHEDULER_JOB="nasdaq-analysis-daily"
-echo "⏰ Setting up Cloud Scheduler job: $SCHEDULER_JOB"
-
-# Delete existing job if present
-gcloud scheduler jobs delete $SCHEDULER_JOB --location=$REGION --quiet 2>/dev/null
-
-gcloud scheduler jobs create http $SCHEDULER_JOB \
-  --location=$REGION \
-  --schedule="0 19 * * 1-5" \
-  --uri="$SERVICE_URL/cron/analyze" \
-  --http-method=POST \
-  --headers="X-Cron-Secret=${CRON_SECRET}" \
-  --time-zone="Asia/Singapore" \
-  --attempt-deadline=300s
-
 echo ""
 echo "✅ Deployment complete!"
 echo "🌐 Service URL: $SERVICE_URL"
 echo "🔍 Health check: $SERVICE_URL/health"
-echo "⏰ Scheduler: $SCHEDULER_JOB (Mon-Fri 7PM SGT)"
-gcloud scheduler jobs describe $SCHEDULER_JOB --location=$REGION --format="table(name,schedule,timeZone,state)"
+echo "🚀 Manual Trigger: curl -X POST $SERVICE_URL/analyze"

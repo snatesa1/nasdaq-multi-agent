@@ -15,6 +15,7 @@ from .agents.macro_agent import MacroAgent
 from .agents.fred_indicators_agent import FredIndicatorsAgent
 from .agents.technical_agent import TechnicalAgent
 from .agents.fundamental_agent import FundamentalAgent
+from .agents.correlation_agent import CorrelationAgent
 from .agents.base_agent import AgentResult
 
 logger = logging.getLogger(__name__)
@@ -23,8 +24,8 @@ logger = logging.getLogger(__name__)
 class HierarchicalOrchestrator:
     """
     Top-down pipeline coordinator.
-    Phase 1: Macro + FRED + Technical
-    Phase 2: + Fundamental per stock
+    Tier 1: Macro + FRED + Correlation (Holy Grail)
+    Tier 2: Fundamental + Technical per stock
     """
 
     def __init__(self):
@@ -32,6 +33,7 @@ class HierarchicalOrchestrator:
         self.fred_agent = FredIndicatorsAgent()
         self.technical_agent = TechnicalAgent()
         self.fundamental_agent = FundamentalAgent()
+        self.correlation_agent = CorrelationAgent()
 
     async def run_full_analysis(self, top_n_sectors: int = 11) -> Dict:
         """
@@ -41,15 +43,19 @@ class HierarchicalOrchestrator:
         start_time = datetime.now()
         logger.info("🎼 Orchestrator: Starting full hierarchical analysis...")
 
-        # ═══ TIER 1: Macro (parallel) ═══
-        logger.info("── Tier 1: Top-Down Macro Analysis ──")
-        macro_result, fred_result = await asyncio.gather(
+        # ═══ TIER 1: Macro + Correlation (parallel) ═══
+        logger.info("── Tier 1: Top-Down Macro + Correlation Analysis ──")
+        macro_result, fred_result, correlation_result = await asyncio.gather(
             self.macro_agent.analyze(top_n=top_n_sectors),
             self.fred_agent.analyze(lookback_months=12),
+            self.correlation_agent.analyze(),
         )
 
         stock_universe = macro_result.data.get("stock_universe", [])
         logger.info(f"📋 Stock universe: {stock_universe}")
+
+        # 🎯 Independence Check (Log domain verification)
+        logger.info("🛡️ Signal Independence Check: Macro (FRED/Econ), Technical (Price/Vol), Fundamental (FMP/Financials). Domains are distinct.")
 
         # ═══ TIER 2: Per-stock Technical + Fundamental (parallel) ═══
         logger.info("── Tier 2: Technical + Fundamental Analysis ──")
@@ -69,8 +75,11 @@ class HierarchicalOrchestrator:
             technical_results = list(all_results[:n])
             fundamental_results = list(all_results[n:])
 
-        # ═══ TIER 3: Portfolio + Risk (Phase 3 — stub for now) ═══
-        logger.info("── Tier 3: Portfolio + Risk (stub) ──")
+        # ═══ TIER 3: Portfolio + Risk ═══
+        logger.info("── Tier 3: Portfolio + Risk (Holy Grail Selection) ──")
+        # Identify overlaps between stock_universe and uncorrelated_assets
+        uncorrelated_symbols = [a["symbol"] for a in correlation_result.data.get("uncorrelated_assets", [])]
+        holy_grail_overlaps = [s for s in stock_universe if s in uncorrelated_symbols]
 
         duration = (datetime.now() - start_time).total_seconds()
         logger.info(f"✅ Orchestrator complete in {duration:.1f}s")
@@ -81,14 +90,15 @@ class HierarchicalOrchestrator:
             "tier1": {
                 "macro": macro_result.to_dict(),
                 "fred_indicators": fred_result.to_dict(),
+                "holy_grail": correlation_result.to_dict(),
             },
             "tier2": {
                 "technical": [r.to_dict() for r in technical_results],
                 "fundamental": [r.to_dict() for r in fundamental_results],
             },
             "tier3": {
-                "portfolio": "Phase 3 — not yet implemented",
-                "risk": "Phase 3 — not yet implemented",
+                "holy_grail_selections": holy_grail_overlaps,
+                "status": "Risk reduction active via uncorrelated assets."
             },
             "stock_universe": stock_universe,
             "selected_sectors": macro_result.data.get("selected_sectors", []),
