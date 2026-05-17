@@ -6,17 +6,9 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from .base_agent import AgentResult, BaseAgent
-from ..data_client import FMPClient, YFinanceClient
+from ..data_client import NasdaqScreenerClient
 
 logger = logging.getLogger(__name__)
-
-# Core defensive assets that often provide uncorrelated returns
-DEFENSIVE_BASKET = [
-    "TLT", "BND", "AGG",          # Bonds
-    "BTC-USD", "ETH-USD",         # Crypto
-    "GLD", "SLV",                 # Commodities
-    "UUP", "FXF",                 # Currencies (USD, CHF)
-]
 
 class CorrelationAgent(BaseAgent):
     """
@@ -29,32 +21,41 @@ class CorrelationAgent(BaseAgent):
     def name(self) -> str:
         return "CorrelationAgent"
 
-    async def analyze(self, lookback_days: int = 252) -> AgentResult:
+    async def analyze(self, **kwargs) -> AgentResult:
         """
         Performs correlation analysis on a massive basket of assets.
         """
         self._log_start()
         
-        fmp = FMPClient()
+        # Load parameters from spec
+        lookback_days = kwargs.get("lookback_days", 252)
+        analysis_limit = kwargs.get("analysis_limit", 600)
+        target_ref = kwargs.get("target_ref", "SPY")
+        correlation_threshold = kwargs.get("correlation_threshold", 0.2)
+        defensive_basket = kwargs.get("defensive_basket", [])
         
-        # 1. Fetch Tickers from Indices
-        logger.info("📡 Fetching S&P 500 and NASDAQ tickers...")
-        sp500 = fmp.get_sp500_constituents()
-        nasdaq = fmp.get_nasdaq_constituents()
+        screener = NasdaqScreenerClient()
         
-        sp_tickers = [item.get("symbol") for item in sp500 if item.get("symbol")]
-        nq_tickers = [item.get("symbol") for item in nasdaq if item.get("symbol")]
+        # 1. Fetch Tickers from Screener
+        logger.info("📡 Fetching NASDAQ tickers from screener...")
+        df_universe = screener.get_screener_universe()
+        
+        if df_universe.empty:
+            logger.warning("No tickers found from screener, using fallback...")
+            screener_tickers = []
+        else:
+            # Maybe filter by market cap to get the top ones instead of random
+            df_universe = df_universe.sort_values(by="marketCap", ascending=False)
+            screener_tickers = df_universe["symbol"].dropna().tolist()
         
         # Combine and deduplicate
-        full_basket = list(set(sp_tickers + nq_tickers + DEFENSIVE_BASKET))
+        full_basket = list(set(screener_tickers + defensive_basket))
         logger.info(f"📋 Total candidates for Holy Grail search: {len(full_basket)}")
 
         # 2. Fetch Data in Batches (to avoid timeout/memory issues)
-        # We'll take the first 600 tickers to keep it manageable but comprehensive
-        analysis_limit = 600
         target_tickers = full_basket[:analysis_limit]
-        if "SPY" not in target_tickers:
-            target_tickers.append("SPY")
+        if target_ref not in target_tickers:
+            target_tickers.append(target_ref)
             
         end_date = datetime.now()
         start_date = end_date - timedelta(days=lookback_days)
@@ -97,7 +98,7 @@ class CorrelationAgent(BaseAgent):
             if asset == target_ref:
                 continue
             corr_val = corr_matrix.loc[target_ref, asset]
-            if not np.isnan(corr_val) and abs(corr_val) < 0.2:
+            if not np.isnan(corr_val) and abs(corr_val) < correlation_threshold:
                 uncorrelated.append({
                     "symbol": asset,
                     "correlation": float(corr_val)
@@ -108,7 +109,7 @@ class CorrelationAgent(BaseAgent):
 
         # 6. Build Rationale
         count = len(uncorrelated)
-        rationale = f"Analyzed {len(target_tickers)} assets across S&P 500, NASDAQ, and Macro. Found {count} uncorrelated assets (< 0.2) to {target_ref}. "
+        rationale = f"Analyzed {len(target_tickers)} assets across NASDAQ and Macro. Found {count} uncorrelated assets (< {correlation_threshold}) to {target_ref}. "
         if count >= 15:
             rationale += "The 'Holy Grail' of 15+ uncorrelated bets is ACHIEVED. Portfolio risk can be reduced by ~80%."
         else:

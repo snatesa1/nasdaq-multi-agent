@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from ..data_client import FMPClient, YFinanceClient
+from ..data_client import FMPClient, YFinanceClient, NasdaqScreenerClient
 from .base_agent import AgentResult, BaseAgent
 from .metric_explainer import VertexGeminiProvider
 
@@ -33,21 +33,7 @@ SECTOR_ETFS = {
     "Communication Services": "XLC",
 }
 
-# ── Top stocks per sector (NASDAQ-focused) ───────────────
-SECTOR_STOCKS = {
-    "Technology": ["AAPL", "MSFT", "NVDA", "AVGO", "AMD", "ADBE", "CRM", "INTC"],
-    "Healthcare": ["AMGN", "GILD", "VRTX", "REGN", "ISRG", "ILMN", "MRNA", "BIIB"],
-    "Consumer Discretionary": ["AMZN", "TSLA", "COST", "SBUX", "LULU", "BKNG", "ROST", "ORLY"],
-    "Communication Services": ["GOOGL", "META", "NFLX", "CMCSA", "TMUS", "CHTR"],
-    "Financials": ["JPM", "V", "MA", "GS", "BLK", "SCHW", "AXP", "SPGI"],
-    "Financial Services": ["JPM", "V", "MA", "GS", "BLK", "SCHW", "AXP", "SPGI"],
-    "Industrials": ["HON", "UNP", "UPS", "RTX", "DE", "BA", "CAT", "GE"],
-    "Energy": ["XOM", "CVX", "COP", "SLB", "EOG", "MPC", "PSX", "VLO"],
-    "Consumer Staples": ["PEP", "KO", "PG", "MDLZ", "MO", "CL", "KHC", "GIS"],
-    "Materials": ["LIN", "APD", "SHW", "ECL", "FCX", "NEM", "NUE", "VMC"],
-    "Utilities": ["NEE", "DUK", "SO", "D", "AEP", "SRE", "EXC", "XEL"],
-    "Real Estate": ["PLD", "AMT", "CCI", "EQIX", "SPG", "PSA", "O", "DLR"],
-}
+# ── Top stocks per sector will be loaded dynamically from NasdaqScreenerClient ─
 
 # Fallback comparison years — used when Gemini is unavailable
 DEFAULT_COMPARISON_YEARS = [1999, 2008, 2022, datetime.now().year]
@@ -152,6 +138,7 @@ class MacroAgent(BaseAgent):
     def __init__(self):
         self.fmp = FMPClient()
         self.yfinance = YFinanceClient()
+        self.screener = NasdaqScreenerClient()
         self.regime_analyzer = MacroRegimeAnalyzer()
 
     @property
@@ -181,7 +168,8 @@ class MacroAgent(BaseAgent):
             logger.warning(
                 "⚠️ FMP returned no sector data — using fallback (all sectors at 0.5)"
             )
-            scored_sectors = {sector: 0.5 for sector in SECTOR_STOCKS}
+            dynamic_sectors = self.screener.get_stocks_by_sector().keys()
+            scored_sectors = {sector: 0.5 for sector in dynamic_sectors}
 
         logger.info(f"📊 Sector scores: {scored_sectors}")
 
@@ -206,12 +194,20 @@ class MacroAgent(BaseAgent):
                 )
                 sliding_windows[sector] = self._summarize_windows(windows)
 
-        # ── Step 5: Build stock universe — top 2 per sector ────
+        # ── Step 5: Build stock universe — top N per sector ────
+        fallback_universe_size = kwargs.get("fallback_universe_size", 10)
         seen = set()
         stock_universe = []
+        sector_stocks_map = self.screener.get_stocks_by_sector()
+        
         for sector in top_sectors:
-            stocks = SECTOR_STOCKS.get(sector, [])
-            for s in stocks[:2]:  # Top 2 per sector → ~6-10 stocks total
+            # Get stocks for this sector, default to empty list
+            stocks = sector_stocks_map.get(sector, [])
+            # Also check mapping variations
+            if not stocks and sector == "Financials":
+                stocks = sector_stocks_map.get("Finance", [])
+            
+            for s in stocks[:max(2, fallback_universe_size // len(top_sectors))]:  # Distribute stocks
                 if s not in seen:
                     seen.add(s)
                     stock_universe.append(s)

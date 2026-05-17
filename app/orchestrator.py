@@ -8,6 +8,8 @@ Tier 3: Portfolio weighting + Risk adjustment                [Phase 3]
 
 import asyncio
 import logging
+import os
+import yaml
 from datetime import datetime
 from typing import Dict, List
 
@@ -28,27 +30,43 @@ class HierarchicalOrchestrator:
     Tier 2: Fundamental + Technical per stock
     """
 
-    def __init__(self):
+    def __init__(self, spec_path: str = None):
+        if spec_path is None:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            spec_path = os.path.join(base_dir, "config", "spec.yaml")
+            
+        with open(spec_path, "r") as f:
+            self.spec = yaml.safe_load(f)
+            
+        self.pipeline = self.spec.get("pipeline", {})
+        
+        # Instantiate agents based on spec
         self.macro_agent = MacroAgent()
         self.fred_agent = FredIndicatorsAgent()
         self.technical_agent = TechnicalAgent()
         self.fundamental_agent = FundamentalAgent()
         self.correlation_agent = CorrelationAgent()
 
-    async def run_full_analysis(self, top_n_sectors: int = 11) -> Dict:
+    async def run_full_analysis(self) -> Dict:
         """
-        Execute the full hierarchical analysis pipeline.
+        Execute the full hierarchical analysis pipeline based on spec.yaml.
         Returns combined results from all tiers.
         """
         start_time = datetime.now()
-        logger.info("🎼 Orchestrator: Starting full hierarchical analysis...")
+        logger.info("🎼 Orchestrator: Starting full hierarchical analysis based on spec...")
 
-        # ═══ TIER 1: Macro + Correlation (parallel) ═══
+        # ── TIER 1: Macro + Correlation (parallel) ──
         logger.info("── Tier 1: Top-Down Macro + Correlation Analysis ──")
+        
+        tier1_spec = self.pipeline.get("tier_1", {})
+        macro_params = tier1_spec.get("macro_agent", {}).get("params", {})
+        fred_params = tier1_spec.get("fred_indicators_agent", {}).get("params", {})
+        corr_params = tier1_spec.get("correlation_agent", {}).get("params", {})
+
         macro_result, fred_result, correlation_result = await asyncio.gather(
-            self.macro_agent.analyze(top_n=top_n_sectors),
-            self.fred_agent.analyze(lookback_months=12),
-            self.correlation_agent.analyze(),
+            self.macro_agent.analyze(**macro_params),
+            self.fred_agent.analyze(**fred_params),
+            self.correlation_agent.analyze(**corr_params),
         )
 
         stock_universe = macro_result.data.get("stock_universe", [])
@@ -63,9 +81,13 @@ class HierarchicalOrchestrator:
         fundamental_results = []
 
         if stock_universe:
+            tier2_spec = self.pipeline.get("tier_2", {})
+            tech_params = tier2_spec.get("technical_agent", {}).get("params", {})
+            fund_params = tier2_spec.get("fundamental_agent", {}).get("params", {})
+            
             # Run both agents in parallel for all stocks
-            tech_tasks = [self.technical_agent.analyze(symbol=s) for s in stock_universe]
-            fund_tasks = [self.fundamental_agent.analyze(symbol=s) for s in stock_universe]
+            tech_tasks = [self.technical_agent.analyze(symbol=s, **tech_params) for s in stock_universe]
+            fund_tasks = [self.fundamental_agent.analyze(symbol=s, **fund_params) for s in stock_universe]
             all_tasks = tech_tasks + fund_tasks
 
             all_results = await asyncio.gather(*all_tasks)
