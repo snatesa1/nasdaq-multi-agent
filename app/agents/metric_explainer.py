@@ -44,9 +44,10 @@ class VertexGeminiProvider(LLMProvider):
     def generate(self, prompt: str) -> str:
         import vertexai
         from vertexai.generative_models import GenerativeModel
+        from ..config import settings
 
-        # vertexai.init() picks up PROJECT_ID from env / metadata server
-        vertexai.init()
+        # Explicitly pass project_id to avoid calling Cloud Resource Manager API
+        vertexai.init(project=settings.PROJECT_ID)
         model = GenerativeModel(self._model_name)
         response = model.generate_content(prompt)
         return response.text

@@ -114,14 +114,18 @@ async def _run_and_deliver(
 
         # Send to Slack with Block Kit
         from slack_sdk import WebClient
+        from slack_sdk.errors import SlackApiError
 
-        slack_client = WebClient(token=settings.SLACK_BOT_TOKEN)
-        slack_client.chat_postMessage(
-            channel=channel_id,
-            text=slack_fallback,   # Fallback for notifications
-            blocks=slack_blocks,   # Rich Block Kit layout
-        )
-        logger.info(f"📤 Slack Block Kit message sent to {channel_id}")
+        try:
+            slack_client = WebClient(token=settings.SLACK_BOT_TOKEN)
+            slack_client.chat_postMessage(
+                channel=channel_id,
+                text=slack_fallback,   # Fallback for notifications
+                blocks=slack_blocks,   # Rich Block Kit layout
+            )
+            logger.info(f"📤 Slack Block Kit message sent to {channel_id}")
+        except SlackApiError as slack_err:
+            logger.error(f"❌ Slack API failed (response data: {slack_err.response.data})")
 
         # Send email — isolated so failures don't kill Slack delivery
         try:
