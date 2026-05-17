@@ -104,7 +104,7 @@ class Settings:
     # ── Vertex AI ────────────────────────────────────────
     @cached_property
     def VERTEX_MODEL(self) -> str:
-        return os.getenv("VERTEX_MODEL", "gemini-2.0-flash-lite")
+        return os.getenv("VERTEX_MODEL", "gemini-1.5-flash")
 
 
 # Singleton
