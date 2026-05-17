@@ -10,10 +10,15 @@ pipeline:
         window_days: 35
         fallback_universe_size: 10
         comparison_years:
+          - 1995
+          - 2000
+          - 2008
+          - 2015
           - 2022
           - 2023
           - 2024
           - 2025
+          - 2026
     fred_indicators_agent:
       enabled: true
       params:
