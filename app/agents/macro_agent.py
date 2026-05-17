@@ -19,6 +19,14 @@ logger = logging.getLogger(__name__)
 
 # ── Sector ETFs for sliding window comparison ────────────
 SECTOR_ETFS = {
+    # Nasdaq Screener Names
+    "Health Care": "XLV",
+    "Finance": "XLF",
+    "Basic Materials": "XLB",
+    "Telecommunications": "XLC",
+    "Consumer Discr": "XLY",
+    "Consumer Stapl": "XLP",
+    # FMP / Standard Names
     "Technology": "XLK",
     "Healthcare": "XLV",
     "Financials": "XLF",
@@ -35,8 +43,8 @@ SECTOR_ETFS = {
 
 # ── Top stocks per sector will be loaded dynamically from NasdaqScreenerClient ─
 
-# Fallback comparison years — used when Gemini is unavailable
-DEFAULT_COMPARISON_YEARS = [1999, 2008, 2022, datetime.now().year]
+# Fallback comparison years — used when Gemini is unavailable (prioritizing recent analog/latest years)
+DEFAULT_COMPARISON_YEARS = [2022, 2023, 2024, 2025, datetime.now().year]
 
 
 # ══════════════════════════════════════════════════════════
@@ -98,7 +106,7 @@ Here are today's top macroeconomic headlines:
 {headlines_text}
 
 Based on these headlines, identify 3-4 historical years (between 1990 and {current_year - 1})
-that had the most similar macro environment. Consider factors like:
+that had the most similar macro environment. Prioritize the most recent years (like 2023, 2024, 2025) if they are a strong match, as comparing to the latest cycles is highly valuable. Consider factors like:
 - Technology revolutions (dot-com boom 1999, AI revolution 2023-2024)
 - Credit/banking crises (2007-2008 GFC, 2023 SVB)
 - Geopolitical conflicts & wars (2001, 2022 Russia-Ukraine)
@@ -106,7 +114,7 @@ that had the most similar macro environment. Consider factors like:
 - Private credit bubbles or liquidity crunches
 - Pandemic recovery (2020-2021)
 
-Return ONLY a JSON array of integers, e.g. [1999, 2008, 2022].
+Return ONLY a JSON array of integers, e.g. [2023, 2024, 2025].
 No explanation, no markdown, just the JSON array."""
 
         raw = self.llm.generate(prompt)
@@ -179,8 +187,12 @@ class MacroAgent(BaseAgent):
         logger.info(f"🏆 Top sectors: {top_sectors}")
 
         # ── Step 3: Dynamic year selection via Gemini ────
-        comparison_years = self.regime_analyzer.get_dynamic_years()
-        logger.info(f"📅 Comparison years: {comparison_years}")
+        comparison_years = kwargs.get("comparison_years")
+        if not comparison_years:
+            comparison_years = self.regime_analyzer.get_dynamic_years()
+            logger.info(f"📅 Dynamic comparison years: {comparison_years}")
+        else:
+            logger.info(f"📋 Using spec-configured comparison years: {comparison_years}")
 
         # ── Step 4: Sliding window comparison ────────────
         sliding_windows = {}

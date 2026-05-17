@@ -9,6 +9,11 @@ pipeline:
         top_n: 11
         window_days: 35
         fallback_universe_size: 10
+        comparison_years:
+          - 2022
+          - 2023
+          - 2024
+          - 2025
     fred_indicators_agent:
       enabled: true
       params:
