@@ -155,79 +155,111 @@ class MacroAgent(BaseAgent):
 
     async def analyze(self, top_n: int = 11, window_days: int = 35, **kwargs) -> AgentResult:
         """
-        Full macro analysis.
+        Full macro analysis using NASDAQ Screener CSV pivot by Sector and Industry.
 
         Args:
-            top_n: Number of top sectors to select (default 3).
-            window_days: Sliding window size in days (default 30).
+            top_n: Number of top sectors to select (default 11).
+            window_days: Sliding window size in days (default 35).
         """
         self._log_start(f"(top {top_n} sectors, {window_days}-day window)")
 
-        # ── Step 1: Current sector performance from FMP ──
-        biz_date = self._last_business_day()
-        logger.info(f"📅 Using business date: {biz_date}")
-        sector_perf = self.fmp.get_sector_performance(biz_date)
-        sector_pe = self.fmp.get_sector_pe(biz_date)
+        import pandas as pd
 
-        scored_sectors = self._score_sectors(sector_perf, sector_pe)
-
-        # ── Fallback: if FMP returned no data, use all known sectors ──
-        if not scored_sectors:
-            logger.warning(
-                "⚠️ FMP returned no sector data — using fallback (all sectors at 0.5)"
-            )
-            dynamic_sectors = self.screener.get_stocks_by_sector().keys()
-            scored_sectors = {sector: 0.5 for sector in dynamic_sectors}
-
-        logger.info(f"📊 Sector scores: {scored_sectors}")
-
-        # ── Step 2: Select top N sectors ─────────────────
-        sorted_sectors = sorted(scored_sectors.items(), key=lambda x: x[1], reverse=True)
-        top_sectors = [s[0] for s in sorted_sectors[:top_n]]
-        logger.info(f"🏆 Top sectors: {top_sectors}")
-
-        # ── Step 3: Dynamic year selection via Gemini ────
-        comparison_years = kwargs.get("comparison_years")
-        if not comparison_years:
-            comparison_years = self.regime_analyzer.get_dynamic_years()
-            logger.info(f"📅 Dynamic comparison years: {comparison_years}")
+        # ── Step 1: Load and pivot Nasdaq Screener CSV by Sector and Industry ──
+        df = self.screener.load_data()
+        if df.empty:
+            logger.error("❌ Nasdaq screener CSV is empty — cannot execute pivot analysis!")
+            scored_sectors = {}
+            top_sectors = []
+            stock_universe = []
+            sliding_windows = {}
+            comparison_years = kwargs.get("comparison_years", DEFAULT_COMPARISON_YEARS)
         else:
-            logger.info(f"📋 Using spec-configured comparison years: {comparison_years}")
+            df_clean = df.dropna(subset=["sector", "industry", "pctchange"]).copy()
+            df_clean["pctchange"] = pd.to_numeric(df_clean["pctchange"], errors="coerce")
+            df_clean = df_clean.dropna(subset=["pctchange"])
 
-        # ── Step 4: Sliding window comparison ────────────
-        sliding_windows = {}
-        for sector in top_sectors:
-            etf = SECTOR_ETFS.get(sector)
-            if etf:
-                windows = self.yfinance.get_sliding_window(
-                    symbol=etf,
-                    window_days=window_days,
-                    years=comparison_years,
-                )
-                sliding_windows[sector] = self._summarize_windows(windows)
+            # Pivot/group by Sector & Industry, getting the average % change
+            pivot = df_clean.groupby(["sector", "industry"])["pctchange"].mean().reset_index()
+            pivot = pivot.sort_values(by="pctchange", ascending=False)
+            logger.info(f"📊 Top pivoted sector-industry segments:\n{pivot.head(10).to_string(index=False)}")
 
-        # ── Step 5: Build stock universe — top N per sector ────
-        fallback_universe_size = kwargs.get("fallback_universe_size", 10)
-        seen = set()
-        stock_universe = []
-        sector_stocks_map = self.screener.get_stocks_by_sector()
-        
-        for sector in top_sectors:
-            # Get stocks for this sector, default to empty list
-            stocks = sector_stocks_map.get(sector, [])
-            # Also check mapping variations
-            if not stocks and sector == "Financials":
-                stocks = sector_stocks_map.get("Finance", [])
+            # Calculate sector averages for UI/Slack rendering
+            sector_averages = df_clean.groupby("sector")["pctchange"].mean().to_dict()
+            max_change = max(abs(v) for v in sector_averages.values()) if sector_averages else 1
+            if max_change == 0:
+                max_change = 1
+            scored_sectors = {
+                k: round((v / max_change + 1) / 2, 3) for k, v in sector_averages.items()
+            }
+
+            # ── Step 2: Select top N macro groups and unique top sectors ─────────────────
+            # Typically select top 3 to 5 groups to build the stock universe
+            num_groups = min(max(3, top_n // 2), 5)
+            top_groups = pivot.head(num_groups).to_dict("records")
+            logger.info(f"🏆 Top selected macro groups: {top_groups}")
+
+            top_sectors = list(dict.fromkeys([g["sector"] for g in top_groups]))
+            logger.info(f"🏆 Unique top sectors: {top_sectors}")
+
+            # ── Step 3: Dynamic year selection via Gemini ────
+            comparison_years = kwargs.get("comparison_years")
+            if not comparison_years:
+                comparison_years = self.regime_analyzer.get_dynamic_years()
+                logger.info(f"📅 Dynamic comparison years: {comparison_years}")
+            else:
+                logger.info(f"📋 Using spec-configured comparison years: {comparison_years}")
+
+            # ── Step 4: Sliding window comparison ────────────
+            sliding_windows = {}
+            for sector in top_sectors:
+                etf = SECTOR_ETFS.get(sector)
+                if etf:
+                    windows = self.yfinance.get_sliding_window(
+                        symbol=etf,
+                        window_days=window_days,
+                        years=comparison_years,
+                    )
+                    sliding_windows[sector] = self._summarize_windows(windows)
+
+            # ── Step 5: Build stock universe — top stocks per high-performing group ────
+            fallback_universe_size = kwargs.get("fallback_universe_size", 10)
+            seen = set()
+            stock_universe = []
             
-            for s in stocks[:max(2, fallback_universe_size // len(top_sectors))]:  # Distribute stocks
-                if s not in seen:
-                    seen.add(s)
-                    stock_universe.append(s)
+            stocks_per_group = max(2, fallback_universe_size // len(top_groups))
+            for group in top_groups:
+                sec = group["sector"]
+                ind = group["industry"]
+                
+                # Fetch matching stocks
+                group_stocks = df_clean[
+                    (df_clean["sector"] == sec) & (df_clean["industry"] == ind)
+                ].copy()
+                
+                # Sort by marketCap descending to get industry leaders
+                if "marketCap" in group_stocks.columns:
+                    group_stocks = group_stocks.sort_values(by="marketCap", ascending=False)
+                elif "volume" in group_stocks.columns:
+                    group_stocks = group_stocks.sort_values(by="volume", ascending=False)
+                
+                symbols = group_stocks["symbol"].tolist()
+                selected_count = 0
+                for sym in symbols:
+                    if sym not in seen:
+                        seen.add(sym)
+                        stock_universe.append(sym)
+                        selected_count += 1
+                        if selected_count >= stocks_per_group:
+                            break
 
-        # ── Fallback: guarantee at least some stocks ─────
-        if not stock_universe:
-            logger.warning("⚠️ Stock universe still empty — using default NASDAQ-100 leaders")
-            stock_universe = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "COST", "NFLX"]
+            # Guarantee default leaders if empty
+            if not stock_universe:
+                logger.warning("⚠️ Stock universe empty — using default NASDAQ-100 leaders")
+                stock_universe = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "COST", "NFLX"]
+
+        # Sort sectors by score descending for formatting compatibility
+        sorted_sectors = sorted(scored_sectors.items(), key=lambda x: x[1], reverse=True)
 
         result = AgentResult(
             agent_name=self.name,
@@ -240,7 +272,7 @@ class MacroAgent(BaseAgent):
                 "stock_universe": stock_universe,
                 "sliding_window_comparison": sliding_windows,
                 "comparison_years": comparison_years,
-                "sector_pe": {item.get("sector", "?"): item.get("pe", 0) for item in (sector_pe or [])},
+                "sector_pe": {},  # Bypassing FMP call cleanly
             },
         )
         self._log_done(result)
