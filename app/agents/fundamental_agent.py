@@ -33,7 +33,7 @@ class FundamentalAgent(BaseAgent):
     def name(self) -> str:
         return "FundamentalAgent"
 
-    async def analyze(self, symbol: str) -> AgentResult:
+    async def analyze(self, symbol: str, **kwargs) -> AgentResult:
         """
         Analyze a single stock's fundamental quality and value.
         Returns score (0→1), confidence, and metrics dict.

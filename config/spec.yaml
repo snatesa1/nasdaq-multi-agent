@@ -1,0 +1,57 @@
+version: "1.0"
+
+# Orchestrator pipeline spec
+pipeline:
+  tier_1:
+    macro_agent:
+      enabled: true
+      params:
+        top_n: 11
+        window_days: 35
+        fallback_universe_size: 10
+    fred_indicators_agent:
+      enabled: true
+      params:
+        lookback_months: 12
+    correlation_agent:
+      enabled: true
+      params:
+        lookback_days: 252
+        analysis_limit: 600
+        target_ref: "SPY"
+        correlation_threshold: 0.2
+        defensive_basket:
+          - TLT
+          - BND
+          - AGG
+          - BTC-USD
+          - ETH-USD
+          - GLD
+          - SLV
+          - UUP
+          - FXF
+
+  tier_2:
+    technical_agent:
+      enabled: true
+      params:
+        history_days: 365
+    fundamental_agent:
+      enabled: true
+      params: {}
+
+  tier_3:
+    portfolio_agent:
+      enabled: true
+      params: {}
+
+# Global settings for data filtering
+data_filters:
+  nasdaq_screener:
+    allowed_markets:
+      - "NASDAQ"
+      - "NASDAQ Capital Market"
+    allowed_regions:
+      - "North America"
+    allowed_countries:
+      - "United States"

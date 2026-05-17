@@ -31,4 +31,12 @@ gcloud services enable \
   compute.googleapis.com \
   cloudscheduler.googleapis.com
 
+echo "📊 Scraping initial NASDAQ screener CSV for static data..."
+if ! command -v playwright &> /dev/null
+then
+    python -m pip install playwright pyyaml
+    python -m playwright install firefox
+fi
+python scripts/scrape_nasdaq.py
+
 echo "✅ Initialization complete for NASDAQ Multi-Agent System!"

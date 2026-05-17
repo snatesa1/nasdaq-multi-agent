@@ -213,7 +213,101 @@ class YFinanceClient:
                 df["indexed_close"] = (df["Close"] / first_close) * 100
                 results[year] = df
                 logger.info(f"📊 Sliding window {year}: {symbol} indexed from {first_close:.2f}")
-            else:
-                logger.warning(f"⚠️ No data for {symbol} in {year} window")
-
         return results
+
+
+# ═══════════════════════════════════════════════════════════
+#  NASDAQ Screener Client — Static Universe & Filtering
+# ═══════════════════════════════════════════════════════════
+import os
+
+class NasdaqScreenerClient:
+    """Client for reading and filtering the static NASDAQ screener CSV."""
+
+    def __init__(self, csv_path: str = None):
+        if csv_path is None:
+            # Default to data/nasdaq_screener.csv relative to this file
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            csv_path = os.path.join(base_dir, "data", "nasdaq_screener.csv")
+        self.csv_path = csv_path
+        self._df = None
+
+    def load_data(self) -> pd.DataFrame:
+        if self._df is None:
+            if not os.path.exists(self.csv_path):
+                logger.warning(f"⚠️ Screener CSV not found at {self.csv_path}")
+                return pd.DataFrame()
+            try:
+                df = pd.read_csv(self.csv_path)
+                
+                # Clean up column data types
+                if "lastsale" in df.columns:
+                    df["lastsale"] = df["lastsale"].astype(str).str.replace("$", "", regex=False).astype(float)
+                if "pctchange" in df.columns:
+                    df["pctchange"] = df["pctchange"].astype(str).str.replace("%", "", regex=False).astype(float)
+                
+                self._df = df
+                logger.info(f"✅ Loaded {len(df)} tickers from NASDAQ screener CSV")
+            except Exception as e:
+                logger.error(f"❌ Failed to load screener CSV: {e}")
+                return pd.DataFrame()
+        return self._df
+
+    def get_screener_universe(self, allowed_countries: List[str] = ["United States"]) -> pd.DataFrame:
+        """Get the base universe, optionally filtered by country."""
+        df = self.load_data()
+        if df.empty:
+            return df
+            
+        if allowed_countries:
+            df = df[df["country"].isin(allowed_countries)]
+        return df
+
+    def get_stocks_by_sector(self) -> Dict[str, List[str]]:
+        """Group symbols by sector, returning a mapping of Sector -> [Symbols]."""
+        df = self.get_screener_universe()
+        if df.empty:
+            return {}
+        
+        # Drop rows where sector is NaN or empty
+        df_sector = df.dropna(subset=["sector"])
+        grouped = df_sector.groupby("sector")["symbol"].apply(list).to_dict()
+        return grouped
+
+    def filter_universe(
+        self,
+        min_market_cap: Optional[float] = None,
+        min_net_change: Optional[float] = None,
+        min_pct_change: Optional[float] = None,
+    ) -> pd.DataFrame:
+        """Helper to filter the universe by fundamental/price metrics."""
+        df = self.get_screener_universe()
+        if df.empty:
+            return df
+            
+        if min_market_cap is not None:
+            df = df[df["marketCap"] >= min_market_cap]
+        if min_net_change is not None:
+            df = df[df["netchange"] >= min_net_change]
+        if min_pct_change is not None:
+            df = df[df["pctchange"] >= min_pct_change]
+            
+        return df
+
+    def get_display_columns(self, df: pd.DataFrame = None) -> pd.DataFrame:
+        """Returns only the requested display columns: Symbol, Name, Last Sale, Net Change, % Change, Market Cap."""
+        if df is None:
+            df = self.get_screener_universe()
+        
+        # Mapping existing columns to requested display names
+        cols_map = {
+            "symbol": "Symbol",
+            "name": "Name",
+            "lastsale": "Last Sale",
+            "netchange": "Net Change",
+            "pctchange": "% Change",
+            "marketCap": "Market Cap"
+        }
+        available_cols = [c for c in cols_map.keys() if c in df.columns]
+        display_df = df[available_cols].rename(columns=cols_map)
+        return display_df
