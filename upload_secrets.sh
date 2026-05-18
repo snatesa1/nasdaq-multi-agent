@@ -52,6 +52,8 @@ create_and_upload_secret "FMP_API_KEY" "$FMP_API_KEY"
 create_and_upload_secret "FRED_API_KEY" "$FRED_API_KEY"
 
 # === Email ===
+create_and_upload_secret "EMAIL_SENDER" "$EMAIL_SENDER"
+create_and_upload_secret "EMAIL_RECIPIENT" "$EMAIL_RECIPIENT"
 create_and_upload_secret "EMAIL_APP_PASSWORD" "$EMAIL_APP_PASSWORD"
 
 # === Vertex AI ===

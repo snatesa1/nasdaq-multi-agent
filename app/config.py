@@ -91,7 +91,7 @@ class Settings:
     # ── Email ────────────────────────────────────────────
     @cached_property
     def EMAIL_SENDER(self) -> str:
-        return os.getenv("EMAIL_SENDER", "")
+        return self._get_secret("EMAIL_SENDER")
 
     @cached_property
     def EMAIL_APP_PASSWORD(self) -> str:
@@ -99,7 +99,7 @@ class Settings:
 
     @cached_property
     def EMAIL_RECIPIENT(self) -> str:
-        return os.getenv("EMAIL_RECIPIENT", "")
+        return self._get_secret("EMAIL_RECIPIENT")
 
     # ── Vertex AI ────────────────────────────────────────
     @cached_property

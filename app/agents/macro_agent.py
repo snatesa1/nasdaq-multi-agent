@@ -203,11 +203,21 @@ class MacroAgent(BaseAgent):
             top_sectors = list(dict.fromkeys([g["sector"] for g in top_groups]))
             logger.info(f"🏆 Unique top sectors: {top_sectors}")
 
-            # ── Step 3: Dynamic year selection via Gemini ────
+            # ── Step 3: Spec-configured comparison years (no dynamic/local overrides) ────
             comparison_years = kwargs.get("comparison_years")
             if not comparison_years:
-                comparison_years = self.regime_analyzer.get_dynamic_years()
-                logger.info(f"📅 Dynamic comparison years: {comparison_years}")
+                try:
+                    import yaml
+                    import os
+                    base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                    spec_path = os.path.join(base_dir, "config", "spec.yaml")
+                    with open(spec_path, "r") as f:
+                        spec = yaml.safe_load(f)
+                    comparison_years = spec.get("pipeline", {}).get("tier_1", {}).get("macro_agent", {}).get("params", {}).get("comparison_years", [])
+                    logger.info(f"📋 Loaded comparison years from spec: {comparison_years}")
+                except Exception as e:
+                    logger.warning(f"⚠️ Failed to load comparison years from spec: {e}")
+                    comparison_years = [1995, 2000, 2008, 2015, 2022, 2023, 2024, 2025, 2026]
             else:
                 logger.info(f"📋 Using spec-configured comparison years: {comparison_years}")
 
