@@ -227,7 +227,7 @@ class MacroAgent(BaseAgent):
                 df_sec = df_clean[df_clean["sector"] == sector]
                 if not df_sec.empty:
                     df_sec = df_sec.sort_values(by="pctchange", ascending=False)
-                    symbols = df_sec["symbol"].tolist()[:100]
+                    symbols = df_sec["symbol"].tolist()[:15]
                     sliding_windows[sector] = self.alpaca.get_sliding_window(
                         symbol_or_symbols=symbols,
                         window_days=window_days,

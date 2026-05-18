@@ -2,9 +2,25 @@
 Unified data client for FMP, Alpaca (OHLCV), and yfinance (deep history).
 """
 
+import os
+import contextlib
+import io
 import logging
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+
+# Suppress yfinance internal logging to keep console logs completely clean
+logging.getLogger('yfinance').setLevel(logging.CRITICAL)
+
+@contextlib.contextmanager
+def suppress_stdout_stderr():
+    """A context manager that redirects stdout and stderr to devnull to suppress verbose yfinance outputs."""
+    with open(os.devnull, 'w') as devnull:
+        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+            try:
+                yield
+            except Exception:
+                pass
 
 import pandas as pd
 import requests
@@ -207,12 +223,13 @@ class AlpacaOHLCVClient:
             if year < 2016:
                 # yfinance fallback
                 try:
-                    df_prices = yf.download(
-                        symbols,
-                        start=start.strftime("%Y-%m-%d"),
-                        end=end.strftime("%Y-%m-%d"),
-                        progress=False
-                    )
+                    with suppress_stdout_stderr():
+                        df_prices = yf.download(
+                            symbols,
+                            start=start.strftime("%Y-%m-%d"),
+                            end=end.strftime("%Y-%m-%d"),
+                            progress=False
+                        )
                     if not df_prices.empty:
                         # Extract Close
                         close_cols = [c for c in df_prices.columns if isinstance(c, tuple) and len(c) > 1 and c[0] == 'Close']
@@ -303,12 +320,13 @@ class AlpacaOHLCVClient:
         if start.year < 2016:
             # yfinance fallback
             try:
-                data = yf.download(
-                    symbols,
-                    start=start.strftime("%Y-%m-%d"),
-                    end=end.strftime("%Y-%m-%d"),
-                    progress=False
-                )
+                with suppress_stdout_stderr():
+                    data = yf.download(
+                        symbols,
+                        start=start.strftime("%Y-%m-%d"),
+                        end=end.strftime("%Y-%m-%d"),
+                        progress=False
+                    )
                 if not data.empty:
                     close_cols = [c for c in data.columns if isinstance(c, tuple) and len(c) > 1 and c[0] == 'Close']
                     if close_cols:
