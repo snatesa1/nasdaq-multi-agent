@@ -137,9 +137,6 @@ class FMPClient:
         return self._get("nasdaq_constituent")
 
 
-# ═══════════════════════════════════════════════════════════
-#  Alpaca Client — OHLCV Price Data
-# ═══════════════════════════════════════════════════════════
 class AlpacaOHLCVClient:
     """Lightweight Alpaca client — only for price data (OHLCV)."""
 
@@ -148,6 +145,48 @@ class AlpacaOHLCVClient:
             api_key=settings.ALPACA_API_KEY,
             secret_key=settings.ALPACA_SECRET_KEY,
         )
+
+    def get_ohlcv(self, symbol: str, days: int = 365) -> pd.DataFrame:
+        """Fetch daily OHLCV bars for a single symbol over the last N days, with yfinance fallback."""
+        end = datetime.now()
+        start = end - timedelta(days=days)
+        try:
+            request = StockBarsRequest(
+                symbol_or_symbols=[symbol],
+                timeframe=TimeFrame.Day,
+                start=start,
+                end=end,
+            )
+            bars = self.client.get_stock_bars(request)
+            df = bars.df
+            if not df.empty:
+                if isinstance(df.index, pd.MultiIndex):
+                    df = df.xs(symbol, level='symbol')
+                df.columns = [c.lower() for c in df.columns]
+                logger.info(f"✅ Alpaca get_ohlcv: fetched {len(df)} rows for {symbol}")
+                return df
+        except Exception as e:
+            logger.warning(f"⚠️ Alpaca single fetch failed for {symbol}: {e}. Falling back to yfinance...")
+
+        # yfinance fallback
+        try:
+            with suppress_stdout_stderr():
+                df_yf = yf.download(
+                    symbol,
+                    start=start.strftime("%Y-%m-%d"),
+                    end=end.strftime("%Y-%m-%d"),
+                    progress=False
+                )
+            if not df_yf.empty:
+                df_yf.columns = [c.lower() for c in df_yf.columns]
+                rename_map = {'adj close': 'close'}
+                df_yf = df_yf.rename(columns=rename_map)
+                logger.info(f"✅ yfinance get_ohlcv: fetched {len(df_yf)} rows for {symbol}")
+                return df_yf
+        except Exception as yfe:
+            logger.error(f"❌ yfinance fallback also failed for get_ohlcv({symbol}): {yfe}")
+
+        return pd.DataFrame()
 
     def get_historical_batch(self, symbols: List[str], start: datetime, end: datetime) -> pd.DataFrame:
         """Fetch historical daily OHLCV bars from Alpaca for a batch of symbols, with yfinance fallback."""
