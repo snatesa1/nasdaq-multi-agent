@@ -11,7 +11,7 @@ import logging
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
-from ..data_client import FMPClient, YFinanceClient, NasdaqScreenerClient
+from ..data_client import FMPClient, YFinanceClient, NasdaqScreenerClient, AlpacaOHLCVClient
 from .base_agent import AgentResult, BaseAgent
 from .metric_explainer import VertexGeminiProvider
 
@@ -147,6 +147,7 @@ class MacroAgent(BaseAgent):
         self.fmp = FMPClient()
         self.yfinance = YFinanceClient()
         self.screener = NasdaqScreenerClient()
+        self.alpaca = AlpacaOHLCVClient()
         self.regime_analyzer = MacroRegimeAnalyzer()
 
     @property
@@ -213,14 +214,15 @@ class MacroAgent(BaseAgent):
             # ── Step 4: Sliding window comparison ────────────
             sliding_windows = {}
             for sector in top_sectors:
-                etf = SECTOR_ETFS.get(sector)
-                if etf:
-                    windows = self.yfinance.get_sliding_window(
-                        symbol=etf,
+                df_sec = df_clean[df_clean["sector"] == sector]
+                if not df_sec.empty:
+                    df_sec = df_sec.sort_values(by="pctchange", ascending=False)
+                    symbols = df_sec["symbol"].tolist()[:100]
+                    sliding_windows[sector] = self.alpaca.get_sliding_window(
+                        symbol_or_symbols=symbols,
                         window_days=window_days,
                         years=comparison_years,
                     )
-                    sliding_windows[sector] = self._summarize_windows(windows)
 
             # ── Step 5: Build stock universe — top stocks per high-performing group ────
             fallback_universe_size = kwargs.get("fallback_universe_size", 10)

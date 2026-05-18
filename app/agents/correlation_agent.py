@@ -6,15 +6,14 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from .base_agent import AgentResult, BaseAgent
-from ..data_client import NasdaqScreenerClient
+from ..data_client import NasdaqScreenerClient, AlpacaOHLCVClient
 
 logger = logging.getLogger(__name__)
 
 class CorrelationAgent(BaseAgent):
     """
-    Agent that identifies uncorrelated assets to achieve the 'Holy Grail' 
-    of 15-20 independent return streams. 
-    Now pulls dynamically from S&P 500 and NASDAQ.
+    Agent that identifies uncorrelated assets to achieve Ray Dalio's 'Holy Grail'
+    of independent return streams, calculated directly on custom sector indexes.
     """
 
     @property
@@ -23,109 +22,122 @@ class CorrelationAgent(BaseAgent):
 
     async def analyze(self, **kwargs) -> AgentResult:
         """
-        Performs correlation analysis on a massive basket of assets.
+        Performs cross-sector correlation analysis on price-weighted indexes
+        to identify Ray Dalio's 'Holy Grail' of uncorrelated return streams.
         """
         self._log_start()
         
         # Load parameters from spec
         lookback_days = kwargs.get("lookback_days", 252)
-        analysis_limit = kwargs.get("analysis_limit", 600)
-        target_ref = kwargs.get("target_ref", "SPY")
         correlation_threshold = kwargs.get("correlation_threshold", 0.2)
-        defensive_basket = kwargs.get("defensive_basket", [])
+        reference_sector = kwargs.get("reference_sector", "Technology")
         
         screener = NasdaqScreenerClient()
+        alpaca = AlpacaOHLCVClient()
         
-        # 1. Fetch Tickers from Screener
-        logger.info("📡 Fetching NASDAQ tickers from screener...")
-        df_universe = screener.get_screener_universe()
-        
+        # 1. Fetch Universe and Sectors
+        logger.info("📡 Loading NASDAQ screener sectors...")
+        df_universe = screener.load_data()
         if df_universe.empty:
-            logger.warning("No tickers found from screener, using fallback...")
-            screener_tickers = []
-        else:
-            # Maybe filter by market cap to get the top ones instead of random
-            df_universe = df_universe.sort_values(by="marketCap", ascending=False)
-            screener_tickers = df_universe["symbol"].dropna().tolist()
-        
-        # Combine and deduplicate
-        full_basket = list(set(screener_tickers + defensive_basket))
-        logger.info(f"📋 Total candidates for Holy Grail search: {len(full_basket)}")
-
-        # 2. Fetch Data in Batches (to avoid timeout/memory issues)
-        target_tickers = full_basket[:analysis_limit]
-        if target_ref not in target_tickers:
-            target_tickers.append(target_ref)
+            return AgentResult(
+                agent_name=self.name,
+                score=0.5,
+                rationale="Failed to load Nasdaq screener database.",
+            )
             
+        sectors = df_universe["sector"].dropna().unique().tolist()
+        sectors = [s.strip() for s in sectors if s.strip()]
+        logger.info(f"📋 Found {len(sectors)} sectors for Holy Grail index analysis: {sectors}")
+
+        # 2. Fetch daily index series for each sector
         end_date = datetime.now()
         start_date = end_date - timedelta(days=lookback_days)
         
-        logger.info(f"📥 Batch downloading data for {len(target_tickers)} assets...")
-        try:
-            data = yf.download(
-                target_tickers, 
-                start=start_date.strftime("%Y-%m-%d"), 
-                end=end_date.strftime("%Y-%m-%d"),
-                group_by='column',
-                progress=False
+        logger.info(f"📥 Generating historical daily index series over {lookback_days} days...")
+        sector_series = {}
+        for sector in sectors:
+            try:
+                series = alpaca.get_sector_index_series(sector, start_date, end_date)
+                if not series.empty:
+                    sector_series[sector] = series
+                    logger.info(f"✅ Generated daily index for sector: {sector} ({len(series)} days)")
+            except Exception as e:
+                logger.warning(f"⚠️ Failed to generate index for sector {sector}: {e}")
+
+        if not sector_series:
+            return AgentResult(
+                agent_name=self.name,
+                score=0.5,
+                rationale="Could not construct historical index series for any sector.",
+            )
+
+        # 3. Combine to DataFrame and calculate log returns
+        df_indexes = pd.DataFrame(sector_series).dropna()
+        if df_indexes.empty:
+            return AgentResult(
+                agent_name=self.name,
+                score=0.5,
+                rationale="No overlapping calendar dates between sector indexes.",
             )
             
-            if data.empty or "Close" not in data:
-                return AgentResult(
-                    agent_name=self.name,
-                    score=0.5,
-                    rationale="Failed to download historical data for analysis.",
-                )
-                
-            close_data = data["Close"]
-        except Exception as e:
-            logger.error(f"❌ Batch download failed: {e}")
-            return AgentResult(agent_name=self.name, score=0.5, rationale=f"Error: {str(e)}")
-
-        # 3. Calculate Log Returns
-        log_returns = np.log(close_data / close_data.shift(1)).dropna()
+        log_returns = np.log(df_indexes / df_indexes.shift(1)).dropna()
         
         # 4. Compute Correlation Matrix
         corr_matrix = log_returns.corr()
         
-        # 5. Identify Uncorrelated Assets (to SPY)
-        target_ref = "SPY"
-        if target_ref not in corr_matrix.columns:
-            target_ref = log_returns.columns[0]
+        # 5. Find sectors uncorrelated to the reference sector (Technology by default)
+        if reference_sector not in corr_matrix.columns:
+            reference_sector = corr_matrix.columns[0]
             
-        uncorrelated = []
-        for asset in corr_matrix.columns:
-            if asset == target_ref:
+        uncorrelated_assets = []
+        for sector in corr_matrix.columns:
+            if sector == reference_sector:
                 continue
-            corr_val = corr_matrix.loc[target_ref, asset]
+            corr_val = corr_matrix.loc[reference_sector, sector]
             if not np.isnan(corr_val) and abs(corr_val) < correlation_threshold:
-                uncorrelated.append({
-                    "symbol": asset,
+                uncorrelated_assets.append({
+                    "symbol": sector,
                     "correlation": float(corr_val)
                 })
-        
-        # Sort by lowest absolute correlation
-        uncorrelated = sorted(uncorrelated, key=lambda x: abs(x['correlation']))
+                
+        # Sort by absolute lowest correlation
+        uncorrelated_assets = sorted(uncorrelated_assets, key=lambda x: abs(x['correlation']))
 
-        # 6. Build Rationale
-        count = len(uncorrelated)
-        rationale = f"Analyzed {len(target_tickers)} assets across NASDAQ and Macro. Found {count} uncorrelated assets (< {correlation_threshold}) to {target_ref}. "
-        if count >= 15:
-            rationale += "The 'Holy Grail' of 15+ uncorrelated bets is ACHIEVED. Portfolio risk can be reduced by ~80%."
-        else:
-            rationale += f"Need more uncorrelated assets (currently {count}/15) to reach Dalio's risk reduction target."
+        # 6. Find Ray Dalio's Holy Grail mutually uncorrelated basket (greedy clique selection)
+        holy_grail_basket = []
+        # Sort sectors by absolute average correlation to others to pick the most independent ones first
+        avg_corrs = corr_matrix.abs().mean().sort_values()
+        for sector in avg_corrs.index:
+            is_mutually_uncorrelated = True
+            for selected in holy_grail_basket:
+                val = corr_matrix.loc[sector, selected]
+                if np.isnan(val) or abs(val) >= correlation_threshold:
+                    is_mutually_uncorrelated = False
+                    break
+            if is_mutually_uncorrelated:
+                holy_grail_basket.append(sector)
 
-        # 7. Final Result
+        # 7. Build beautiful, high-energy rationale
+        basket_str = ", ".join([f"`{s}`" for s in holy_grail_basket])
+        count = len(holy_grail_basket)
+        rationale = (
+            f"Analyzed cross-correlations of {len(corr_matrix.columns)} dynamic price-weighted sector indexes. "
+            f"Found {len(uncorrelated_assets)} sectors uncorrelated (< {correlation_threshold}) to reference `{reference_sector}`. "
+            f"Ray Dalio's Holy Grail basket contains {count} mutually uncorrelated sectors: {basket_str}."
+        )
+
+        # 8. Return AgentResult
         result = AgentResult(
             agent_name=self.name,
-            score=1.0 if count >= 15 else 0.7,
-            confidence=0.9,
+            score=1.0 if count >= 3 else 0.7,  # Mutually uncorrelated sectors at macro level are extremely powerful!
+            confidence=0.95,
             rationale=rationale,
             data={
-                "reference_asset": target_ref,
-                "uncorrelated_assets": uncorrelated,
-                "top_10_uncorrelated": uncorrelated[:10],
-                "total_analyzed": len(target_tickers)
+                "reference_asset": reference_sector,
+                "uncorrelated_assets": uncorrelated_assets,
+                "top_10_uncorrelated": uncorrelated_assets[:10],
+                "holy_grail_basket": holy_grail_basket,
+                "total_analyzed": len(corr_matrix.columns)
             }
         )
         
