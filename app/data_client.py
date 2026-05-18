@@ -4,7 +4,7 @@ Unified data client for FMP, Alpaca (OHLCV), and yfinance (deep history).
 
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 import requests
