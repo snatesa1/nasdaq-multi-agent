@@ -178,7 +178,10 @@ class AlpacaOHLCVClient:
                     progress=False
                 )
             if not df_yf.empty:
-                df_yf.columns = [c.lower() for c in df_yf.columns]
+                if isinstance(df_yf.columns, pd.MultiIndex):
+                    df_yf.columns = [c[0].lower() for c in df_yf.columns]
+                else:
+                    df_yf.columns = [str(c).lower() for c in df_yf.columns]
                 rename_map = {'adj close': 'close'}
                 df_yf = df_yf.rename(columns=rename_map)
                 logger.info(f"✅ yfinance get_ohlcv: fetched {len(df_yf)} rows for {symbol}")
