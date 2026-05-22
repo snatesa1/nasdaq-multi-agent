@@ -24,12 +24,14 @@ class CorrelationAgent(BaseAgent):
         """
         Performs cross-sector correlation analysis on price-weighted indexes
         to identify Ray Dalio's 'Holy Grail' of uncorrelated return streams.
+        Uses rolling correlations to ensure resilience across regimes.
         """
         self._log_start()
         
         # Load parameters from spec
-        lookback_days = kwargs.get("lookback_days", 252)
-        correlation_threshold = kwargs.get("correlation_threshold", 0.2)
+        lookback_days = kwargs.get("lookback_days", 2520) # 10 years default now
+        rolling_window = kwargs.get("rolling_window", 252) # 1 year rolling window
+        correlation_threshold = kwargs.get("correlation_threshold", 0.3) # Slightly relaxed for 90th percentile
         reference_sector = kwargs.get("reference_sector", "Technology")
         
         screener = NasdaqScreenerClient()
@@ -82,8 +84,30 @@ class CorrelationAgent(BaseAgent):
             
         log_returns = np.log(df_indexes / df_indexes.shift(1)).dropna()
         
-        # 4. Compute Correlation Matrix
-        corr_matrix = log_returns.corr()
+        # 4. Compute 1-Year Rolling Correlation Matrix (90th percentile to measure worst-case correlation)
+        logger.info(f"🧮 Computing {rolling_window}-day rolling correlations across 10 years...")
+        # Initialize an empty matrix for the worst-case (90th percentile) correlations
+        cols = log_returns.columns
+        worst_case_corr_matrix = pd.DataFrame(index=cols, columns=cols, dtype=float)
+        
+        for col1 in cols:
+            for col2 in cols:
+                if col1 == col2:
+                    worst_case_corr_matrix.loc[col1, col2] = 1.0
+                elif pd.isna(worst_case_corr_matrix.loc[col1, col2]):
+                    # Compute rolling correlation series
+                    roll_corr = log_returns[col1].rolling(window=rolling_window).corr(log_returns[col2]).dropna()
+                    if not roll_corr.empty:
+                        # 90th percentile absolute correlation (to catch high negative OR positive correlation)
+                        # Actually, Dalio wants uncorrelated (near 0), so we look at the absolute max/90th
+                        val = np.percentile(roll_corr.abs(), 90)
+                        worst_case_corr_matrix.loc[col1, col2] = val
+                        worst_case_corr_matrix.loc[col2, col1] = val
+                    else:
+                        worst_case_corr_matrix.loc[col1, col2] = 1.0
+                        worst_case_corr_matrix.loc[col2, col1] = 1.0
+                        
+        corr_matrix = worst_case_corr_matrix
         
         # 5. Find sectors uncorrelated to the reference sector (Technology by default)
         if reference_sector not in corr_matrix.columns:
@@ -121,15 +145,15 @@ class CorrelationAgent(BaseAgent):
         basket_str = ", ".join([f"`{s}`" for s in holy_grail_basket])
         count = len(holy_grail_basket)
         rationale = (
-            f"Analyzed cross-correlations of {len(corr_matrix.columns)} dynamic price-weighted sector indexes. "
-            f"Found {len(uncorrelated_assets)} sectors uncorrelated (< {correlation_threshold}) to reference `{reference_sector}`. "
-            f"Ray Dalio's Holy Grail basket contains {count} mutually uncorrelated sectors: {basket_str}."
+            f"Analyzed {rolling_window}-day rolling cross-correlations over 10 years for {len(corr_matrix.columns)} dynamic momentum sector indexes. "
+            f"Found {len(uncorrelated_assets)} sectors consistently uncorrelated (90th pctl < {correlation_threshold}) to reference `{reference_sector}`. "
+            f"Ray Dalio's Holy Grail basket contains {count} mutually independent sectors: {basket_str}."
         )
 
         # 8. Return AgentResult
         result = AgentResult(
             agent_name=self.name,
-            score=1.0 if count >= 3 else 0.7,  # Mutually uncorrelated sectors at macro level are extremely powerful!
+            score=1.0 if count >= 3 else 0.7,
             confidence=0.95,
             rationale=rationale,
             data={

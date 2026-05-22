@@ -313,87 +313,116 @@ class AlpacaOHLCVClient:
         return results
 
     def get_sector_index_series(
-        self, sector: str, start: datetime, end: datetime, top_n: int = 100
+        self, sector: str, start: datetime, end: datetime, top_n: int = 10
     ) -> pd.Series:
         """
         Constructs a price-weighted index daily series for a sector over a date range.
-        Uses Alpaca for >= 2016 and yfinance for < 2016.
+        Uses static cache from data/historical_cache.parquet for historical data,
+        and fetches delta for recent days dynamically using top momentum stocks.
         """
         today = datetime.now()
         if end >= today:
             end = today - timedelta(days=1)
 
-        screener = NasdaqScreenerClient()
-        df_screener = screener.load_data()
-        if df_screener.empty:
-            return pd.Series()
-
-        # Filter by sector
-        df_sec = df_screener[df_screener["sector"] == sector].dropna(subset=["symbol"])
-        df_sec = df_sec[df_sec["symbol"].astype(str).str.strip() != '']
-        df_sec = df_sec[df_sec["symbol"].astype(str).str.strip() != 'nan']
-        if df_sec.empty:
-            return pd.Series()
-
-        # Clean and filter for active, liquid major common stocks
-        df_sec = df_sec.copy()
-        df_sec["volume"] = pd.to_numeric(df_sec["volume"], errors="coerce").fillna(0)
-        df_sec["marketCap"] = pd.to_numeric(df_sec["marketCap"], errors="coerce").fillna(0)
+        import os
+        cache_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "historical_cache.parquet")
         
-        # Apply strict standard common stock filters to prevent Alpaca SIP errors
-        df_sec = df_sec[df_sec["symbol"].astype(str).str.len() <= 4]
-        df_sec = df_sec[df_sec["symbol"].astype(str).str.isalpha()]
-        df_sec = df_sec[df_sec["volume"] > 10000]
-        df_sec = df_sec[df_sec["marketCap"] > 50000000]
-
-        # Clean and sort by daily pctchange (highest momentum leaders first)
-        if "pctchange" in df_sec.columns:
-            df_sec["pctchange"] = df_sec["pctchange"].astype(str).str.replace("%", "").str.replace("$", "")
-            df_sec["pctchange"] = pd.to_numeric(df_sec["pctchange"], errors="coerce")
-            df_sec = df_sec.dropna(subset=["pctchange"])
-            df_sec = df_sec.sort_values(by="pctchange", ascending=False)
-
-        symbols = df_sec["symbol"].tolist()[:top_n]
-        if not symbols:
-            return pd.Series()
-
-        # Batch download daily Close prices
-        df_prices = pd.DataFrame()
-        if start.year < 2016:
-            # yfinance fallback
+        df_cache = pd.DataFrame()
+        if os.path.exists(cache_path):
             try:
-                with suppress_stdout_stderr():
-                    data = yf.download(
-                        symbols,
-                        start=start.strftime("%Y-%m-%d"),
-                        end=end.strftime("%Y-%m-%d"),
-                        progress=False
-                    )
-                if not data.empty:
-                    close_cols = [c for c in data.columns if isinstance(c, tuple) and len(c) > 1 and c[0] == 'Close']
-                    if close_cols:
-                        df_prices = data[close_cols]
-                        df_prices.columns = [c[1] for c in df_prices.columns]
-                    elif 'Close' in data.columns:
-                        df_prices = data[['Close']]
+                df_cache = pd.read_parquet(cache_path)
             except Exception as e:
-                logger.error(f"❌ yfinance fallback batch fetch failed for sector {sector}: {e}")
-        else:
-            # Alpaca
-            data = self.get_historical_batch(symbols, start, end)
-            if not data.empty and 'close' in data.columns:
-                if isinstance(data.index, pd.MultiIndex):
-                    df_prices = data['close'].unstack(level='symbol')
-                else:
-                    df_prices = data[['close']]
-                    df_prices.columns = [symbols[0]]
+                logger.warning(f"Failed to load historical cache: {e}")
 
-        if df_prices.empty:
-            return pd.Series()
+        cached_series = pd.Series(dtype=float)
+        last_cached_date = None
+        
+        if not df_cache.empty and sector in df_cache.columns:
+            cached_series = df_cache[sector].dropna()
+            cached_series.index = pd.to_datetime(cached_series.index)
+            if cached_series.index.tz is not None:
+                cached_series.index = cached_series.index.tz_localize(None)
+            if not cached_series.empty:
+                last_cached_date = cached_series.index.max()
 
-        # Calculate daily price-weighted average index
-        daily_index = df_prices.mean(axis=1)
-        return daily_index
+        delta_start = start
+        if last_cached_date is not None and start <= last_cached_date:
+            delta_start = last_cached_date + timedelta(days=1)
+
+        # If we need delta data, fetch it dynamically
+        delta_series = pd.Series(dtype=float)
+        if delta_start <= end:
+            screener = NasdaqScreenerClient()
+            df_screener = screener.load_data()
+            if not df_screener.empty:
+                df_sec = df_screener[df_screener["sector"] == sector].dropna(subset=["symbol"])
+                df_sec = df_sec[df_sec["symbol"].astype(str).str.strip() != '']
+                df_sec = df_sec[df_sec["symbol"].astype(str).str.strip() != 'nan']
+                
+                if not df_sec.empty:
+                    df_sec = df_sec.copy()
+                    df_sec["volume"] = pd.to_numeric(df_sec["volume"], errors="coerce").fillna(0)
+                    df_sec["marketCap"] = pd.to_numeric(df_sec["marketCap"], errors="coerce").fillna(0)
+                    
+                    df_sec = df_sec[df_sec["symbol"].astype(str).str.len() <= 4]
+                    df_sec = df_sec[df_sec["symbol"].astype(str).str.isalpha()]
+                    df_sec = df_sec[df_sec["volume"] > 10000]
+                    df_sec = df_sec[df_sec["marketCap"] > 50000000]
+            
+                    if "pctchange" in df_sec.columns:
+                        df_sec["pctchange"] = df_sec["pctchange"].astype(str).str.replace("%", "").str.replace("$", "")
+                        df_sec["pctchange"] = pd.to_numeric(df_sec["pctchange"], errors="coerce")
+                        df_sec = df_sec.dropna(subset=["pctchange"])
+                        
+                        # TOP MOMENTUM: Select > 10%, otherwise top 10
+                        df_momentum = df_sec[df_sec["pctchange"] > 10.0]
+                        if len(df_momentum) >= top_n:
+                            df_sec = df_momentum.sort_values(by="pctchange", ascending=False)
+                        else:
+                            df_sec = df_sec.sort_values(by="pctchange", ascending=False)
+            
+                    symbols = df_sec["symbol"].tolist()[:top_n]
+                    if symbols:
+                        df_prices = pd.DataFrame()
+                        if delta_start.year < 2016:
+                            try:
+                                with suppress_stdout_stderr():
+                                    data = yf.download(symbols, start=delta_start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), progress=False)
+                                if not data.empty:
+                                    close_cols = [c for c in data.columns if isinstance(c, tuple) and len(c) > 1 and c[0] == 'Close']
+                                    if close_cols:
+                                        df_prices = data[close_cols]
+                                        df_prices.columns = [c[1] for c in df_prices.columns]
+                                    elif 'Close' in data.columns:
+                                        df_prices = data[['Close']]
+                            except Exception as e:
+                                logger.error(f"yfinance fallback batch fetch failed for sector {sector}: {e}")
+                        else:
+                            data = self.get_historical_batch(symbols, delta_start, end)
+                            if not data.empty and 'close' in data.columns:
+                                if isinstance(data.index, pd.MultiIndex):
+                                    df_prices = data['close'].unstack(level='symbol')
+                                else:
+                                    df_prices = data[['close']]
+                                    df_prices.columns = [symbols[0]]
+            
+                        if not df_prices.empty:
+                            delta_series = df_prices.mean(axis=1)
+
+        # Combine cache and delta
+        combined_series = pd.concat([cached_series, delta_series])
+        
+        # Trim to requested start and end
+        if not combined_series.empty:
+            combined_series.index = pd.to_datetime(combined_series.index)
+            if combined_series.index.tz is not None:
+                combined_series.index = combined_series.index.tz_localize(None)
+            mask = (combined_series.index.normalize() >= pd.to_datetime(start).normalize()) & (combined_series.index.normalize() <= pd.to_datetime(end).normalize())
+            combined_series = combined_series.loc[mask]
+            # Ensure unique index in case of overlap
+            combined_series = combined_series[~combined_series.index.duplicated(keep='last')]
+            
+        return combined_series
 
 
 # ═══════════════════════════════════════════════════════════
