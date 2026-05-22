@@ -54,6 +54,26 @@ class VertexGeminiProvider(LLMProvider):
 
 
 # ═══════════════════════════════════════════════════════════
+#  Process-level singleton — ONE LLM call per process lifetime
+# ═══════════════════════════════════════════════════════════
+
+_EXPLAINER_SINGLETON: "MetricExplainer | None" = None
+
+
+def get_shared_explainer() -> "MetricExplainer":
+    """
+    Returns the process-level MetricExplainer singleton.
+    Ensures exactly ONE Gemini call is made per Cloud Run instance lifecycle,
+    regardless of how many stocks are analyzed in parallel.
+    """
+    global _EXPLAINER_SINGLETON
+    if _EXPLAINER_SINGLETON is None:
+        _EXPLAINER_SINGLETON = MetricExplainer()
+        logger.info("✅ MetricExplainer singleton created (one-time LLM call)")
+    return _EXPLAINER_SINGLETON
+
+
+# ═══════════════════════════════════════════════════════════
 #  Layer 2: Metric Definitions (data layer)
 # ═══════════════════════════════════════════════════════════
 

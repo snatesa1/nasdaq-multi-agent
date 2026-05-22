@@ -101,10 +101,12 @@ class Settings:
     def EMAIL_RECIPIENT(self) -> str:
         return self._get_secret("EMAIL_RECIPIENT")
 
-    # ── Vertex AI ────────────────────────────────────────
+    # ── Vertex AI ────────────────────────────────────────────────
     @cached_property
     def VERTEX_MODEL(self) -> str:
-        return os.getenv("VERTEX_MODEL", "gemini-1.5-flash")
+        # gemini-2.0-flash-lite: higher RPM quota + lower cost vs 1.5-flash
+        # Override via VERTEX_MODEL env var to use a different model.
+        return os.getenv("VERTEX_MODEL", "gemini-2.0-flash-lite")
 
 
 # Singleton

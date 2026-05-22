@@ -8,6 +8,8 @@ Identifies the hottest industries and selects a stock universe.
 
 import json
 import logging
+import os
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -56,14 +58,27 @@ class MacroRegimeAnalyzer:
     Fetches the latest macro headlines from FMP, sends them to Gemini,
     and gets back 3-4 historical analog years that match the current
     macro regime (e.g. war, AI bubble, credit crisis).
+
+    Results are cached to a temp file for 12 hours to avoid burning
+    Gemini quota on repeated runs within the same trading day.
     """
+
+    _CACHE_FILE = "/tmp/macro_analog_years_cache.json"
+    _CACHE_TTL_HOURS = 12
 
     def __init__(self):
         self.fmp = FMPClient()
         self.llm = VertexGeminiProvider()
 
     def get_dynamic_years(self) -> List[int]:
-        """Return dynamically-selected analog comparison years."""
+        """Return dynamically-selected analog comparison years (cached 12h)."""
+        # ─ Check cache first ─────────────────────────────────────
+        cached = self._load_cache()
+        if cached:
+            logger.info(f"📦 Analog years from cache (expires in {cached['ttl_remaining']:.1f}h): {cached['years']}")
+            return cached["years"]
+
+        # ─ Cache miss → call Gemini ───────────────────────────────
         try:
             headlines = self._fetch_macro_headlines()
             if not headlines:
@@ -72,17 +87,44 @@ class MacroRegimeAnalyzer:
 
             years = self._ask_gemini_for_analogs(headlines)
             if years:
-                # Always include current year
                 current_year = datetime.now().year
                 if current_year not in years:
                     years.append(current_year)
+                years = sorted(years)
                 logger.info(f"🧠 Gemini selected analog years: {years}")
-                return sorted(years)
+                self._save_cache(years)
+                return years
 
         except Exception as e:
             logger.error(f"❌ MacroRegimeAnalyzer failed: {e}")
 
         return DEFAULT_COMPARISON_YEARS
+
+    def _load_cache(self) -> Optional[Dict]:
+        """Load cached analog years if still within TTL."""
+        try:
+            if not os.path.exists(self._CACHE_FILE):
+                return None
+            with open(self._CACHE_FILE, "r") as f:
+                data = json.load(f)
+            cached_at = data.get("cached_at", 0)
+            age_hours = (time.time() - cached_at) / 3600
+            if age_hours < self._CACHE_TTL_HOURS:
+                data["ttl_remaining"] = self._CACHE_TTL_HOURS - age_hours
+                return data
+            logger.info(f"🗑️ Analog years cache expired ({age_hours:.1f}h old) — refreshing")
+        except Exception as e:
+            logger.warning(f"⚠️ Cache read failed: {e}")
+        return None
+
+    def _save_cache(self, years: List[int]) -> None:
+        """Persist analog years to temp file with timestamp."""
+        try:
+            with open(self._CACHE_FILE, "w") as f:
+                json.dump({"years": years, "cached_at": time.time()}, f)
+            logger.info(f"💾 Analog years cached for {self._CACHE_TTL_HOURS}h: {years}")
+        except Exception as e:
+            logger.warning(f"⚠️ Cache write failed (non-fatal): {e}")
 
     def _fetch_macro_headlines(self) -> List[str]:
         """Fetch top 5 macro headlines from FMP general news."""
