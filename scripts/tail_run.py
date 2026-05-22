@@ -6,7 +6,7 @@ from datetime import datetime
 cmd = [
     "C:\\WINDOWS\\System32\\wsl.exe", "-d", "Ubuntu-24.04", "-e",
     "gcloud", "logging", "read",
-    "resource.type=cloud_run_revision AND resource.labels.service_name=nasdaq-multi-agent AND resource.labels.revision_name=nasdaq-multi-agent-00021-qws",
+    "resource.type=cloud_run_revision AND resource.labels.service_name=nasdaq-multi-agent AND resource.labels.revision_name=nasdaq-multi-agent-00022-rhf",
     "--limit=1000", "--format=json"
 ]
 

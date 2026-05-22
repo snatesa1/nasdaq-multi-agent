@@ -82,7 +82,7 @@ class Settings:
 
     @cached_property
     def SLACK_CHANNEL_ID(self) -> str:
-        return os.getenv("SLACK_CHANNEL_ID", "")
+        return self._get_secret("SLACK_CHANNEL_ID")
 
     @cached_property
     def CRON_SECRET(self) -> str:
