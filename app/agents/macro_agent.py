@@ -243,7 +243,13 @@ class MacroAgent(BaseAgent):
             logger.info(f"🏆 Top selected macro groups: {top_groups}")
 
             top_sectors = list(dict.fromkeys([g["sector"] for g in top_groups]))
-            logger.info(f"🏆 Unique top sectors: {top_sectors}")
+            
+            # Force Technology, Finance, and Energy to always be included
+            mandatory_sectors = ["Technology", "Finance", "Energy"]
+            for ms in mandatory_sectors:
+                if ms in sector_averages and ms not in top_sectors:
+                    top_sectors.append(ms)
+            logger.info(f"🏆 Unique top sectors (including mandatory): {top_sectors}")
 
             # ── Step 3: Spec-configured comparison years (no dynamic/local overrides) ────
             comparison_years = kwargs.get("comparison_years")
@@ -276,36 +282,31 @@ class MacroAgent(BaseAgent):
                         years=comparison_years,
                     )
 
-            # ── Step 5: Build stock universe — top stocks per high-performing group ────
-            fallback_universe_size = kwargs.get("fallback_universe_size", 10)
-            seen = set()
+            # ── Step 5: Build stock universe — top 1 stock per major sector by daily momentum ────
+            major_sectors = [
+                "Technology",
+                "Health Care",
+                "Finance",
+                "Consumer Discretionary",
+                "Industrials",
+                "Real Estate",
+                "Consumer Staples",
+                "Telecommunications",
+                "Energy",
+                "Utilities",
+                "Basic Materials"
+            ]
             stock_universe = []
-            
-            stocks_per_group = max(2, fallback_universe_size // len(top_groups))
-            for group in top_groups:
-                sec = group["sector"]
-                ind = group["industry"]
-                
-                # Fetch matching stocks
-                group_stocks = df_clean[
-                    (df_clean["sector"] == sec) & (df_clean["industry"] == ind)
-                ].copy()
-                
-                # Sort by marketCap descending to get industry leaders
-                if "marketCap" in group_stocks.columns:
-                    group_stocks = group_stocks.sort_values(by="marketCap", ascending=False)
-                elif "volume" in group_stocks.columns:
-                    group_stocks = group_stocks.sort_values(by="volume", ascending=False)
-                
-                symbols = group_stocks["symbol"].tolist()
-                selected_count = 0
-                for sym in symbols:
-                    if sym not in seen:
-                        seen.add(sym)
-                        stock_universe.append(sym)
-                        selected_count += 1
-                        if selected_count >= stocks_per_group:
-                            break
+            for sector in major_sectors:
+                df_sec_stocks = df_clean[df_clean["sector"] == sector]
+                if not df_sec_stocks.empty:
+                    # Sort by daily percentage change descending
+                    df_sec_stocks = df_sec_stocks.sort_values(by="pctchange", ascending=False)
+                    top_symbol = df_sec_stocks.iloc[0]["symbol"]
+                    stock_universe.append(top_symbol)
+                    logger.info(f"📌 Sector '{sector}' representative: {top_symbol} ({df_sec_stocks.iloc[0]['pctchange']:+.2f}%)")
+                else:
+                    logger.warning(f"⚠️ No stocks found for major sector: {sector}")
 
             # Guarantee default leaders if empty
             if not stock_universe:
@@ -323,6 +324,7 @@ class MacroAgent(BaseAgent):
             data={
                 "selected_sectors": top_sectors,
                 "sector_scores": scored_sectors,
+                "sector_changes": sector_averages,
                 "stock_universe": stock_universe,
                 "sliding_window_comparison": sliding_windows,
                 "comparison_years": comparison_years,

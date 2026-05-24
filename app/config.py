@@ -47,7 +47,7 @@ class Settings:
             client = secretmanager.SecretManagerServiceClient()
             name = f"projects/{self.PROJECT_ID}/secrets/{secret_id}/versions/latest"
             response = client.access_secret_version(request={"name": name})
-            return response.payload.data.decode("UTF-8")
+            return response.payload.data.decode("UTF-8").strip()
         except Exception as e:
             logger.warning(f"⚠️ Secret '{secret_id}' not in Secret Manager: {e}")
             return os.getenv(secret_id, "")

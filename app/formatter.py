@@ -89,7 +89,7 @@ def format_slack_blocks(result: Dict) -> List[Dict]:
     blocks.append({
         "type": "context",
         "elements": [
-            {"type": "mrkdwn", "text": f"🕐 {_format_timestamp(result.get('timestamp'))}  •  ⏱️ {result.get('duration_seconds', 0)}s  •  Phase 1"}
+            {"type": "mrkdwn", "text": f"⏱️ {result.get('duration_seconds', 0)}s"}
         ]
     })
     blocks.append({"type": "divider"})
@@ -226,15 +226,18 @@ def _build_macro_blocks(result: Dict) -> List[Dict]:
     # Top sectors as fields
     sector_fields = []
     sector_scores = macro.get("data", {}).get("sector_scores", {})
+    sector_changes = macro.get("data", {}).get("sector_changes", {})
     for sector in sectors:
         s = sector_scores.get(sector, 0)
+        avg_change = sector_changes.get(sector, 0.0)
+        sign = "+" if avg_change > 0 else ""
         sector_fields.append({
             "type": "mrkdwn",
-            "text": f"*{sector}*\n{_score_emoji(s)} {s:.3f}"
+            "text": f"*{sector}*\n{_score_emoji(s)} {sign}{avg_change:.2f}%"
         })
 
     if sector_fields:
-        blocks.append({"type": "section", "fields": sector_fields[:6]})  # Max 6 fields
+        blocks.append({"type": "section", "fields": sector_fields[:10]})  # Max 10 fields
 
     # Sliding window comparison — dynamic year columns
     if sliding:
@@ -410,11 +413,13 @@ def _build_technical_blocks(result: Dict) -> List[Dict]:
 
     # Scoreboard table
     table_text = "```\n"
-    table_text += f"{'':>2} {'Symbol':<7} {'Score':>5} {'Regime':<13} {'RSI':>5} {'ADX':>5} {'Hurst':>6} {'MACD':>6}\n"
-    table_text += "─" * 55 + "\n"
+    table_text += f"{'':>2} {'Symbol':<7} {'Sector':<12} {'Score':>5} {'Regime':<13} {'RSI':>5} {'ADX':>5} {'Hurst':>6} {'MACD':>6}\n"
+    table_text += "─" * 68 + "\n"
 
     for tr in tech_results:
         sym = tr.get("data", {}).get("symbol", "?")
+        sector = tr.get("data", {}).get("sector", "N/A")
+        sector_trunc = sector[:12]
         sc = tr.get("score") or 0
         regime = tr.get("data", {}).get("regime", "?")
         momentum = tr.get("data", {}).get("momentum_regime", "?")
@@ -426,7 +431,7 @@ def _build_technical_blocks(result: Dict) -> List[Dict]:
         hurst = ind.get("hurst", 0)
         macd_bull = "✅" if ind.get("macd_bullish") else "❌"
 
-        table_text += f"{emoji:>2} {sym:<7} {sc:>5.2f} {regime:<13} {rsi:>5.1f} {adx:>5.1f} {hurst:>6.3f} {macd_bull:>6}\n"
+        table_text += f"{emoji:>2} {sym:<7} {sector_trunc:<12} {sc:>5.2f} {regime:<13} {rsi:>5.1f} {adx:>5.1f} {hurst:>6.3f} {macd_bull:>6}\n"
 
     table_text += "```"
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": table_text}})
@@ -481,11 +486,13 @@ def _build_fundamental_blocks(result: Dict) -> List[Dict]:
 
     # Fundamental scoreboard
     table_text = "```\n"
-    table_text += f"{'':>2} {'Symbol':<7} {'Score':>5} {'PE':>7} {'PB':>6} {'ROE':>7} {'Margin':>7} {'F-Sc':>5} {'Z-Sc':>5}\n"
-    table_text += "─" * 58 + "\n"
+    table_text += f"{'':>2} {'Symbol':<7} {'Sector':<12} {'Score':>5} {'PE':>7} {'PB':>6} {'ROE':>7} {'Margin':>7} {'F-Sc':>5} {'Z-Sc':>5}\n"
+    table_text += "─" * 71 + "\n"
 
     for fr in fund_results:
         sym = fr.get("data", {}).get("symbol", "?")
+        sector = fr.get("data", {}).get("sector", "N/A")
+        sector_trunc = sector[:12]
         sc = fr.get("score") or 0
         d = fr.get("data", {}).get("metrics", {})
         emoji = _score_emoji(sc)
@@ -496,7 +503,7 @@ def _build_fundamental_blocks(result: Dict) -> List[Dict]:
         f_score = d.get("piotroski_score", 0)
         z_score = d.get("altman_z_score", 0)
 
-        table_text += f"{emoji:>2} {sym:<7} {sc:>5.2f} {pe:>7.1f} {pb:>6.1f} {roe:>6.1f}% {margin:>6.1f}% {f_score:>5.0f} {z_score:>5.1f}\n"
+        table_text += f"{emoji:>2} {sym:<7} {sector_trunc:<12} {sc:>5.2f} {pe:>7.1f} {pb:>6.1f} {roe:>6.1f}% {margin:>6.1f}% {f_score:>5.0f} {z_score:>5.1f}\n"
 
     table_text += "```"
     blocks.append({"type": "section", "text": {"type": "mrkdwn", "text": table_text}})
@@ -620,7 +627,7 @@ def format_email(result: Dict) -> str:
   </h2>
 </td></tr>
 <tr><td style="padding:5px 30px 15px;">
-  {_email_sector_pills(sectors, macro.get("data", {}).get("sector_scores", {}))}
+  {_email_sector_pills(sectors, macro.get("data", {}).get("sector_scores", {}), macro.get("data", {}).get("sector_changes", {}))}
   {_email_sliding_window(macro.get("data", {}).get("sliding_window_comparison", {}), sectors)}
 </td></tr>
 
@@ -696,15 +703,18 @@ def _score_color(score: float) -> str:
         return "#f85149"
 
 
-def _email_sector_pills(sectors: List[str], scores: Dict) -> str:
-    """Render sector score pills."""
+def _email_sector_pills(sectors: List[str], scores: Dict, changes: Dict = None) -> str:
+    """Render sector score pills with percentage changes."""
     pills = ""
+    changes = changes or {}
     for sector in sectors:
         s = scores.get(sector, 0)
         color = _score_color(s)
+        avg_change = changes.get(sector, 0.0)
+        sign = "+" if avg_change > 0 else ""
         pills += f"""<span style="display:inline-block; background:#1c2128; border:1px solid {color};
             border-radius:16px; padding:4px 14px; margin:3px 4px; font-size:12px; color:{color}; font-weight:600;">
-            {sector} {s:.3f}</span>"""
+            {sector} {sign}{avg_change:.2f}%</span>"""
     return f'<div style="margin:8px 0;">{pills}</div>'
 
 
@@ -810,6 +820,7 @@ def _email_tech_table(tech_results: List[Dict]) -> str:
     rows = ""
     for i, tr in enumerate(sorted(tech_results, key=lambda t: t.get("score", 0) or 0, reverse=True)):
         sym = tr.get("data", {}).get("symbol", "?")
+        sector = tr.get("data", {}).get("sector", "N/A")
         sc = tr.get("score") or 0
         regime = tr.get("data", {}).get("regime", "?")
         momentum = tr.get("data", {}).get("momentum_regime", "?")
@@ -825,6 +836,7 @@ def _email_tech_table(tech_results: List[Dict]) -> str:
 
         rows += f"""<tr style="background:{bg};">
             <td style="padding:8px; color:#c9d1d9; font-weight:700; font-size:13px;">{sym}</td>
+            <td style="padding:8px; color:#8b949e; font-size:12px;">{sector}</td>
             <td style="padding:8px; text-align:right; color:#8b949e; font-size:12px;">${price:.2f}</td>
             <td style="padding:8px; text-align:center;">
                 <span style="background:{sc_color}22; color:{sc_color}; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600;">{sc:.2f}</span>
@@ -840,6 +852,7 @@ def _email_tech_table(tech_results: List[Dict]) -> str:
     <table style="width:100%; border-collapse:collapse; background:#0d1117; border-radius:6px; overflow:hidden;">
     <tr style="background:#161b22; border-bottom:1px solid #30363d;">
         <th style="padding:8px; text-align:left; color:#8b949e; font-size:11px;">Stock</th>
+        <th style="padding:8px; text-align:left; color:#8b949e; font-size:11px;">Sector</th>
         <th style="padding:8px; text-align:right; color:#8b949e; font-size:11px;">Price</th>
         <th style="padding:8px; text-align:center; color:#8b949e; font-size:11px;">Score</th>
         <th style="padding:8px; text-align:center; color:#8b949e; font-size:11px;">Regime</th>
@@ -864,6 +877,7 @@ def _email_fundamental_section(result: Dict) -> str:
     rows = ""
     for i, fr in enumerate(sorted(fund_results, key=lambda f: f.get("score", 0) or 0, reverse=True)):
         sym = fr.get("data", {}).get("symbol", "?")
+        sector = fr.get("data", {}).get("sector", "N/A")
         sc = fr.get("score") or 0
         d = fr.get("data", {}).get("metrics", {})
         bg = "#161b22" if i % 2 == 0 else "#0d1117"
@@ -881,6 +895,7 @@ def _email_fundamental_section(result: Dict) -> str:
 
         rows += f"""<tr style="background:{bg};">
             <td style="padding:7px 8px; color:#c9d1d9; font-weight:700; font-size:13px;">{sym}</td>
+            <td style="padding:7px 8px; color:#8b949e; font-size:12px;">{sector}</td>
             <td style="padding:7px 4px; text-align:center;">
                 <span style="background:{sc_color}22; color:{sc_color}; padding:2px 8px; border-radius:10px; font-size:12px; font-weight:600;">{sc:.2f}</span>
             </td>
@@ -931,6 +946,7 @@ def _email_fundamental_section(result: Dict) -> str:
     <table style="width:100%; border-collapse:collapse; background:#0d1117; border-radius:6px; overflow:hidden;">
     <tr style="background:#161b22; border-bottom:1px solid #30363d;">
         <th style="padding:8px; text-align:left; color:#8b949e; font-size:11px;">Stock</th>
+        <th style="padding:8px; text-align:left; color:#8b949e; font-size:11px;">Sector</th>
         <th style="padding:8px; text-align:center; color:#8b949e; font-size:11px;">Score</th>
         <th style="padding:8px; text-align:center; color:#8b949e; font-size:11px;">P/E</th>
         <th style="padding:8px; text-align:center; color:#8b949e; font-size:11px;">P/B</th>
