@@ -527,12 +527,14 @@ def _build_fundamental_blocks(result: Dict) -> List[Dict]:
 
 
 def _extract_metric_explanations(fund_results: List[Dict]) -> Dict:
-    """Extract metric_explanations from the first fund result that has them."""
-    for fr in fund_results:
-        explanations = fr.get("data", {}).get("metrics", {}).get("metric_explanations")
-        if explanations:
-            return explanations
-    return {}
+    """Load explanations directly from get_shared_explainer().explanations."""
+    try:
+        from .agents.metric_explainer import get_shared_explainer
+        return get_shared_explainer().explanations
+    except Exception as e:
+        import logging
+        logging.getLogger("nasdaq-formatter").warning(f"Failed to load metric explanations: {e}")
+        return {}
 
 def _format_timestamp(ts: str) -> str:
     """Format ISO timestamp to readable format."""

@@ -294,11 +294,20 @@ class AlpacaOHLCVClient:
                             df_prices.columns = [symbols[0]]
 
             if not df_prices.empty:
-                # Calculate daily average (price-weighted index or stock price)
-                daily_series = df_prices.mean(axis=1)
+                # Normalize each stock to 100 at start to avoid scale/price bias and missing data discontinuities
+                df_normalized = df_prices.copy()
+                for col in df_normalized.columns:
+                    col_series = df_normalized[col].dropna()
+                    if not col_series.empty:
+                        first_valid_val = col_series.iloc[0]
+                        if first_valid_val > 0:
+                            df_normalized[col] = (df_normalized[col] / first_valid_val) * 100
+                
+                # Calculate equally-weighted index series
+                daily_series = df_normalized.mean(axis=1)
                 if not daily_series.empty:
-                    first_val = daily_series.iloc[0]
-                    last_val = daily_series.iloc[-1]
+                    first_val = daily_series.dropna().iloc[0]
+                    last_val = daily_series.dropna().iloc[-1]
                     if first_val > 0 and last_val > 0:
                         # Calculate logarithmic return
                         log_ret = math.log(last_val / first_val) * 100
@@ -407,9 +416,32 @@ class AlpacaOHLCVClient:
                                     df_prices.columns = [symbols[0]]
             
                         if not df_prices.empty:
-                            delta_series = df_prices.mean(axis=1)
+                            # Normalize each stock to 100 at start to avoid scale/price bias
+                            df_normalized = df_prices.copy()
+                            for col in df_normalized.columns:
+                                col_series = df_normalized[col].dropna()
+                                if not col_series.empty:
+                                    first_valid_val = col_series.iloc[0]
+                                    if first_valid_val > 0:
+                                        df_normalized[col] = (df_normalized[col] / first_valid_val) * 100
+                            delta_series = df_normalized.mean(axis=1)
 
-        # Combine cache and delta
+        # Combine cache and delta with smooth re-baselining/chaining to prevent jumps
+        if not cached_series.empty and not delta_series.empty:
+            # Align timezones
+            cached_series.index = pd.to_datetime(cached_series.index)
+            if cached_series.index.tz is not None:
+                cached_series.index = cached_series.index.tz_localize(None)
+            delta_series.index = pd.to_datetime(delta_series.index)
+            if delta_series.index.tz is not None:
+                delta_series.index = delta_series.index.tz_localize(None)
+                
+            last_cached_val = cached_series.iloc[-1]
+            first_delta_val = delta_series.iloc[0]
+            if last_cached_val > 0 and first_delta_val > 0:
+                ratio = last_cached_val / first_delta_val
+                delta_series = delta_series * ratio
+
         combined_series = pd.concat([cached_series, delta_series])
         
         # Trim to requested start and end

@@ -101,7 +101,24 @@ class HierarchicalOrchestrator:
         logger.info("── Tier 3: Portfolio + Risk (Holy Grail Selection) ──")
         # Identify overlaps between stock_universe and uncorrelated_assets
         uncorrelated_symbols = [a["symbol"] for a in correlation_result.data.get("uncorrelated_assets", [])]
-        holy_grail_overlaps = [s for s in stock_universe if s in uncorrelated_symbols]
+        
+        # Load screener data to map stock ticker to its sector
+        from .data_client import NasdaqScreenerClient
+        screener = NasdaqScreenerClient()
+        df_screener = screener.load_data()
+        
+        holy_grail_overlaps = []
+        if not df_screener.empty:
+            symbol_to_sector = df_screener.dropna(subset=["symbol", "sector"])
+            symbol_to_sector = symbol_to_sector.set_index("symbol")["sector"].to_dict()
+            symbol_to_sector = {str(k).strip(): str(v).strip() for k, v in symbol_to_sector.items()}
+            
+            for s in stock_universe:
+                sec = symbol_to_sector.get(s.strip())
+                if sec and sec in uncorrelated_symbols:
+                    holy_grail_overlaps.append(s)
+        else:
+            holy_grail_overlaps = []
 
         duration = (datetime.now() - start_time).total_seconds()
         logger.info(f"✅ Orchestrator complete in {duration:.1f}s")
