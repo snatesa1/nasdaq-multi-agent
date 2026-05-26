@@ -191,8 +191,66 @@ class AlpacaOHLCVClient:
 
         return pd.DataFrame()
 
+    def get_google_sheets_market_data(self, symbols: List[str], start: datetime, end: datetime) -> pd.DataFrame:
+        """Reads 10-year historical market data from the Google Sheet CSV export."""
+        import json
+        try:
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "market_data_config.json")
+            if not os.path.exists(config_path):
+                return pd.DataFrame()
+                
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            spreadsheet_id = config.get("spreadsheet_id")
+            if not spreadsheet_id:
+                return pd.DataFrame()
+                
+            url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv"
+            df_raw = pd.read_csv(url)
+            
+            total_cols = len(df_raw.columns)
+            all_series = {}
+            for i in range(0, total_cols, 2):
+                if i + 1 >= total_cols:
+                    break
+                ticker = str(df_raw.columns[i]).strip()
+                if ticker in symbols:
+                    date_series = df_raw.iloc[1:, i]
+                    price_series = df_raw.iloc[1:, i + 1]
+                    
+                    temp_df = pd.DataFrame({"date": date_series, "close": price_series})
+                    temp_df = temp_df.dropna()
+                    temp_df["date"] = pd.to_datetime(temp_df["date"], errors="coerce")
+                    temp_df["close"] = pd.to_numeric(temp_df["close"], errors="coerce")
+                    temp_df = temp_df.dropna()
+                    
+                    if not temp_df.empty:
+                        series = pd.Series(temp_df["close"].values, index=temp_df["date"])
+                        # Handle date timezone alignment & filtering
+                        if series.index.tz is not None:
+                            series.index = series.index.tz_localize(None)
+                        series = series.loc[pd.to_datetime(start).tz_localize(None):pd.to_datetime(end).tz_localize(None)]
+                        all_series[ticker] = series
+                        
+            if all_series:
+                df_res = pd.DataFrame(all_series)
+                logger.info(f"✅ Loaded {len(df_res)} rows for {len(all_series)} symbols from Google Sheets")
+                return df_res
+        except Exception as e:
+            logger.error(f"❌ Failed to fetch market data from Google Sheet: {e}")
+            
+        return pd.DataFrame()
+
     def get_historical_batch(self, symbols: List[str], start: datetime, end: datetime) -> pd.DataFrame:
-        """Fetch historical daily OHLCV bars from Alpaca for a batch of symbols, with yfinance fallback."""
+        """Fetch historical daily OHLCV bars from Alpaca for a batch of symbols, with Google Sheets and yfinance fallbacks."""
+        # 1. Fallback to Google Sheets if available
+        df_sheet = self.get_google_sheets_market_data(symbols, start, end)
+        if not df_sheet.empty:
+            df_stacked = df_sheet.stack().to_frame(name='close')
+            df_stacked.index.names = ['timestamp', 'symbol']
+            df_stacked = df_stacked.reorder_levels(['symbol', 'timestamp'])
+            return df_stacked
+
         try:
             request = StockBarsRequest(
                 symbol_or_symbols=symbols,
