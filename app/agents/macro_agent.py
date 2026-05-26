@@ -271,18 +271,31 @@ class MacroAgent(BaseAgent):
 
             # ── Step 4: Sliding window comparison ────────────
             sliding_windows = {}
+            cached_tickers = self.alpaca.get_cached_tickers()
+            logger.info(f"📋 Retrieved {len(cached_tickers)} cached tickers from Google Sheet")
             for sector in top_sectors:
-                df_sec = df_clean[df_clean["sector"] == sector]
+                df_sec = df_clean[df_clean["sector"] == sector].copy()
                 if not df_sec.empty:
-                    df_sec = df_sec.sort_values(by="pctchange", ascending=False)
-                    symbols = df_sec["symbol"].tolist()[:15]
-                    sliding_windows[sector] = self.alpaca.get_sliding_window(
-                        symbol_or_symbols=symbols,
-                        window_days=window_days,
-                        years=comparison_years,
-                    )
+                    df_sec = df_sec[df_sec["symbol"].astype(str).str.isalpha()]
+                    df_sec = df_sec[df_sec["symbol"].astype(str).str.len() <= 4]
+                    df_sec["marketCap"] = pd.to_numeric(df_sec["marketCap"], errors="coerce").fillna(0)
+                    df_sec = df_sec[df_sec["marketCap"] > 1_000_000_000]
+                    if cached_tickers:
+                        df_sec = df_sec[df_sec["symbol"].isin(cached_tickers)]
+                        
+                    if not df_sec.empty:
+                        df_sec = df_sec.sort_values(by="marketCap", ascending=False)
+                        symbols = df_sec["symbol"].tolist()[:15]
+                        logger.info(f"📈 Sliding window for sector '{sector}' using symbols: {symbols}")
+                        sliding_windows[sector] = self.alpaca.get_sliding_window(
+                            symbol_or_symbols=symbols,
+                            window_days=window_days,
+                            years=comparison_years,
+                        )
+                    else:
+                        logger.warning(f"⚠️ No matching cached stocks for sector '{sector}' sliding window")
 
-            # ── Step 5: Build stock universe — top 1 stock per major sector by daily momentum ────
+            # ── Step 5: Build stock universe — top 1 stock per major sector by market cap ────
             major_sectors = [
                 "Technology",
                 "Health Care",
@@ -298,20 +311,33 @@ class MacroAgent(BaseAgent):
             ]
             stock_universe = []
             for sector in major_sectors:
-                df_sec_stocks = df_clean[df_clean["sector"] == sector]
+                df_sec_stocks = df_clean[df_clean["sector"] == sector].copy()
                 if not df_sec_stocks.empty:
-                    # Sort by daily percentage change descending
-                    df_sec_stocks = df_sec_stocks.sort_values(by="pctchange", ascending=False)
-                    top_symbol = df_sec_stocks.iloc[0]["symbol"]
-                    stock_universe.append(top_symbol)
-                    logger.info(f"📌 Sector '{sector}' representative: {top_symbol} ({df_sec_stocks.iloc[0]['pctchange']:+.2f}%)")
+                    df_sec_stocks = df_sec_stocks[df_sec_stocks["symbol"].astype(str).str.isalpha()]
+                    df_sec_stocks = df_sec_stocks[df_sec_stocks["symbol"].astype(str).str.len() <= 4]
+                    df_sec_stocks["marketCap"] = pd.to_numeric(df_sec_stocks["marketCap"], errors="coerce").fillna(0)
+                    df_sec_stocks = df_sec_stocks[df_sec_stocks["marketCap"] > 1_000_000_000]
+                    if cached_tickers:
+                        df_sec_stocks = df_sec_stocks[df_sec_stocks["symbol"].isin(cached_tickers)]
+                    
+                    if not df_sec_stocks.empty:
+                        df_sec_stocks = df_sec_stocks.sort_values(by="marketCap", ascending=False)
+                        top_symbol = df_sec_stocks.iloc[0]["symbol"]
+                        stock_universe.append(top_symbol)
+                        logger.info(f"📌 Sector '{sector}' representative: {top_symbol} (Market Cap: ${df_sec_stocks.iloc[0]['marketCap'] / 1e9:.2f}B)")
+                    else:
+                        logger.warning(f"⚠️ No matching cached large-cap stocks found for major sector: {sector}")
                 else:
-                    logger.warning(f"⚠️ No stocks found for major sector: {sector}")
+                    logger.warning(f"⚠️ No stocks found in screener data for major sector: {sector}")
 
             # Guarantee default leaders if empty
             if not stock_universe:
-                logger.warning("⚠️ Stock universe empty — using default NASDAQ-100 leaders")
-                stock_universe = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "COST", "NFLX"]
+                logger.warning("⚠️ Stock universe empty — using default NASDAQ-100 leaders from cached tickers")
+                default_candidates = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOG", "TSLA", "AVGO", "COST", "NFLX"]
+                if cached_tickers:
+                    stock_universe = [t for t in default_candidates if t in cached_tickers]
+                if not stock_universe:
+                    stock_universe = cached_tickers[:10] if cached_tickers else default_candidates
 
         # Sort sectors by score descending for formatting compatibility
         sorted_sectors = sorted(scored_sectors.items(), key=lambda x: x[1], reverse=True)

@@ -147,49 +147,48 @@ class AlpacaOHLCVClient:
         )
 
     def get_ohlcv(self, symbol: str, days: int = 365) -> pd.DataFrame:
-        """Fetch daily OHLCV bars for a single symbol over the last N days, with yfinance fallback."""
+        """Fetch daily OHLCV bars for a single symbol over the last N days directly from the Google Sheet."""
         end = datetime.now()
         start = end - timedelta(days=days)
-        try:
-            request = StockBarsRequest(
-                symbol_or_symbols=[symbol],
-                timeframe=TimeFrame.Day,
-                start=start,
-                end=end,
-            )
-            bars = self.client.get_stock_bars(request)
-            df = bars.df
-            if not df.empty:
-                if isinstance(df.index, pd.MultiIndex):
-                    df = df.xs(symbol, level='symbol')
-                df.columns = [c.lower() for c in df.columns]
-                logger.info(f"✅ Alpaca get_ohlcv: fetched {len(df)} rows for {symbol}")
-                return df
-        except Exception as e:
-            logger.warning(f"⚠️ Alpaca single fetch failed for {symbol}: {e}. Falling back to yfinance...")
-
-        # yfinance fallback
-        try:
-            with suppress_stdout_stderr():
-                df_yf = yf.download(
-                    symbol,
-                    start=start.strftime("%Y-%m-%d"),
-                    end=end.strftime("%Y-%m-%d"),
-                    progress=False
-                )
-            if not df_yf.empty:
-                if isinstance(df_yf.columns, pd.MultiIndex):
-                    df_yf.columns = [c[0].lower() for c in df_yf.columns]
-                else:
-                    df_yf.columns = [str(c).lower() for c in df_yf.columns]
-                rename_map = {'adj close': 'close'}
-                df_yf = df_yf.rename(columns=rename_map)
-                logger.info(f"✅ yfinance get_ohlcv: fetched {len(df_yf)} rows for {symbol}")
-                return df_yf
-        except Exception as yfe:
-            logger.error(f"❌ yfinance fallback also failed for get_ohlcv({symbol}): {yfe}")
-
+        
+        # Fetch from Google Sheets
+        df_sheet = self.get_google_sheets_market_data([symbol], start, end)
+        if not df_sheet.empty and symbol in df_sheet.columns:
+            df_res = df_sheet[[symbol]].rename(columns={symbol: 'close'})
+            logger.info(f"✅ Google Sheets get_ohlcv: fetched {len(df_res)} rows for {symbol}")
+            return df_res
+            
+        logger.warning(f"⚠️ Google Sheets did not have data for {symbol} — returning empty DataFrame")
         return pd.DataFrame()
+
+    def get_cached_tickers(self) -> List[str]:
+        """Reads and returns the list of tickers cached in the Google Sheet."""
+        import json
+        try:
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "market_data_config.json")
+            if not os.path.exists(config_path):
+                return []
+                
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            spreadsheet_id = config.get("spreadsheet_id")
+            if not spreadsheet_id:
+                return []
+                
+            url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv"
+            df_raw = pd.read_csv(url, nrows=1)
+            total_cols = len(df_raw.columns)
+            tickers = []
+            for i in range(0, total_cols, 2):
+                if i + 1 >= total_cols:
+                    break
+                ticker = str(df_raw.columns[i]).strip()
+                if ticker and not ticker.startswith("Unnamed"):
+                    tickers.append(ticker)
+            return tickers
+        except Exception as e:
+            logger.error(f"❌ Failed to get cached tickers: {e}")
+            return []
 
     def get_google_sheets_market_data(self, symbols: List[str], start: datetime, end: datetime) -> pd.DataFrame:
         """Reads 10-year historical market data from the Google Sheet CSV export."""
@@ -226,7 +225,6 @@ class AlpacaOHLCVClient:
                     
                     if not temp_df.empty:
                         series = pd.Series(temp_df["close"].values, index=temp_df["date"])
-                        # Handle date timezone alignment & filtering
                         if series.index.tz is not None:
                             series.index = series.index.tz_localize(None)
                         series = series.loc[pd.to_datetime(start).tz_localize(None):pd.to_datetime(end).tz_localize(None)]
@@ -242,56 +240,15 @@ class AlpacaOHLCVClient:
         return pd.DataFrame()
 
     def get_historical_batch(self, symbols: List[str], start: datetime, end: datetime) -> pd.DataFrame:
-        """Fetch historical daily OHLCV bars from Alpaca for a batch of symbols, with Google Sheets and yfinance fallbacks."""
-        # 1. Fallback to Google Sheets if available
+        """Fetch historical daily OHLCV bars from Google Sheets for a batch of symbols."""
         df_sheet = self.get_google_sheets_market_data(symbols, start, end)
         if not df_sheet.empty:
             df_stacked = df_sheet.stack().to_frame(name='close')
             df_stacked.index.names = ['timestamp', 'symbol']
             df_stacked = df_stacked.reorder_levels(['symbol', 'timestamp'])
             return df_stacked
-
-        try:
-            request = StockBarsRequest(
-                symbol_or_symbols=symbols,
-                timeframe=TimeFrame.Day,
-                start=start,
-                end=end,
-            )
-            bars = self.client.get_stock_bars(request)
-            df = bars.df
-            logger.info(f"✅ Alpaca historical batch: fetched {len(df)} rows for {len(symbols)} symbols")
-            return df
-        except Exception as e:
-            logger.warning(f"⚠️ Alpaca batch fetch failed for {symbols[:5]}...: {e}. Falling back to yfinance...")
-            try:
-                df_yf = yf.download(
-                    symbols,
-                    start=start.strftime("%Y-%m-%d"),
-                    end=end.strftime("%Y-%m-%d"),
-                    progress=False
-                )
-                if not df_yf.empty:
-                    # Extract Close prices
-                    close_cols = [c for c in df_yf.columns if isinstance(c, tuple) and len(c) > 1 and c[0] == 'Close']
-                    if close_cols:
-                        df_close = df_yf[close_cols]
-                        df_close.columns = [c[1] for c in df_close.columns]
-                    elif 'Close' in df_yf.columns:
-                        df_close = df_yf[['Close']]
-                        df_close.columns = [symbols[0]]
-                    else:
-                        df_close = df_yf
-
-                    # Stacking to match Alpaca's MultiIndex [symbol, timestamp] structure
-                    df_stacked = df_close.stack().to_frame(name='close')
-                    df_stacked.index.names = ['timestamp', 'symbol']
-                    df_stacked = df_stacked.reorder_levels(['symbol', 'timestamp'])
-                    logger.info(f"✅ yfinance fallback batch: downloaded and formatted {len(df_stacked)} rows for {len(symbols)} symbols")
-                    return df_stacked
-            except Exception as yfe:
-                logger.error(f"❌ yfinance fallback batch also failed: {yfe}")
-            return pd.DataFrame()
+        logger.warning(f"⚠️ Google Sheets did not have batch data for {symbols[:5]}... — returning empty DataFrame")
+        return pd.DataFrame()
 
     def get_sliding_window(
         self, symbol_or_symbols: Any, window_days: int = 30, years: List[int] = None
@@ -318,38 +275,8 @@ class AlpacaOHLCVClient:
             if end >= today:
                 end = today - timedelta(days=1)
 
-            # Determine whether to use Alpaca or yfinance fallback
-            df_prices = pd.DataFrame()
-            if year < 2016:
-                # yfinance fallback
-                try:
-                    with suppress_stdout_stderr():
-                        df_prices = yf.download(
-                            symbols,
-                            start=start.strftime("%Y-%m-%d"),
-                            end=end.strftime("%Y-%m-%d"),
-                            progress=False
-                        )
-                    if not df_prices.empty:
-                        # Extract Close
-                        close_cols = [c for c in df_prices.columns if isinstance(c, tuple) and len(c) > 1 and c[0] == 'Close']
-                        if close_cols:
-                            df_prices = df_prices[close_cols]
-                            df_prices.columns = [c[1] for c in df_prices.columns]
-                        elif 'Close' in df_prices.columns:
-                            df_prices = df_prices[['Close']]
-                except Exception as e:
-                    logger.warning(f"⚠️ yfinance fallback failed for year {year}: {e}")
-            else:
-                # Alpaca query
-                df_alp = self.get_historical_batch(symbols, start, end)
-                if not df_alp.empty and 'close' in df_alp.columns:
-                    if isinstance(df_alp.index, pd.MultiIndex):
-                        df_prices = df_alp['close'].unstack(level='symbol')
-                    else:
-                        df_prices = df_alp[['close']]
-                        if not is_list:
-                            df_prices.columns = [symbols[0]]
+            # Fetch from Google Sheets exclusively
+            df_prices = self.get_google_sheets_market_data(symbols, start, end)
 
             if not df_prices.empty:
                 # Normalize each stock to 100 at start to avoid scale/price bias and missing data discontinuities
@@ -454,27 +381,13 @@ class AlpacaOHLCVClient:
                     symbols = df_sec["symbol"].tolist()[:top_n]
                     if symbols:
                         df_prices = pd.DataFrame()
-                        if delta_start.year < 2016:
-                            try:
-                                with suppress_stdout_stderr():
-                                    data = yf.download(symbols, start=delta_start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), progress=False)
-                                if not data.empty:
-                                    close_cols = [c for c in data.columns if isinstance(c, tuple) and len(c) > 1 and c[0] == 'Close']
-                                    if close_cols:
-                                        df_prices = data[close_cols]
-                                        df_prices.columns = [c[1] for c in df_prices.columns]
-                                    elif 'Close' in data.columns:
-                                        df_prices = data[['Close']]
-                            except Exception as e:
-                                logger.error(f"yfinance fallback batch fetch failed for sector {sector}: {e}")
-                        else:
-                            data = self.get_historical_batch(symbols, delta_start, end)
-                            if not data.empty and 'close' in data.columns:
-                                if isinstance(data.index, pd.MultiIndex):
-                                    df_prices = data['close'].unstack(level='symbol')
-                                else:
-                                    df_prices = data[['close']]
-                                    df_prices.columns = [symbols[0]]
+                        data = self.get_historical_batch(symbols, delta_start, end)
+                        if not data.empty and 'close' in data.columns:
+                            if isinstance(data.index, pd.MultiIndex):
+                                df_prices = data['close'].unstack(level='symbol')
+                            else:
+                                df_prices = data[['close']]
+                                df_prices.columns = [symbols[0]]
             
                         if not df_prices.empty:
                             # Normalize each stock to 100 at start to avoid scale/price bias
