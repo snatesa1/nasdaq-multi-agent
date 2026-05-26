@@ -322,12 +322,12 @@ class AlpacaOHLCVClient:
         return results
 
     def get_sector_index_series(
-        self, sector: str, start: datetime, end: datetime, top_n: int = 10
+        self, sector: str, start: datetime, end: datetime, top_n: int = 10, selection_criteria: str = "momentum"
     ) -> pd.Series:
         """
         Constructs a price-weighted index daily series for a sector over a date range.
         Uses static cache from data/historical_cache.parquet for historical data,
-        and fetches delta for recent days dynamically using top momentum stocks.
+        and fetches delta for recent days dynamically using top momentum or market cap stocks.
         """
         today = datetime.now()
         if end >= today:
@@ -383,12 +383,15 @@ class AlpacaOHLCVClient:
                         df_sec["pctchange"] = pd.to_numeric(df_sec["pctchange"], errors="coerce")
                         df_sec = df_sec.dropna(subset=["pctchange"])
                         
-                        # TOP MOMENTUM: Select > 10%, otherwise top 10
-                        df_momentum = df_sec[df_sec["pctchange"] > 10.0]
-                        if len(df_momentum) >= top_n:
-                            df_sec = df_momentum.sort_values(by="pctchange", ascending=False)
+                        if selection_criteria == "market_cap":
+                            df_sec = df_sec.sort_values(by="marketCap", ascending=False)
                         else:
-                            df_sec = df_sec.sort_values(by="pctchange", ascending=False)
+                            # TOP MOMENTUM: Select > 10%, otherwise top 10
+                            df_momentum = df_sec[df_sec["pctchange"] > 10.0]
+                            if len(df_momentum) >= top_n:
+                                df_sec = df_momentum.sort_values(by="pctchange", ascending=False)
+                            else:
+                                df_sec = df_sec.sort_values(by="pctchange", ascending=False)
             
                     symbols = df_sec["symbol"].tolist()[:top_n]
                     if symbols:
