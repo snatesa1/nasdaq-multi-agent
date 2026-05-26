@@ -23,10 +23,25 @@ SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapi
 def get_google_service(service_name, version):
     """Authenticate and return the Google API service client."""
     creds = None
-    token_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "token.json")
-    client_secret_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "client_secret.json")
+    proj_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    workspace_root = os.path.dirname(proj_root)
     
-    if os.path.exists(token_path):
+    token_path = None
+    client_secret_path = None
+    
+    # Check token.json
+    for path in [os.path.join(proj_root, "token.json"), os.path.join(workspace_root, "token.json")]:
+        if os.path.exists(path):
+            token_path = path
+            break
+            
+    # Check client_secret.json
+    for path in [os.path.join(proj_root, "client_secret.json"), os.path.join(workspace_root, "client_secret.json")]:
+        if os.path.exists(path):
+            client_secret_path = path
+            break
+            
+    if token_path:
         try:
             creds = Credentials.from_authorized_user_file(token_path, SCOPES)
         except Exception:
@@ -45,10 +60,12 @@ def get_google_service(service_name, version):
                 creds = None
                 
     if not creds or not creds.valid:
-        if os.path.exists(client_secret_path):
+        if client_secret_path:
             flow = InstalledAppFlow.from_client_secrets_file(client_secret_path, SCOPES)
             creds = flow.run_local_server(port=0)
-            with open(token_path, "w") as token_file:
+            # Save token to workspace root or project root
+            save_path = os.path.join(workspace_root, "token.json")
+            with open(save_path, "w") as token_file:
                 token_file.write(creds.to_json())
         else:
             raise Exception("No Google API credentials found (missing client_secret.json / token.json and ADC).")
