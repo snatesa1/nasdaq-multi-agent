@@ -1,0 +1,13 @@
+.git
+.github
+.env
+.gitignore
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/*.pyd
+.pytest_cache
+test_env/
+data/
+*.html
+*.json

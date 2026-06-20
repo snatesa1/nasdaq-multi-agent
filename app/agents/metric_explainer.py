@@ -42,15 +42,56 @@ class VertexGeminiProvider(LLMProvider):
             self._model_name = settings.VERTEX_MODEL
 
     def generate(self, prompt: str) -> str:
+        from ..config import settings
+        api_key = settings.GEMINI_API_KEY
+        if api_key:
+            try:
+                import requests
+                # Invoke the free Gemini API via Google AI Studio
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:generateContent"
+                headers = {
+                    "Content-Type": "application/json",
+                    "X-goog-api-key": api_key
+                }
+                data = {
+                    "contents": [{"parts": [{"text": prompt}]}]
+                }
+                logger.info(f"Calling free Gemini API via Google AI Studio for model: {self._model_name}")
+                response = requests.post(url, headers=headers, json=data, timeout=30)
+                response.raise_for_status()
+                res_json = response.json()
+                return res_json["candidates"][0]["content"]["parts"][0]["text"]
+            except Exception as e:
+                logger.warning(f"⚠️ Free Gemini API call failed: {e}. Falling back to Vertex AI.")
+
         import vertexai
         from vertexai.generative_models import GenerativeModel
-        from ..config import settings
 
         # Explicitly pass project_id to avoid calling Cloud Resource Manager API
         vertexai.init(project=settings.PROJECT_ID)
         model = GenerativeModel(self._model_name)
         response = model.generate_content(prompt)
         return response.text
+
+
+# ═══════════════════════════════════════════════════════════
+#  Process-level singleton — ONE LLM call per process lifetime
+# ═══════════════════════════════════════════════════════════
+
+_EXPLAINER_SINGLETON: "MetricExplainer | None" = None
+
+
+def get_shared_explainer() -> "MetricExplainer":
+    """
+    Returns the process-level MetricExplainer singleton.
+    Ensures exactly ONE Gemini call is made per Cloud Run instance lifecycle,
+    regardless of how many stocks are analyzed in parallel.
+    """
+    global _EXPLAINER_SINGLETON
+    if _EXPLAINER_SINGLETON is None:
+        _EXPLAINER_SINGLETON = MetricExplainer()
+        logger.info("✅ MetricExplainer singleton created (one-time LLM call)")
+    return _EXPLAINER_SINGLETON
 
 
 # ═══════════════════════════════════════════════════════════

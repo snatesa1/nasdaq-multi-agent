@@ -41,16 +41,19 @@ class Settings:
 
     # ── Secret Manager helper ────────────────────────────
     def _get_secret(self, secret_id: str) -> str:
-        """Fetch secret from GCP Secret Manager, fallback to env var."""
+        """Fetch secret from env var first, falling back to GCP Secret Manager."""
+        val = os.getenv(secret_id, "")
+        if val:
+            return val
         try:
             from google.cloud import secretmanager
             client = secretmanager.SecretManagerServiceClient()
             name = f"projects/{self.PROJECT_ID}/secrets/{secret_id}/versions/latest"
             response = client.access_secret_version(request={"name": name})
-            return response.payload.data.decode("UTF-8")
+            return response.payload.data.decode("UTF-8").strip()
         except Exception as e:
-            logger.warning(f"⚠️ Secret '{secret_id}' not in Secret Manager: {e}")
-            return os.getenv(secret_id, "")
+            logger.warning(f"⚠️ Secret '{secret_id}' not in Secret Manager or env: {e}")
+            return ""
 
     # ── Alpaca (OHLCV price data) ────────────────────────
     @cached_property
@@ -101,10 +104,16 @@ class Settings:
     def EMAIL_RECIPIENT(self) -> str:
         return self._get_secret("EMAIL_RECIPIENT")
 
-    # ── Vertex AI ────────────────────────────────────────
+    # ── Vertex AI ────────────────────────────────────────────────
     @cached_property
     def VERTEX_MODEL(self) -> str:
-        return os.getenv("VERTEX_MODEL", "gemini-1.5-flash")
+        # gemini-2.5-flash: active production model with higher quota/stability
+        # Override via VERTEX_MODEL env var to use a different model.
+        return os.getenv("VERTEX_MODEL", "gemini-2.5-flash")
+
+    @cached_property
+    def GEMINI_API_KEY(self) -> str:
+        return self._get_secret("GEMINI_API_KEY")
 
 
 # Singleton

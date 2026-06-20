@@ -147,93 +147,108 @@ class AlpacaOHLCVClient:
         )
 
     def get_ohlcv(self, symbol: str, days: int = 365) -> pd.DataFrame:
-        """Fetch daily OHLCV bars for a single symbol over the last N days, with yfinance fallback."""
+        """Fetch daily OHLCV bars for a single symbol over the last N days directly from the Google Sheet."""
         end = datetime.now()
         start = end - timedelta(days=days)
+        
+        # Fetch from Google Sheets
+        df_sheet = self.get_google_sheets_market_data([symbol], start, end)
+        if not df_sheet.empty and symbol in df_sheet.columns:
+            df_res = df_sheet[[symbol]].rename(columns={symbol: 'close'})
+            logger.info(f"✅ Google Sheets get_ohlcv: fetched {len(df_res)} rows for {symbol}")
+            return df_res
+            
+        logger.warning(f"⚠️ Google Sheets did not have data for {symbol} — returning empty DataFrame")
+        return pd.DataFrame()
+
+    def get_cached_tickers(self) -> List[str]:
+        """Reads and returns the list of tickers cached in the Google Sheet."""
+        import json
         try:
-            request = StockBarsRequest(
-                symbol_or_symbols=[symbol],
-                timeframe=TimeFrame.Day,
-                start=start,
-                end=end,
-            )
-            bars = self.client.get_stock_bars(request)
-            df = bars.df
-            if not df.empty:
-                if isinstance(df.index, pd.MultiIndex):
-                    df = df.xs(symbol, level='symbol')
-                df.columns = [c.lower() for c in df.columns]
-                logger.info(f"✅ Alpaca get_ohlcv: fetched {len(df)} rows for {symbol}")
-                return df
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "market_data_config.json")
+            if not os.path.exists(config_path):
+                return []
+                
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            spreadsheet_id = config.get("spreadsheet_id")
+            if not spreadsheet_id:
+                return []
+                
+            url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv"
+            df_raw = pd.read_csv(url, nrows=1)
+            total_cols = len(df_raw.columns)
+            tickers = []
+            for i in range(0, total_cols, 2):
+                if i + 1 >= total_cols:
+                    break
+                ticker = str(df_raw.columns[i]).strip()
+                if ticker and not ticker.startswith("Unnamed"):
+                    tickers.append(ticker)
+            return tickers
         except Exception as e:
-            logger.warning(f"⚠️ Alpaca single fetch failed for {symbol}: {e}. Falling back to yfinance...")
+            logger.error(f"❌ Failed to get cached tickers: {e}")
+            return []
 
-        # yfinance fallback
+    def get_google_sheets_market_data(self, symbols: List[str], start: datetime, end: datetime) -> pd.DataFrame:
+        """Reads 10-year historical market data from the Google Sheet CSV export."""
+        import json
         try:
-            with suppress_stdout_stderr():
-                df_yf = yf.download(
-                    symbol,
-                    start=start.strftime("%Y-%m-%d"),
-                    end=end.strftime("%Y-%m-%d"),
-                    progress=False
-                )
-            if not df_yf.empty:
-                if isinstance(df_yf.columns, pd.MultiIndex):
-                    df_yf.columns = [c[0].lower() for c in df_yf.columns]
-                else:
-                    df_yf.columns = [str(c).lower() for c in df_yf.columns]
-                rename_map = {'adj close': 'close'}
-                df_yf = df_yf.rename(columns=rename_map)
-                logger.info(f"✅ yfinance get_ohlcv: fetched {len(df_yf)} rows for {symbol}")
-                return df_yf
-        except Exception as yfe:
-            logger.error(f"❌ yfinance fallback also failed for get_ohlcv({symbol}): {yfe}")
-
+            config_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "market_data_config.json")
+            if not os.path.exists(config_path):
+                return pd.DataFrame()
+                
+            with open(config_path, "r") as f:
+                config = json.load(f)
+            spreadsheet_id = config.get("spreadsheet_id")
+            if not spreadsheet_id:
+                return pd.DataFrame()
+                
+            url = f"https://docs.google.com/spreadsheets/d/{spreadsheet_id}/export?format=csv"
+            df_raw = pd.read_csv(url)
+            
+            total_cols = len(df_raw.columns)
+            all_series = {}
+            for i in range(0, total_cols, 2):
+                if i + 1 >= total_cols:
+                    break
+                ticker = str(df_raw.columns[i]).strip()
+                if ticker in symbols:
+                    date_series = df_raw.iloc[1:, i]
+                    price_series = df_raw.iloc[1:, i + 1]
+                    
+                    temp_df = pd.DataFrame({"date": date_series, "close": price_series})
+                    temp_df = temp_df.dropna()
+                    temp_df["date"] = pd.to_datetime(temp_df["date"], errors="coerce")
+                    temp_df["close"] = pd.to_numeric(temp_df["close"], errors="coerce")
+                    temp_df = temp_df.dropna()
+                    
+                    if not temp_df.empty:
+                        series = pd.Series(temp_df["close"].values, index=temp_df["date"])
+                        if series.index.tz is not None:
+                            series.index = series.index.tz_localize(None)
+                        series = series.loc[pd.to_datetime(start).tz_localize(None):pd.to_datetime(end).tz_localize(None)]
+                        all_series[ticker] = series
+                        
+            if all_series:
+                df_res = pd.DataFrame(all_series)
+                logger.info(f"✅ Loaded {len(df_res)} rows for {len(all_series)} symbols from Google Sheets")
+                return df_res
+        except Exception as e:
+            logger.error(f"❌ Failed to fetch market data from Google Sheet: {e}")
+            
         return pd.DataFrame()
 
     def get_historical_batch(self, symbols: List[str], start: datetime, end: datetime) -> pd.DataFrame:
-        """Fetch historical daily OHLCV bars from Alpaca for a batch of symbols, with yfinance fallback."""
-        try:
-            request = StockBarsRequest(
-                symbol_or_symbols=symbols,
-                timeframe=TimeFrame.Day,
-                start=start,
-                end=end,
-            )
-            bars = self.client.get_stock_bars(request)
-            df = bars.df
-            logger.info(f"✅ Alpaca historical batch: fetched {len(df)} rows for {len(symbols)} symbols")
-            return df
-        except Exception as e:
-            logger.warning(f"⚠️ Alpaca batch fetch failed for {symbols[:5]}...: {e}. Falling back to yfinance...")
-            try:
-                df_yf = yf.download(
-                    symbols,
-                    start=start.strftime("%Y-%m-%d"),
-                    end=end.strftime("%Y-%m-%d"),
-                    progress=False
-                )
-                if not df_yf.empty:
-                    # Extract Close prices
-                    close_cols = [c for c in df_yf.columns if isinstance(c, tuple) and len(c) > 1 and c[0] == 'Close']
-                    if close_cols:
-                        df_close = df_yf[close_cols]
-                        df_close.columns = [c[1] for c in df_close.columns]
-                    elif 'Close' in df_yf.columns:
-                        df_close = df_yf[['Close']]
-                        df_close.columns = [symbols[0]]
-                    else:
-                        df_close = df_yf
-
-                    # Stacking to match Alpaca's MultiIndex [symbol, timestamp] structure
-                    df_stacked = df_close.stack().to_frame(name='close')
-                    df_stacked.index.names = ['timestamp', 'symbol']
-                    df_stacked = df_stacked.reorder_levels(['symbol', 'timestamp'])
-                    logger.info(f"✅ yfinance fallback batch: downloaded and formatted {len(df_stacked)} rows for {len(symbols)} symbols")
-                    return df_stacked
-            except Exception as yfe:
-                logger.error(f"❌ yfinance fallback batch also failed: {yfe}")
-            return pd.DataFrame()
+        """Fetch historical daily OHLCV bars from Google Sheets for a batch of symbols."""
+        df_sheet = self.get_google_sheets_market_data(symbols, start, end)
+        if not df_sheet.empty:
+            df_stacked = df_sheet.stack().to_frame(name='close')
+            df_stacked.index.names = ['timestamp', 'symbol']
+            df_stacked = df_stacked.reorder_levels(['symbol', 'timestamp'])
+            return df_stacked
+        logger.warning(f"⚠️ Google Sheets did not have batch data for {symbols[:5]}... — returning empty DataFrame")
+        return pd.DataFrame()
 
     def get_sliding_window(
         self, symbol_or_symbols: Any, window_days: int = 30, years: List[int] = None
@@ -260,45 +275,24 @@ class AlpacaOHLCVClient:
             if end >= today:
                 end = today - timedelta(days=1)
 
-            # Determine whether to use Alpaca or yfinance fallback
-            df_prices = pd.DataFrame()
-            if year < 2016:
-                # yfinance fallback
-                try:
-                    with suppress_stdout_stderr():
-                        df_prices = yf.download(
-                            symbols,
-                            start=start.strftime("%Y-%m-%d"),
-                            end=end.strftime("%Y-%m-%d"),
-                            progress=False
-                        )
-                    if not df_prices.empty:
-                        # Extract Close
-                        close_cols = [c for c in df_prices.columns if isinstance(c, tuple) and len(c) > 1 and c[0] == 'Close']
-                        if close_cols:
-                            df_prices = df_prices[close_cols]
-                            df_prices.columns = [c[1] for c in df_prices.columns]
-                        elif 'Close' in df_prices.columns:
-                            df_prices = df_prices[['Close']]
-                except Exception as e:
-                    logger.warning(f"⚠️ yfinance fallback failed for year {year}: {e}")
-            else:
-                # Alpaca query
-                df_alp = self.get_historical_batch(symbols, start, end)
-                if not df_alp.empty and 'close' in df_alp.columns:
-                    if isinstance(df_alp.index, pd.MultiIndex):
-                        df_prices = df_alp['close'].unstack(level='symbol')
-                    else:
-                        df_prices = df_alp[['close']]
-                        if not is_list:
-                            df_prices.columns = [symbols[0]]
+            # Fetch from Google Sheets exclusively
+            df_prices = self.get_google_sheets_market_data(symbols, start, end)
 
             if not df_prices.empty:
-                # Calculate daily average (price-weighted index or stock price)
-                daily_series = df_prices.mean(axis=1)
+                # Normalize each stock to 100 at start to avoid scale/price bias and missing data discontinuities
+                df_normalized = df_prices.copy()
+                for col in df_normalized.columns:
+                    col_series = df_normalized[col].dropna()
+                    if not col_series.empty:
+                        first_valid_val = col_series.iloc[0]
+                        if first_valid_val > 0:
+                            df_normalized[col] = (df_normalized[col] / first_valid_val) * 100
+                
+                # Calculate equally-weighted index series
+                daily_series = df_normalized.mean(axis=1)
                 if not daily_series.empty:
-                    first_val = daily_series.iloc[0]
-                    last_val = daily_series.iloc[-1]
+                    first_val = daily_series.dropna().iloc[0]
+                    last_val = daily_series.dropna().iloc[-1]
                     if first_val > 0 and last_val > 0:
                         # Calculate logarithmic return
                         log_ret = math.log(last_val / first_val) * 100
@@ -313,12 +307,12 @@ class AlpacaOHLCVClient:
         return results
 
     def get_sector_index_series(
-        self, sector: str, start: datetime, end: datetime, top_n: int = 10
+        self, sector: str, start: datetime, end: datetime, top_n: int = 10, selection_criteria: str = "momentum"
     ) -> pd.Series:
         """
         Constructs a price-weighted index daily series for a sector over a date range.
         Uses static cache from data/historical_cache.parquet for historical data,
-        and fetches delta for recent days dynamically using top momentum stocks.
+        and fetches delta for recent days dynamically using top momentum or market cap stocks.
         """
         today = datetime.now()
         if end >= today:
@@ -374,42 +368,54 @@ class AlpacaOHLCVClient:
                         df_sec["pctchange"] = pd.to_numeric(df_sec["pctchange"], errors="coerce")
                         df_sec = df_sec.dropna(subset=["pctchange"])
                         
-                        # TOP MOMENTUM: Select > 10%, otherwise top 10
-                        df_momentum = df_sec[df_sec["pctchange"] > 10.0]
-                        if len(df_momentum) >= top_n:
-                            df_sec = df_momentum.sort_values(by="pctchange", ascending=False)
+                        if selection_criteria == "market_cap":
+                            df_sec = df_sec.sort_values(by="marketCap", ascending=False)
                         else:
-                            df_sec = df_sec.sort_values(by="pctchange", ascending=False)
+                            # TOP MOMENTUM: Select > 10%, otherwise top 10
+                            df_momentum = df_sec[df_sec["pctchange"] > 10.0]
+                            if len(df_momentum) >= top_n:
+                                df_sec = df_momentum.sort_values(by="pctchange", ascending=False)
+                            else:
+                                df_sec = df_sec.sort_values(by="pctchange", ascending=False)
             
                     symbols = df_sec["symbol"].tolist()[:top_n]
                     if symbols:
                         df_prices = pd.DataFrame()
-                        if delta_start.year < 2016:
-                            try:
-                                with suppress_stdout_stderr():
-                                    data = yf.download(symbols, start=delta_start.strftime("%Y-%m-%d"), end=end.strftime("%Y-%m-%d"), progress=False)
-                                if not data.empty:
-                                    close_cols = [c for c in data.columns if isinstance(c, tuple) and len(c) > 1 and c[0] == 'Close']
-                                    if close_cols:
-                                        df_prices = data[close_cols]
-                                        df_prices.columns = [c[1] for c in df_prices.columns]
-                                    elif 'Close' in data.columns:
-                                        df_prices = data[['Close']]
-                            except Exception as e:
-                                logger.error(f"yfinance fallback batch fetch failed for sector {sector}: {e}")
-                        else:
-                            data = self.get_historical_batch(symbols, delta_start, end)
-                            if not data.empty and 'close' in data.columns:
-                                if isinstance(data.index, pd.MultiIndex):
-                                    df_prices = data['close'].unstack(level='symbol')
-                                else:
-                                    df_prices = data[['close']]
-                                    df_prices.columns = [symbols[0]]
+                        data = self.get_historical_batch(symbols, delta_start, end)
+                        if not data.empty and 'close' in data.columns:
+                            if isinstance(data.index, pd.MultiIndex):
+                                df_prices = data['close'].unstack(level='symbol')
+                            else:
+                                df_prices = data[['close']]
+                                df_prices.columns = [symbols[0]]
             
                         if not df_prices.empty:
-                            delta_series = df_prices.mean(axis=1)
+                            # Normalize each stock to 100 at start to avoid scale/price bias
+                            df_normalized = df_prices.copy()
+                            for col in df_normalized.columns:
+                                col_series = df_normalized[col].dropna()
+                                if not col_series.empty:
+                                    first_valid_val = col_series.iloc[0]
+                                    if first_valid_val > 0:
+                                        df_normalized[col] = (df_normalized[col] / first_valid_val) * 100
+                            delta_series = df_normalized.mean(axis=1)
 
-        # Combine cache and delta
+        # Combine cache and delta with smooth re-baselining/chaining to prevent jumps
+        if not cached_series.empty and not delta_series.empty:
+            # Align timezones
+            cached_series.index = pd.to_datetime(cached_series.index)
+            if cached_series.index.tz is not None:
+                cached_series.index = cached_series.index.tz_localize(None)
+            delta_series.index = pd.to_datetime(delta_series.index)
+            if delta_series.index.tz is not None:
+                delta_series.index = delta_series.index.tz_localize(None)
+                
+            last_cached_val = cached_series.iloc[-1]
+            first_delta_val = delta_series.iloc[0]
+            if last_cached_val > 0 and first_delta_val > 0:
+                ratio = last_cached_val / first_delta_val
+                delta_series = delta_series * ratio
+
         combined_series = pd.concat([cached_series, delta_series])
         
         # Trim to requested start and end

@@ -58,5 +58,6 @@ create_and_upload_secret "EMAIL_APP_PASSWORD" "$EMAIL_APP_PASSWORD"
 
 # === Vertex AI ===
 create_and_upload_secret "VERTEX_KEY" "$VERTEX_KEY"
+create_and_upload_secret "GEMINI_API_KEY" "$GEMINI_API_KEY"
 
 echo "✅ All secrets processed!"

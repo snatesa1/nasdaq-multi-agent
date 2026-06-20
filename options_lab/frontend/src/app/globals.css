@@ -1,0 +1,89 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #12141a;
+  --foreground: #e4e6eb;
+  --card-bg: rgba(26, 29, 36, 0.7);
+  --card-border: rgba(255, 255, 255, 0.06);
+  --primary: #5ba4b5;      /* soft teal */
+  --primary-hover: #4a91a2;
+  --profit: #7ec8a0;       /* mild sage green */
+  --loss: #dc3545;         /* crimson red */
+  --accent: #d4a853;       /* warm gold */
+  --border-glow: rgba(91, 164, 181, 0.25);
+}
+
+body {
+  color: var(--foreground);
+  background-color: var(--background);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  overflow-x: hidden;
+  background-image: 
+    radial-gradient(at 0% 0%, rgba(91, 164, 181, 0.08) 0px, transparent 50%),
+    radial-gradient(at 50% 0%, rgba(212, 168, 83, 0.04) 0px, transparent 50%),
+    radial-gradient(at 100% 100%, rgba(126, 200, 160, 0.05) 0px, transparent 50%);
+  background-attachment: fixed;
+}
+
+/* Glassmorphism utility card styles */
+.glass-card {
+  background: var(--card-bg);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid var(--card-border);
+  border-radius: 12px;
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+}
+
+.glass-card:hover {
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+}
+
+/* Soft glow effects */
+.glow-primary {
+  box-shadow: 0 0 15px var(--border-glow);
+}
+
+.glow-profit {
+  box-shadow: 0 0 15px rgba(126, 200, 160, 0.15);
+}
+
+.glow-loss {
+  box-shadow: 0 0 15px rgba(220, 53, 69, 0.15);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.1);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Inputs and Forms */
+input, select, textarea {
+  background: rgba(18, 20, 26, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #fff;
+  transition: all 0.2s ease-in-out;
+}
+
+input:focus, select:focus, textarea:focus {
+  border-color: var(--primary);
+  outline: none;
+  box-shadow: 0 0 0 2px var(--border-glow);
+}

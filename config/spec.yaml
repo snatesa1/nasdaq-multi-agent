@@ -30,6 +30,7 @@ pipeline:
         analysis_limit: 600
         target_ref: "SPY"
         correlation_threshold: 0.2
+        selection_criteria: "market_cap"
         defensive_basket:
           - TLT
           - BND

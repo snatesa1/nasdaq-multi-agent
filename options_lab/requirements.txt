@@ -1,0 +1,21 @@
+# ── Core Framework ────────────────────────────────────────────────────────────
+fastapi
+uvicorn[standard]
+pydantic
+python-dotenv
+
+# ── Data & Computation ────────────────────────────────────────────────────────
+numpy
+pandas
+yfinance
+requests
+
+# ── Google Cloud ──────────────────────────────────────────────────────────────
+google-cloud-aiplatform
+google-cloud-secret-manager
+google-cloud-firestore
+google-api-python-client
+google-auth
+
+# ── Authentication ────────────────────────────────────────────────────────────
+# (google-auth handles Firebase token verification — no firebase-admin needed)

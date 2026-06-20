@@ -38,7 +38,7 @@ jobs:
 
       - name: Authenticate to Google Cloud
         id: auth
-        uses: google-github-actions/auth@v2
+        uses: google-github-actions/auth@v3
         with:
           workload_identity_provider: ${{ secrets.WIF_PROVIDER }}
           service_account: ${{ secrets.WIF_SERVICE_ACCOUNT }}
@@ -63,9 +63,30 @@ jobs:
             EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}
             EMAIL_RECIPIENT=${{ secrets.EMAIL_RECIPIENT }}
             VERTEX_MODEL=${{ secrets.VERTEX_MODEL }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
 
       - name: Verify Deployment
         run: |
           echo "✅ Deployment complete to ${{ steps.deploy.outputs.url }}"
           echo "🚀 Manual Trigger: curl -X POST ${{ steps.deploy.outputs.url }}/analyze"
 
+      # ── OptionsLab Deployment ─────────────────────────────────────────────
+      - name: Build and Push OptionsLab (Cloud Build)
+        run: |
+          gcloud builds submit --tag gcr.io/${{ steps.auth.outputs.project_id }}/options-lab ./options_lab
+
+      - name: Deploy OptionsLab to Cloud Run
+        id: deploy_options_lab
+        uses: google-github-actions/deploy-cloudrun@v2
+        with:
+          service: options-lab
+          image: gcr.io/${{ steps.auth.outputs.project_id }}/options-lab
+          region: asia-southeast1
+          env_vars: |
+            GCP_PROJECT_ID=${{ steps.auth.outputs.project_id }}
+            VERTEX_MODEL=gemini-2.5-flash
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+
+      - name: Verify OptionsLab Deployment
+        run: |
+          echo "✅ OptionsLab Deployment complete to ${{ steps.deploy_options_lab.outputs.url }}"

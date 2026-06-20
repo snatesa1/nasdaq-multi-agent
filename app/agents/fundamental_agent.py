@@ -18,7 +18,7 @@ from typing import Dict
 import yfinance as yf
 
 from .base_agent import BaseAgent, AgentResult
-from .metric_explainer import MetricExplainer
+from .metric_explainer import get_shared_explainer
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,8 @@ class FundamentalAgent(BaseAgent):
     """Fundamental quality + value scoring agent using yfinance."""
 
     def __init__(self):
-        self._explainer = MetricExplainer()
+        # Use process-level singleton: ONE Gemini call per Cloud Run instance
+        self._explainer = get_shared_explainer()
 
     @property
     def name(self) -> str:
@@ -134,7 +135,9 @@ class FundamentalAgent(BaseAgent):
             "earnings_growth": earnings_growth,
             "piotroski_score": piotroski_score,
             "altman_z_score": altman_z,
-            "metric_explanations": self._explainer.explanations,
+            # NOTE: metric_explanations intentionally excluded from per-stock payload
+            # to save output tokens. Load once via get_shared_explainer().explanations
+            # at the formatter level if needed for Slack display.
         }
 
     def _estimate_piotroski(self, info: Dict) -> float:

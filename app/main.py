@@ -48,8 +48,12 @@ async def cron_analyze(request: Request, background_tasks: BackgroundTasks):
         return JSONResponse(status_code=403, content={"error": "Forbidden"})
 
     logger.info("⏰ Cron trigger received — starting full analysis")
-    background_tasks.add_task(_run_and_deliver, channel_id=settings.SLACK_CHANNEL_ID)
-    return {"status": "analysis_started", "delivery": "slack"}
+    background_tasks.add_task(
+        _run_and_deliver,
+        channel_id=settings.SLACK_CHANNEL_ID,
+        send_email=True,
+    )
+    return {"status": "analysis_started", "delivery": "slack_and_email"}
 
 
 @app.post("/analyze")

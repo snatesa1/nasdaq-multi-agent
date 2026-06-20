@@ -56,6 +56,13 @@ class TechnicalAgent(BaseAgent):
         # Normalize column names to lowercase
         ohlcv_df.columns = [c.lower() for c in ohlcv_df.columns]
 
+        # Populate missing columns (open, high, low, volume) with fallback values for close-only data sources
+        for col in ["open", "high", "low"]:
+            if col not in ohlcv_df.columns:
+                ohlcv_df[col] = ohlcv_df["close"]
+        if "volume" not in ohlcv_df.columns:
+            ohlcv_df["volume"] = 0
+
         # ── Calculate all indicators ─────────────────────
         indicators = {}
         indicators.update(self._calculate_ema(ohlcv_df))

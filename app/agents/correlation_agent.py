@@ -33,6 +33,7 @@ class CorrelationAgent(BaseAgent):
         rolling_window = kwargs.get("rolling_window", 252) # 1 year rolling window
         correlation_threshold = kwargs.get("correlation_threshold", 0.3) # Slightly relaxed for 90th percentile
         reference_sector = kwargs.get("reference_sector", "Technology")
+        selection_criteria = kwargs.get("selection_criteria", "momentum")
         
         screener = NasdaqScreenerClient()
         alpaca = AlpacaOHLCVClient()
@@ -50,7 +51,7 @@ class CorrelationAgent(BaseAgent):
         sectors = df_universe["sector"].dropna().unique().tolist()
         sectors = [s.strip() for s in sectors if s.strip()]
         logger.info(f"📋 Found {len(sectors)} sectors for Holy Grail index analysis: {sectors}")
-
+ 
         # 2. Fetch daily index series for each sector
         end_date = datetime.now()
         start_date = end_date - timedelta(days=lookback_days)
@@ -59,7 +60,9 @@ class CorrelationAgent(BaseAgent):
         sector_series = {}
         for sector in sectors:
             try:
-                series = alpaca.get_sector_index_series(sector, start_date, end_date)
+                series = alpaca.get_sector_index_series(
+                    sector, start_date, end_date, selection_criteria=selection_criteria
+                )
                 if not series.empty:
                     sector_series[sector] = series
                     logger.info(f"✅ Generated daily index for sector: {sector} ({len(series)} days)")

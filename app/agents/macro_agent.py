@@ -8,6 +8,8 @@ Identifies the hottest industries and selects a stock universe.
 
 import json
 import logging
+import os
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
@@ -56,14 +58,27 @@ class MacroRegimeAnalyzer:
     Fetches the latest macro headlines from FMP, sends them to Gemini,
     and gets back 3-4 historical analog years that match the current
     macro regime (e.g. war, AI bubble, credit crisis).
+
+    Results are cached to a temp file for 12 hours to avoid burning
+    Gemini quota on repeated runs within the same trading day.
     """
+
+    _CACHE_FILE = "/tmp/macro_analog_years_cache.json"
+    _CACHE_TTL_HOURS = 12
 
     def __init__(self):
         self.fmp = FMPClient()
         self.llm = VertexGeminiProvider()
 
     def get_dynamic_years(self) -> List[int]:
-        """Return dynamically-selected analog comparison years."""
+        """Return dynamically-selected analog comparison years (cached 12h)."""
+        # ─ Check cache first ─────────────────────────────────────
+        cached = self._load_cache()
+        if cached:
+            logger.info(f"📦 Analog years from cache (expires in {cached['ttl_remaining']:.1f}h): {cached['years']}")
+            return cached["years"]
+
+        # ─ Cache miss → call Gemini ───────────────────────────────
         try:
             headlines = self._fetch_macro_headlines()
             if not headlines:
@@ -72,17 +87,44 @@ class MacroRegimeAnalyzer:
 
             years = self._ask_gemini_for_analogs(headlines)
             if years:
-                # Always include current year
                 current_year = datetime.now().year
                 if current_year not in years:
                     years.append(current_year)
+                years = sorted(years)
                 logger.info(f"🧠 Gemini selected analog years: {years}")
-                return sorted(years)
+                self._save_cache(years)
+                return years
 
         except Exception as e:
             logger.error(f"❌ MacroRegimeAnalyzer failed: {e}")
 
         return DEFAULT_COMPARISON_YEARS
+
+    def _load_cache(self) -> Optional[Dict]:
+        """Load cached analog years if still within TTL."""
+        try:
+            if not os.path.exists(self._CACHE_FILE):
+                return None
+            with open(self._CACHE_FILE, "r") as f:
+                data = json.load(f)
+            cached_at = data.get("cached_at", 0)
+            age_hours = (time.time() - cached_at) / 3600
+            if age_hours < self._CACHE_TTL_HOURS:
+                data["ttl_remaining"] = self._CACHE_TTL_HOURS - age_hours
+                return data
+            logger.info(f"🗑️ Analog years cache expired ({age_hours:.1f}h old) — refreshing")
+        except Exception as e:
+            logger.warning(f"⚠️ Cache read failed: {e}")
+        return None
+
+    def _save_cache(self, years: List[int]) -> None:
+        """Persist analog years to temp file with timestamp."""
+        try:
+            with open(self._CACHE_FILE, "w") as f:
+                json.dump({"years": years, "cached_at": time.time()}, f)
+            logger.info(f"💾 Analog years cached for {self._CACHE_TTL_HOURS}h: {years}")
+        except Exception as e:
+            logger.warning(f"⚠️ Cache write failed (non-fatal): {e}")
 
     def _fetch_macro_headlines(self) -> List[str]:
         """Fetch top 5 macro headlines from FMP general news."""
@@ -201,7 +243,13 @@ class MacroAgent(BaseAgent):
             logger.info(f"🏆 Top selected macro groups: {top_groups}")
 
             top_sectors = list(dict.fromkeys([g["sector"] for g in top_groups]))
-            logger.info(f"🏆 Unique top sectors: {top_sectors}")
+            
+            # Force Technology, Finance, and Energy to always be included
+            mandatory_sectors = ["Technology", "Finance", "Energy"]
+            for ms in mandatory_sectors:
+                if ms in sector_averages and ms not in top_sectors:
+                    top_sectors.append(ms)
+            logger.info(f"🏆 Unique top sectors (including mandatory): {top_sectors}")
 
             # ── Step 3: Spec-configured comparison years (no dynamic/local overrides) ────
             comparison_years = kwargs.get("comparison_years")
@@ -223,52 +271,73 @@ class MacroAgent(BaseAgent):
 
             # ── Step 4: Sliding window comparison ────────────
             sliding_windows = {}
+            cached_tickers = self.alpaca.get_cached_tickers()
+            logger.info(f"📋 Retrieved {len(cached_tickers)} cached tickers from Google Sheet")
             for sector in top_sectors:
-                df_sec = df_clean[df_clean["sector"] == sector]
+                df_sec = df_clean[df_clean["sector"] == sector].copy()
                 if not df_sec.empty:
-                    df_sec = df_sec.sort_values(by="pctchange", ascending=False)
-                    symbols = df_sec["symbol"].tolist()[:15]
-                    sliding_windows[sector] = self.alpaca.get_sliding_window(
-                        symbol_or_symbols=symbols,
-                        window_days=window_days,
-                        years=comparison_years,
-                    )
+                    df_sec = df_sec[df_sec["symbol"].astype(str).str.isalpha()]
+                    df_sec = df_sec[df_sec["symbol"].astype(str).str.len() <= 4]
+                    df_sec["marketCap"] = pd.to_numeric(df_sec["marketCap"], errors="coerce").fillna(0)
+                    df_sec = df_sec[df_sec["marketCap"] > 1_000_000_000]
+                    if cached_tickers:
+                        df_sec = df_sec[df_sec["symbol"].isin(cached_tickers)]
+                        
+                    if not df_sec.empty:
+                        df_sec = df_sec.sort_values(by="marketCap", ascending=False)
+                        symbols = df_sec["symbol"].tolist()[:15]
+                        logger.info(f"📈 Sliding window for sector '{sector}' using symbols: {symbols}")
+                        sliding_windows[sector] = self.alpaca.get_sliding_window(
+                            symbol_or_symbols=symbols,
+                            window_days=window_days,
+                            years=comparison_years,
+                        )
+                    else:
+                        logger.warning(f"⚠️ No matching cached stocks for sector '{sector}' sliding window")
 
-            # ── Step 5: Build stock universe — top stocks per high-performing group ────
-            fallback_universe_size = kwargs.get("fallback_universe_size", 10)
-            seen = set()
+            # ── Step 5: Build stock universe — top 1 stock per major sector by market cap ────
+            major_sectors = [
+                "Technology",
+                "Health Care",
+                "Finance",
+                "Consumer Discretionary",
+                "Industrials",
+                "Real Estate",
+                "Consumer Staples",
+                "Telecommunications",
+                "Energy",
+                "Utilities",
+                "Basic Materials"
+            ]
             stock_universe = []
-            
-            stocks_per_group = max(2, fallback_universe_size // len(top_groups))
-            for group in top_groups:
-                sec = group["sector"]
-                ind = group["industry"]
-                
-                # Fetch matching stocks
-                group_stocks = df_clean[
-                    (df_clean["sector"] == sec) & (df_clean["industry"] == ind)
-                ].copy()
-                
-                # Sort by marketCap descending to get industry leaders
-                if "marketCap" in group_stocks.columns:
-                    group_stocks = group_stocks.sort_values(by="marketCap", ascending=False)
-                elif "volume" in group_stocks.columns:
-                    group_stocks = group_stocks.sort_values(by="volume", ascending=False)
-                
-                symbols = group_stocks["symbol"].tolist()
-                selected_count = 0
-                for sym in symbols:
-                    if sym not in seen:
-                        seen.add(sym)
-                        stock_universe.append(sym)
-                        selected_count += 1
-                        if selected_count >= stocks_per_group:
-                            break
+            for sector in major_sectors:
+                df_sec_stocks = df_clean[df_clean["sector"] == sector].copy()
+                if not df_sec_stocks.empty:
+                    df_sec_stocks = df_sec_stocks[df_sec_stocks["symbol"].astype(str).str.isalpha()]
+                    df_sec_stocks = df_sec_stocks[df_sec_stocks["symbol"].astype(str).str.len() <= 4]
+                    df_sec_stocks["marketCap"] = pd.to_numeric(df_sec_stocks["marketCap"], errors="coerce").fillna(0)
+                    df_sec_stocks = df_sec_stocks[df_sec_stocks["marketCap"] > 1_000_000_000]
+                    if cached_tickers:
+                        df_sec_stocks = df_sec_stocks[df_sec_stocks["symbol"].isin(cached_tickers)]
+                    
+                    if not df_sec_stocks.empty:
+                        df_sec_stocks = df_sec_stocks.sort_values(by="marketCap", ascending=False)
+                        top_symbol = df_sec_stocks.iloc[0]["symbol"]
+                        stock_universe.append(top_symbol)
+                        logger.info(f"📌 Sector '{sector}' representative: {top_symbol} (Market Cap: ${df_sec_stocks.iloc[0]['marketCap'] / 1e9:.2f}B)")
+                    else:
+                        logger.warning(f"⚠️ No matching cached large-cap stocks found for major sector: {sector}")
+                else:
+                    logger.warning(f"⚠️ No stocks found in screener data for major sector: {sector}")
 
             # Guarantee default leaders if empty
             if not stock_universe:
-                logger.warning("⚠️ Stock universe empty — using default NASDAQ-100 leaders")
-                stock_universe = ["AAPL", "MSFT", "NVDA", "GOOGL", "AMZN", "META", "TSLA", "AVGO", "COST", "NFLX"]
+                logger.warning("⚠️ Stock universe empty — using default NASDAQ-100 leaders from cached tickers")
+                default_candidates = ["AAPL", "MSFT", "NVDA", "AMZN", "META", "GOOG", "TSLA", "AVGO", "COST", "NFLX"]
+                if cached_tickers:
+                    stock_universe = [t for t in default_candidates if t in cached_tickers]
+                if not stock_universe:
+                    stock_universe = cached_tickers[:10] if cached_tickers else default_candidates
 
         # Sort sectors by score descending for formatting compatibility
         sorted_sectors = sorted(scored_sectors.items(), key=lambda x: x[1], reverse=True)
@@ -281,6 +350,7 @@ class MacroAgent(BaseAgent):
             data={
                 "selected_sectors": top_sectors,
                 "sector_scores": scored_sectors,
+                "sector_changes": sector_averages,
                 "stock_universe": stock_universe,
                 "sliding_window_comparison": sliding_windows,
                 "comparison_years": comparison_years,
