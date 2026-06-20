@@ -12,3 +12,9 @@ tests/__pycache__/
 !destroy_app.sh
 !upload_secrets.sh
 !setup_gh_actions_sa.sh
+
+# Exceptions for options_lab
+!options_lab/**/*.json
+!options_lab/**/*.sh
+!options_lab/**/.gitignore
+

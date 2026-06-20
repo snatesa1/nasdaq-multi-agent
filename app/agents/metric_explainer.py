@@ -42,9 +42,30 @@ class VertexGeminiProvider(LLMProvider):
             self._model_name = settings.VERTEX_MODEL
 
     def generate(self, prompt: str) -> str:
+        from ..config import settings
+        api_key = settings.GEMINI_API_KEY
+        if api_key:
+            try:
+                import requests
+                # Invoke the free Gemini API via Google AI Studio
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:generateContent"
+                headers = {
+                    "Content-Type": "application/json",
+                    "X-goog-api-key": api_key
+                }
+                data = {
+                    "contents": [{"parts": [{"text": prompt}]}]
+                }
+                logger.info(f"Calling free Gemini API via Google AI Studio for model: {self._model_name}")
+                response = requests.post(url, headers=headers, json=data, timeout=30)
+                response.raise_for_status()
+                res_json = response.json()
+                return res_json["candidates"][0]["content"]["parts"][0]["text"]
+            except Exception as e:
+                logger.warning(f"⚠️ Free Gemini API call failed: {e}. Falling back to Vertex AI.")
+
         import vertexai
         from vertexai.generative_models import GenerativeModel
-        from ..config import settings
 
         # Explicitly pass project_id to avoid calling Cloud Resource Manager API
         vertexai.init(project=settings.PROJECT_ID)

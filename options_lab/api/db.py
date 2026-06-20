@@ -1,0 +1,390 @@
+"""
+db.py — Unified SQLite database module for OptionsLab.
+
+Refactored from sessions.py to serve as a single entry point for all
+persistent data: tutor sessions, portfolios, and portfolio tickers.
+
+Stores data in /data/optionslab.db inside the container,
+falling back to a local path for development.
+"""
+
+import sqlite3
+import json
+import uuid
+import logging
+import os
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
+
+# ── Database Path ─────────────────────────────────────────────────────────────
+_DATA_DIR = os.environ.get(
+    "DB_DATA_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+)
+_DB_PATH = os.path.join(_DATA_DIR, "optionslab.db")
+
+
+# ── Firestore Initialization (with SQLite fallback) ──────────────────────────
+_USE_FIRESTORE = False
+_firestore_client = None
+
+try:
+    from google.cloud import firestore
+    _firestore_client = firestore.Client()
+    _USE_FIRESTORE = True
+    logger.info("Firestore storage initialized for Socratic tutor sessions.")
+except ImportError:
+    logger.warning("google-cloud-firestore module not found. Falling back to SQLite for sessions.")
+except Exception as e:
+    logger.warning(f"Could not initialize Firestore client: {e}. Falling back to SQLite for sessions.")
+
+
+def _get_conn() -> sqlite3.Connection:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+    conn = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA foreign_keys=ON")
+    return conn
+
+
+def _init_db():
+    """Create all tables if they don't exist."""
+    with _get_conn() as conn:
+        # ── Tutor Sessions ────────────────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                id          TEXT PRIMARY KEY,
+                title       TEXT NOT NULL,
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL,
+                messages    TEXT NOT NULL
+            )
+        """)
+        # ── Portfolios ────────────────────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS portfolios (
+                id          TEXT PRIMARY KEY,
+                name        TEXT NOT NULL,
+                source_url  TEXT,
+                created_at  TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
+            )
+        """)
+        # ── Portfolio Tickers ─────────────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS portfolio_tickers (
+                id            TEXT PRIMARY KEY,
+                portfolio_id  TEXT NOT NULL,
+                symbol        TEXT NOT NULL,
+                name          TEXT,
+                current_price REAL,
+                change        REAL,
+                high          REAL,
+                low           REAL,
+                volume        INTEGER,
+                last_synced   TEXT,
+                FOREIGN KEY (portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE,
+                UNIQUE(portfolio_id, symbol)
+            )
+        """)
+        conn.commit()
+
+
+# Initialise on import
+_init_db()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  TUTOR SESSIONS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def list_sessions() -> List[Dict[str, Any]]:
+    """Return all sessions ordered by last update (newest first), without messages."""
+    if _USE_FIRESTORE and _firestore_client:
+        try:
+            from google.cloud import firestore
+            docs = _firestore_client.collection("tutor_sessions").order_by("updated_at", direction=firestore.Query.DESCENDING).stream()
+            results = []
+            for doc in docs:
+                d = doc.to_dict()
+                d.pop("messages", None)
+                results.append(d)
+            return results
+        except Exception as e:
+            logger.error(f"Firestore list_sessions failed: {e}. Falling back to SQLite.")
+
+    with _get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def create_session(title: str, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+    """Persist a new session and return it."""
+    session_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    if _USE_FIRESTORE and _firestore_client:
+        try:
+            doc_ref = _firestore_client.collection("tutor_sessions").document(session_id)
+            session_data = {
+                "id": session_id,
+                "title": title,
+                "created_at": now,
+                "updated_at": now,
+                "messages": messages
+            }
+            doc_ref.set(session_data)
+            return session_data
+        except Exception as e:
+            logger.error(f"Firestore create_session failed: {e}. Falling back to SQLite.")
+
+    messages_json = json.dumps(messages)
+
+    with _get_conn() as conn:
+        conn.execute(
+            "INSERT INTO sessions (id, title, created_at, updated_at, messages) VALUES (?,?,?,?,?)",
+            (session_id, title, now, now, messages_json)
+        )
+        conn.commit()
+
+    return {
+        "id": session_id,
+        "title": title,
+        "created_at": now,
+        "updated_at": now,
+        "messages": messages
+    }
+
+
+def get_session(session_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch a full session by ID (including messages)."""
+    if _USE_FIRESTORE and _firestore_client:
+        try:
+            doc_ref = _firestore_client.collection("tutor_sessions").document(session_id)
+            doc = doc_ref.get()
+            if doc.exists:
+                return doc.to_dict()
+            return None
+        except Exception as e:
+            logger.error(f"Firestore get_session failed: {e}. Falling back to SQLite.")
+
+    with _get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM sessions WHERE id = ?", (session_id,)
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    data = dict(row)
+    data["messages"] = json.loads(data["messages"])
+    return data
+
+
+def update_session(session_id: str, messages: List[Dict[str, str]], title: Optional[str] = None) -> Optional[Dict[str, Any]]:
+    """Append / overwrite messages for an existing session."""
+    now = datetime.now(timezone.utc).isoformat()
+
+    if _USE_FIRESTORE and _firestore_client:
+        try:
+            doc_ref = _firestore_client.collection("tutor_sessions").document(session_id)
+            update_data = {
+                "messages": messages,
+                "updated_at": now
+            }
+            if title:
+                update_data["title"] = title
+            doc_ref.set(update_data, merge=True)
+            doc = doc_ref.get()
+            if doc.exists:
+                return doc.to_dict()
+            return None
+        except Exception as e:
+            logger.error(f"Firestore update_session failed: {e}. Falling back to SQLite.")
+
+    messages_json = json.dumps(messages)
+
+    with _get_conn() as conn:
+        if title:
+            conn.execute(
+                "UPDATE sessions SET messages=?, updated_at=?, title=? WHERE id=?",
+                (messages_json, now, title, session_id)
+            )
+        else:
+            conn.execute(
+                "UPDATE sessions SET messages=?, updated_at=? WHERE id=?",
+                (messages_json, now, session_id)
+            )
+        conn.commit()
+        row = conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+
+    if row is None:
+        return None
+
+    data = dict(row)
+    data["messages"] = json.loads(data["messages"])
+    return data
+
+
+def delete_session(session_id: str) -> bool:
+    """Delete a session by ID. Returns True if found and deleted."""
+    if _USE_FIRESTORE and _firestore_client:
+        try:
+            doc_ref = _firestore_client.collection("tutor_sessions").document(session_id)
+            doc = doc_ref.get()
+            if doc.exists:
+                doc_ref.delete()
+                return True
+            return False
+        except Exception as e:
+            logger.error(f"Firestore delete_session failed: {e}. Falling back to SQLite.")
+
+    with _get_conn() as conn:
+        cursor = conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+        conn.commit()
+    return cursor.rowcount > 0
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  PORTFOLIOS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def list_portfolios() -> List[Dict[str, Any]]:
+    """Return all portfolios with their tickers and ticker counts."""
+    with _get_conn() as conn:
+        rows = conn.execute("""
+            SELECT id, name, source_url, created_at, updated_at
+            FROM portfolios
+            ORDER BY updated_at DESC
+        """).fetchall()
+        
+        portfolios = []
+        for r in rows:
+            p = dict(r)
+            tickers = conn.execute(
+                "SELECT * FROM portfolio_tickers WHERE portfolio_id=? ORDER BY symbol",
+                (p["id"],)
+            ).fetchall()
+            ticker_list = []
+            for t in tickers:
+                td = dict(t)
+                td["price"] = td.get("current_price", 0.0)
+                ticker_list.append(td)
+            p["tickers"] = ticker_list
+            p["ticker_count"] = len(tickers)
+            portfolios.append(p)
+            
+    return portfolios
+
+
+def create_portfolio(name: str, source_url: Optional[str] = None) -> Dict[str, Any]:
+    """Create a new portfolio."""
+    portfolio_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    with _get_conn() as conn:
+        conn.execute(
+            "INSERT INTO portfolios (id, name, source_url, created_at, updated_at) VALUES (?,?,?,?,?)",
+            (portfolio_id, name, source_url, now, now)
+        )
+        conn.commit()
+
+    return {
+        "id": portfolio_id,
+        "name": name,
+        "source_url": source_url,
+        "created_at": now,
+        "updated_at": now,
+        "ticker_count": 0
+    }
+
+
+def get_portfolio(portfolio_id: str) -> Optional[Dict[str, Any]]:
+    """Get a portfolio with all its tickers."""
+    with _get_conn() as conn:
+        row = conn.execute("SELECT * FROM portfolios WHERE id=?", (portfolio_id,)).fetchone()
+        if row is None:
+            return None
+
+        tickers = conn.execute(
+            "SELECT * FROM portfolio_tickers WHERE portfolio_id=? ORDER BY symbol",
+            (portfolio_id,)
+        ).fetchall()
+
+    data = dict(row)
+    ticker_list = []
+    for t in tickers:
+        td = dict(t)
+        td["price"] = td.get("current_price", 0.0)
+        ticker_list.append(td)
+    data["tickers"] = ticker_list
+    return data
+
+
+def delete_portfolio(portfolio_id: str) -> bool:
+    """Delete a portfolio and all its tickers (cascade)."""
+    with _get_conn() as conn:
+        cursor = conn.execute("DELETE FROM portfolios WHERE id=?", (portfolio_id,))
+        conn.commit()
+    return cursor.rowcount > 0
+
+
+def upsert_portfolio_tickers(
+    portfolio_id: str,
+    tickers: List[Dict[str, Any]]
+) -> List[Dict[str, Any]]:
+    """Insert or update tickers for a portfolio. Returns the final ticker list."""
+    now = datetime.now(timezone.utc).isoformat()
+
+    with _get_conn() as conn:
+        for t in tickers:
+            ticker_id = str(uuid.uuid4())
+            conn.execute("""
+                INSERT INTO portfolio_tickers
+                    (id, portfolio_id, symbol, name, current_price, change, high, low, volume, last_synced)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(portfolio_id, symbol) DO UPDATE SET
+                    name=excluded.name,
+                    current_price=excluded.current_price,
+                    change=excluded.change,
+                    high=excluded.high,
+                    low=excluded.low,
+                    volume=excluded.volume,
+                    last_synced=excluded.last_synced
+            """, (
+                ticker_id,
+                portfolio_id,
+                t.get("symbol", "").upper().strip(),
+                t.get("name"),
+                t.get("current_price"),
+                t.get("change"),
+                t.get("high"),
+                t.get("low"),
+                t.get("volume"),
+                now
+            ))
+
+        # Update portfolio timestamp
+        conn.execute(
+            "UPDATE portfolios SET updated_at=? WHERE id=?",
+            (now, portfolio_id)
+        )
+        conn.commit()
+
+        # Return final list
+        rows = conn.execute(
+            "SELECT * FROM portfolio_tickers WHERE portfolio_id=? ORDER BY symbol",
+            (portfolio_id,)
+        ).fetchall()
+
+    res = []
+    for r in rows:
+        rd = dict(r)
+        rd["price"] = rd.get("current_price", 0.0)
+        res.append(rd)
+    return res
