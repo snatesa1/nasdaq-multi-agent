@@ -32,7 +32,7 @@ cp ../data/nasdaq_screener.csv api/data/ 2>/dev/null || cp ../../data/nasdaq_scr
 
 # 2. Build and Push Image using Cloud Build
 echo "🏗️ Building container image via GCP Cloud Build..."
-gcloud builds submit --tag gcr.io/$PROJECT_ID/$SERVICE_NAME .
+gcloud builds submit --tag gcr.io/$PROJECT_ID/$SERVICE_NAME . --timeout=20m --machine-type=e2-highcpu-8
 
 # 3. Deploy to Cloud Run
 echo "☁️ Deploying to Cloud Run..."
