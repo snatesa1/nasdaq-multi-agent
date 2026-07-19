@@ -64,6 +64,7 @@ jobs:
             EMAIL_RECIPIENT=${{ secrets.EMAIL_RECIPIENT }}
             VERTEX_MODEL=${{ secrets.VERTEX_MODEL }}
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            DISABLE_VERTEX_FALLBACK=True
 
       - name: Verify Deployment
         run: |
@@ -84,8 +85,9 @@ jobs:
           region: asia-southeast1
           env_vars: |
             GCP_PROJECT_ID=${{ steps.auth.outputs.project_id }}
-            VERTEX_MODEL=gemini-2.5-flash
+            VERTEX_MODEL=gemini-flash-latest
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            DISABLE_VERTEX_FALLBACK=True
 
       - name: Verify OptionsLab Deployment
         run: |

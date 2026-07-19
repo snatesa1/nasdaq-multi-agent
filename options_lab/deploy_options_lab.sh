@@ -1,6 +1,16 @@
 #!/bin/bash
 # deploy_options_lab.sh: Build, push, and deploy OptionsLab v2 to GCP Cloud Run
 
+# Load .env
+if [ -f ../.env ]; then
+    while IFS= read -r line || [ -n "$line" ]; do
+        clean_line=$(echo "$line" | tr -d '\r')
+        [[ $clean_line =~ ^#.* ]] && continue
+        [[ -z $clean_line ]] && continue
+        export "$clean_line"
+    done < ../.env
+fi
+
 PROJECT_ID="optimal-aurora-495912-n0"
 SERVICE_NAME="options-lab"
 REGION="asia-southeast1"
@@ -47,7 +57,7 @@ gcloud run deploy $SERVICE_NAME \
   --min-instances 0 \
   --max-instances 3 \
   --cpu-throttling \
-  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GCP_PROJECT_ID=$PROJECT_ID,VERTEX_MODEL=gemini-2.5-flash,FIREBASE_PROJECT_ID=$PROJECT_ID" \
+  --set-env-vars="GOOGLE_CLOUD_PROJECT=$PROJECT_ID,GCP_PROJECT_ID=$PROJECT_ID,VERTEX_MODEL=gemini-flash-latest,FIREBASE_PROJECT_ID=$PROJECT_ID,GEMINI_API_KEY=${GEMINI_API_KEY},DISABLE_VERTEX_FALLBACK=True" \
   --service-account $SA_EMAIL
 
 # 4. Get Service URL

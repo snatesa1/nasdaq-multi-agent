@@ -46,11 +46,15 @@ class Settings:
     # ── AI Model ──────────────────────────────────────────────────────────────
     @cached_property
     def VERTEX_MODEL(self) -> str:
-        return os.getenv("VERTEX_MODEL", "gemini-2.5-flash")
+        return os.getenv("VERTEX_MODEL", "gemini-flash-latest")
 
     @cached_property
     def GEMINI_API_KEY(self) -> str:
         return self._get_secret("GEMINI_API_KEY")
+
+    @cached_property
+    def DISABLE_VERTEX_FALLBACK(self) -> bool:
+        return os.getenv("DISABLE_VERTEX_FALLBACK", "false").lower() == "true"
 
     # ── Market Data API Keys ──────────────────────────────────────────────────
     @cached_property
