@@ -74,7 +74,7 @@ jobs:
       # ── OptionsLab Deployment ─────────────────────────────────────────────
       - name: Build and Push OptionsLab (Cloud Build)
         run: |
-          gcloud builds submit --tag gcr.io/${{ steps.auth.outputs.project_id }}/options-lab ./options_lab --timeout=20m --machine-type=e2-highcpu-8 --suppress-logs
+          gcloud builds submit ./options_lab --config options_lab/cloudbuild.yaml --substitutions=_IMAGE_TAG=gcr.io/${{ steps.auth.outputs.project_id }}/options-lab
 
       - name: Deploy OptionsLab to Cloud Run
         id: deploy_options_lab
