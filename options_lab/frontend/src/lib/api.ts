@@ -115,4 +115,11 @@ export const optionsApi = {
 
   // ── Multi-Agent ───────────────────────────────────────────────────────────
   runAnalysis: (tickers: string[]) => apiRequest('/multi-agent/analyze', 'POST', { tickers }),
+
+  // ── Earnings Plays ────────────────────────────────────────────────────────
+  getUpcomingEarnings: () => apiRequest('/api/earnings/upcoming'),
+  scanEarnings: (params: { low_threshold_pct: number; min_open_interest: number }) =>
+    apiRequest('/api/earnings/scan', 'POST', params),
+  getEarningsVolatility: (symbol: string) => apiRequest(`/api/earnings/volatility/${symbol}`),
 };
+

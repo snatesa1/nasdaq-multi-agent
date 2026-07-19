@@ -19,3 +19,8 @@ google-auth
 
 # ── Authentication ────────────────────────────────────────────────────────────
 # (google-auth handles Firebase token verification — no firebase-admin needed)
+
+# ── Scraping & Parsers ─────────────────────────────────────────────────────────
+beautifulsoup4
+lxml
+
