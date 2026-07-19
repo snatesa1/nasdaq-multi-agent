@@ -62,7 +62,7 @@ jobs:
             SLACK_CHANNEL_ID=${{ secrets.SLACK_CHANNEL_ID }}
             EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}
             EMAIL_RECIPIENT=${{ secrets.EMAIL_RECIPIENT }}
-            VERTEX_MODEL=${{ secrets.VERTEX_MODEL }}
+            VERTEX_MODEL=gemini-flash-latest
             GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
             DISABLE_VERTEX_FALLBACK=True
 
