@@ -4,7 +4,7 @@ import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { optionsApi } from '@/lib/api';
 import {
   BookOpen, Send, Sparkles, Loader, Save, Clock, Trash2,
-  FolderOpen, PlusCircle, Check, ChevronRight, X
+  FolderOpen, PlusCircle, Check, ChevronRight, ChevronDown, X
 } from 'lucide-react';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
@@ -18,6 +18,7 @@ interface SessionMeta {
   title: string;
   created_at: string;
   updated_at: string;
+  key_learnings?: string;
 }
 
 type PanelView = 'chat' | 'sessions';
@@ -28,7 +29,7 @@ export default function LearnPage() {
     {
       role: 'assistant',
       content:
-        "Hello! I am your Socratic Options Tutor. I don't just feed you answers — I'm here to help you build true, intuitive models of quantitative trading. What options concepts or real-world portfolio scenarios would you like to explore today?"
+        "Hello! I am your Socratic Options & Markets Tutor. I act as your Senior Financial Analyst and Research Assistant. I'm here to help you explore corporate finance, risk exposure, earnings, capital allocation, and market strategy. What concepts or portfolio events are you analyzing today?"
     }
   ]);
   const [input, setInput] = useState('');
@@ -44,6 +45,7 @@ export default function LearnPage() {
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
+  const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [sessionTitle, setSessionTitle] = useState('');
@@ -87,6 +89,8 @@ export default function LearnPage() {
       // Auto-save if there's an active session
       if (currentSessionId) {
         await optionsApi.updateSession(currentSessionId, newMessages);
+        // Refresh sessions list to pull new key_learnings in background
+        loadSessions();
       }
     } catch (err) {
       console.error(err);
@@ -194,17 +198,58 @@ export default function LearnPage() {
     } catch { return iso; }
   };
 
+  // ── Date grouping logic ───────────────────────────────────────────────────
+  const getGroupedSessions = () => {
+    const groups: Record<string, SessionMeta[]> = {
+      'Today': [],
+      'Yesterday': [],
+      'Earlier this Week': [],
+      'Older': []
+    };
+
+    const now = new Date();
+    const todayStr = now.toLocaleDateString();
+    
+    const yesterday = new Date();
+    yesterday.setDate(now.getDate() - 1);
+    const yesterdayStr = yesterday.toLocaleDateString();
+
+    const startOfWeek = new Date();
+    startOfWeek.setDate(now.getDate() - now.getDay()); // Sunday
+
+    sessions.forEach(session => {
+      const date = new Date(session.updated_at);
+      const dateStr = date.toLocaleDateString();
+
+      if (dateStr === todayStr) {
+        groups['Today'].push(session);
+      } else if (dateStr === yesterdayStr) {
+        groups['Yesterday'].push(session);
+      } else if (date >= startOfWeek) {
+        groups['Earlier this Week'].push(session);
+      } else {
+        groups['Older'].push(session);
+      }
+    });
+
+    return Object.fromEntries(
+      Object.entries(groups).filter(([_, items]) => items.length > 0)
+    );
+  };
+
   const quickPrompts = [
-    "What is the compounding mistake in the Legacy Monte Carlo code?",
-    "I have 100 shares of PANW. How do I hedge if the market turns against me?",
-    "What is the difference between hedging and arbitrage?",
-    "How does high implied volatility impact option buyers vs sellers?"
+    "How do companies decide between stock buybacks and dividends?",
+    "What is capital allocation and why does ROI matter?",
+    "How does a tech firm hedge its key employee stock grant risk?",
+    "What is the compounding mistake in the Legacy Monte Carlo code?"
   ];
 
   const conceptsList = [
-    "Brownian Motion", "Hedging", "Call & Put",
-    "Implied Volatility", "Arbitrage", "Option Greeks"
+    "Capital Allocation", "Risk Exposure", "Corporate Earnings",
+    "Hedging Options", "Brownian Motion", "Option Greeks"
   ];
+
+  const groupedSessions = getGroupedSessions();
 
   return (
     <ProtectedRoute>
@@ -216,7 +261,7 @@ export default function LearnPage() {
             <BookOpen className="h-6 w-6 text-[#5ba4b5]" /> Socratic Learning Tutor
           </h1>
           <p className="text-slate-400 text-sm mt-1">
-            Deepen your understanding of derivative math and risk management through Socratic dialog.
+            Deepen your understanding of financial markets, capital allocation, corporate earnings, and risk management through Socratic dialog.
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -247,7 +292,7 @@ export default function LearnPage() {
 
       {/* ── Sessions Panel ─────────────────────────────────────────────────── */}
       {panelView === 'sessions' && (
-        <div className="glass-card p-6 space-y-4">
+        <div className="glass-card p-6 space-y-4 bg-[#161924]/80 border border-slate-800 rounded-xl">
           <div className="flex items-center justify-between">
             <h2 className="font-bold text-slate-200 text-sm flex items-center gap-2">
               <FolderOpen className="h-4 w-4 text-[#5ba4b5]" /> Saved Learning Sessions
@@ -256,6 +301,7 @@ export default function LearnPage() {
               <X className="h-4 w-4" />
             </button>
           </div>
+          
           {sessionsLoading ? (
             <div className="flex items-center gap-2 text-xs text-slate-500 animate-pulse py-4">
               <Loader className="h-3 w-3 animate-spin" /> Loading sessions...
@@ -267,34 +313,90 @@ export default function LearnPage() {
               <p className="mt-1 text-slate-600">Start a conversation and click <strong className="text-slate-400">Save Session</strong> to persist it.</p>
             </div>
           ) : (
-            <div className="divide-y divide-slate-800/60">
-              {sessions.map(session => (
-                <div
-                  key={session.id}
-                  onClick={() => handleLoadSession(session.id)}
-                  className={`flex items-center justify-between py-3 cursor-pointer hover:bg-[#1a1d28]/40 rounded-lg px-2 transition group ${
-                    currentSessionId === session.id ? 'bg-[#5ba4b5]/5' : ''
-                  }`}
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      {currentSessionId === session.id && (
-                        <span className="h-1.5 w-1.5 rounded-full bg-[#5ba4b5] flex-shrink-0" />
-                      )}
-                      <p className="text-sm text-slate-200 truncate font-medium">{session.title}</p>
-                    </div>
-                    <p className="text-[10px] text-slate-500 mt-0.5">
-                      Last updated: {formatDate(session.updated_at)}
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-2 ml-3">
-                    <ChevronRight className="h-3.5 w-3.5 text-slate-600 group-hover:text-slate-400 transition" />
-                    <button
-                      onClick={(e) => handleDeleteSession(session.id, e)}
-                      className="p-1.5 rounded text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition opacity-0 group-hover:opacity-100"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </button>
+            <div className="space-y-6">
+              {Object.entries(groupedSessions).map(([groupName, groupItems]) => (
+                <div key={groupName} className="space-y-2">
+                  <h3 className="text-[10px] font-bold text-slate-500 uppercase tracking-wider border-b border-slate-800 pb-1">
+                    {groupName}
+                  </h3>
+                  <div className="divide-y divide-slate-800/40">
+                    {groupItems.map(session => (
+                      <div key={session.id} className="py-2.5">
+                        {/* Session Row */}
+                        <div 
+                          className={`flex items-center justify-between hover:bg-[#1a1d28]/40 rounded-lg px-3 py-2 transition group ${
+                            currentSessionId === session.id ? 'bg-[#5ba4b5]/5 border-l-2 border-[#5ba4b5]' : ''
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 flex-1 min-w-0">
+                            {/* Expand Key Learnings Button */}
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setExpandedSessionId(expandedSessionId === session.id ? null : session.id);
+                              }}
+                              className="p-1 rounded hover:bg-slate-800 text-slate-500 hover:text-slate-300 transition"
+                              title="Toggle Key Learnings"
+                            >
+                              {expandedSessionId === session.id ? (
+                                <ChevronDown className="h-4 w-4 text-[#5ba4b5]" />
+                              ) : (
+                                <ChevronRight className="h-4 w-4" />
+                              )}
+                            </button>
+                            
+                            {/* Clickable Title to Load Session */}
+                            <div 
+                              onClick={() => handleLoadSession(session.id)}
+                              className="flex-1 cursor-pointer min-w-0"
+                            >
+                              <p className="text-xs text-slate-200 truncate font-semibold hover:text-[#5ba4b5] transition">
+                                {session.title}
+                              </p>
+                              <p className="text-[9px] text-slate-500 mt-0.5 font-mono">
+                                Updated: {formatDate(session.updated_at)}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="flex items-center gap-2 ml-3">
+                            <button
+                              onClick={() => handleLoadSession(session.id)}
+                              className="text-[10px] text-slate-400 bg-slate-800/80 hover:bg-[#5ba4b5]/20 hover:text-[#5ba4b5] border border-slate-700 px-2 py-0.5 rounded transition"
+                            >
+                              Load Chat
+                            </button>
+                            <button
+                              onClick={(e) => handleDeleteSession(session.id, e)}
+                              className="p-1.5 rounded text-slate-600 hover:text-rose-400 hover:bg-rose-500/10 transition opacity-0 group-hover:opacity-100"
+                              title="Delete Session"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Collapsible Key Learnings Summary Block */}
+                        {expandedSessionId === session.id && (
+                          <div className="ml-10 mt-2 p-3.5 rounded-lg border border-[#5ba4b5]/20 bg-[#12141c]/60 space-y-2">
+                            <span className="text-[9px] font-bold text-[#5ba4b5] uppercase tracking-wider block">
+                              Key Financial Learnings
+                            </span>
+                            {session.key_learnings ? (
+                              <ul className="list-disc list-inside space-y-1.5 text-slate-300 text-xs">
+                                {session.key_learnings.split('\n').filter(line => line.trim().startsWith('-')).map((line, idx) => (
+                                  <li key={idx} className="leading-relaxed pl-1">
+                                    {line.replace(/^-\s*/, '')}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : (
+                              <p className="text-slate-500 text-xs italic">No key learnings extracted. Chat longer to build a summary.</p>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
@@ -419,7 +521,7 @@ export default function LearnPage() {
                 value={input}
                 onChange={e => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Ask your quantitative tutor... (Ctrl+Enter to send)"
+                placeholder="Ask your analyst tutor... (Ctrl+Enter to send)"
                 rows={2}
                 className="flex-1 rounded-lg px-4 py-2.5 text-xs bg-slate-900/60 text-slate-100 border border-slate-700/80 focus:outline-none focus:border-[#5ba4b5] transition min-h-[44px] max-h-[160px] overflow-y-auto resize-none"
               />

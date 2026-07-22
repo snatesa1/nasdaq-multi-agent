@@ -81,3 +81,10 @@ class UpdateSessionRequest(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     tickers: List[str] = Field(..., description="List of stock ticker symbols to analyze")
+
+# ── Earnings Scanner Models ───────────────────────────────────────────────────
+
+class EarningsScanRequest(BaseModel):
+    low_threshold_pct: float = Field(0.20, description="Max percentage above 52-week low to consider deep value")
+    min_open_interest: int = Field(5000, description="Minimum total front-month option open interest")
+

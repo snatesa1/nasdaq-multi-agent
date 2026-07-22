@@ -56,13 +56,18 @@ def _init_db():
         # ── Tutor Sessions ────────────────────────────────────────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS sessions (
-                id          TEXT PRIMARY KEY,
-                title       TEXT NOT NULL,
-                created_at  TEXT NOT NULL,
-                updated_at  TEXT NOT NULL,
-                messages    TEXT NOT NULL
+                id              TEXT PRIMARY KEY,
+                title           TEXT NOT NULL,
+                created_at      TEXT NOT NULL,
+                updated_at      TEXT NOT NULL,
+                messages        TEXT NOT NULL,
+                key_learnings   TEXT
             )
         """)
+        try:
+            conn.execute("ALTER TABLE sessions ADD COLUMN key_learnings TEXT")
+        except sqlite3.OperationalError:
+            pass
         # ── Portfolios ────────────────────────────────────────────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS portfolios (
@@ -101,6 +106,15 @@ _init_db()
 #  TUTOR SESSIONS
 # ═══════════════════════════════════════════════════════════════════════════════
 
+def get_key_learnings(messages: List[Dict[str, str]]) -> str:
+    try:
+        from .tutor import SocraticTutor
+        tutor = SocraticTutor()
+        return tutor.summarize_learnings(messages)
+    except Exception as e:
+        logger.error(f"Failed to generate key learnings: {e}")
+        return "- Discussed financial markets and quantitative modeling strategies."
+
 def list_sessions() -> List[Dict[str, Any]]:
     """Return all sessions ordered by last update (newest first), without messages."""
     if _USE_FIRESTORE and _firestore_client:
@@ -118,7 +132,7 @@ def list_sessions() -> List[Dict[str, Any]]:
 
     with _get_conn() as conn:
         rows = conn.execute(
-            "SELECT id, title, created_at, updated_at FROM sessions ORDER BY updated_at DESC"
+            "SELECT id, title, created_at, updated_at, key_learnings FROM sessions ORDER BY updated_at DESC"
         ).fetchall()
     return [dict(r) for r in rows]
 
@@ -127,6 +141,7 @@ def create_session(title: str, messages: List[Dict[str, str]]) -> Dict[str, Any]
     """Persist a new session and return it."""
     session_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
+    learnings = get_key_learnings(messages)
 
     if _USE_FIRESTORE and _firestore_client:
         try:
@@ -136,7 +151,8 @@ def create_session(title: str, messages: List[Dict[str, str]]) -> Dict[str, Any]
                 "title": title,
                 "created_at": now,
                 "updated_at": now,
-                "messages": messages
+                "messages": messages,
+                "key_learnings": learnings
             }
             doc_ref.set(session_data)
             return session_data
@@ -147,8 +163,8 @@ def create_session(title: str, messages: List[Dict[str, str]]) -> Dict[str, Any]
 
     with _get_conn() as conn:
         conn.execute(
-            "INSERT INTO sessions (id, title, created_at, updated_at, messages) VALUES (?,?,?,?,?)",
-            (session_id, title, now, now, messages_json)
+            "INSERT INTO sessions (id, title, created_at, updated_at, messages, key_learnings) VALUES (?,?,?,?,?,?)",
+            (session_id, title, now, now, messages_json, learnings)
         )
         conn.commit()
 
@@ -157,7 +173,8 @@ def create_session(title: str, messages: List[Dict[str, str]]) -> Dict[str, Any]
         "title": title,
         "created_at": now,
         "updated_at": now,
-        "messages": messages
+        "messages": messages,
+        "key_learnings": learnings
     }
 
 
@@ -189,13 +206,15 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
 def update_session(session_id: str, messages: List[Dict[str, str]], title: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Append / overwrite messages for an existing session."""
     now = datetime.now(timezone.utc).isoformat()
+    learnings = get_key_learnings(messages)
 
     if _USE_FIRESTORE and _firestore_client:
         try:
             doc_ref = _firestore_client.collection("tutor_sessions").document(session_id)
             update_data = {
                 "messages": messages,
-                "updated_at": now
+                "updated_at": now,
+                "key_learnings": learnings
             }
             if title:
                 update_data["title"] = title
@@ -212,13 +231,13 @@ def update_session(session_id: str, messages: List[Dict[str, str]], title: Optio
     with _get_conn() as conn:
         if title:
             conn.execute(
-                "UPDATE sessions SET messages=?, updated_at=?, title=? WHERE id=?",
-                (messages_json, now, title, session_id)
+                "UPDATE sessions SET messages=?, updated_at=?, title=?, key_learnings=? WHERE id=?",
+                (messages_json, now, title, learnings, session_id)
             )
         else:
             conn.execute(
-                "UPDATE sessions SET messages=?, updated_at=? WHERE id=?",
-                (messages_json, now, session_id)
+                "UPDATE sessions SET messages=?, updated_at=?, key_learnings=? WHERE id=?",
+                (messages_json, now, learnings, session_id)
             )
         conn.commit()
         row = conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()

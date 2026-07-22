@@ -51,14 +51,16 @@ Built with **FastAPI**, **Vertex AI (Gemini)**, and deployed on **Google Cloud R
 
 ## 🚀 Features
 
-- 🤖 **Multi-Agent AI** — 4 specialized agents orchestrated in a hierarchical pipeline
-- 🧠 **Gemini-Powered** — Vertex AI (Gemini 2.0 Flash Lite) for macro analysis and metric explanations
-- 📈 **Real-Time Data** — Alpaca, yfinance, FRED API, Financial Modeling Prep
+- 🤖 **Multi-Agent AI** — Hierarchical pipeline featuring Macro, Technical, Fundamental, Correlation, and Earnings Volatility agents
+- 📈 **Correlation Agent (Dalio's Holy Grail)** — Multi-asset correlation engine (Stocks, Bonds, BTC) isolating low-correlation (< 0.2) diversification opportunities
+- 🎯 **Earnings Volatility Scanner** — Multi-stage quantitative funnel (52-Week Low proximity, Piotroski/Altman Z fundamentals, option open interest liquidity, 4-quarter pre/post earnings move matrix)
+- 🎓 **Socratic Tutor** — AI Senior Financial Analyst tutor with Firestore session persistence & dynamic **Key Financial Learnings** extraction
+- 🧮 **Options Lab Suite** — Monte Carlo GBM path simulator, Black-Scholes analytical pricer, Greeks surface generator, strategy payoff simulator, and paper trading sandbox
+- 🧠 **Gemini-Powered** — Google AI Studio / Gemini API integration with zero-cost runtime Secret Manager resolution and Vertex AI fallback safeguards (`DISABLE_VERTEX_FALLBACK=True`)
 - 💬 **Slack Integration** — Rich Block Kit messages via `/nasdaqscan` slash command
 - 📧 **Email Reports** — Automated HTML email delivery via Gmail SMTP
-- ⏰ **Scheduled Runs** — Cloud Scheduler triggers analysis Mon-Fri at 7 PM SGT
-- 🔐 **Production Security** — GCP Secret Manager, HMAC signature verification, OIDC auth
-- 🚀 **CI/CD** — GitHub Actions with Workload Identity Federation (keyless auth)
+- 🚀 **Dual Cloud Run CI/CD** — GitHub Actions deployment for both `nasdaq-multi-agent` and `options-lab` with workflow concurrency controls and Cloud Build integration
+
 
 ---
 
@@ -73,15 +75,35 @@ nasdaq-multi-agent/
 │   │   ├── fred_indicators_agent.py # Tier 1: FRED economic indicators
 │   │   ├── technical_agent.py       # Tier 2: Technical indicators per stock
 │   │   ├── fundamental_agent.py     # Tier 2: Fundamental analysis per stock
+│   │   ├── correlation_agent.py     # Tier 2: Dalio Holy Grail cross-asset correlation
 │   │   └── metric_explainer.py      # LLM-powered metric explanations
 │   ├── config.py                    # Settings (Secret Manager + env fallback)
 │   ├── data_client.py               # Alpaca / yfinance / FRED data fetchers
 │   ├── formatter.py                 # Slack Block Kit + Email HTML formatter
 │   ├── main.py                      # FastAPI app (endpoints)
 │   └── orchestrator.py              # Hierarchical pipeline coordinator
+├── options_lab/                     # 🚀 Options Lab Suite & Web Application
+│   ├── api/                         # FastAPI Engine (Socratic Tutor, Earnings Scanner, Portfolio DB)
+│   │   ├── agents/                  # Earnings Volatility & Explainer Agents
+│   │   ├── earnings_scanner.py      # Multi-stage quantitative funnel scanner
+│   │   ├── db.py                    # GCP Firestore persistence layer (with SQLite fallback)
+│   │   ├── main.py                  # API endpoints & static frontend mount
+│   │   └── tutor.py                 # Socratic AI Tutor service
+│   ├── frontend/                    # Next.js 14 App Router UI (Static Export)
+│   │   ├── src/app/
+│   │   │   ├── earnings/            # Earnings Volatility Scanner page
+│   │   │   ├── learn/               # Socratic Tutor chat interface & Key Learnings
+│   │   │   ├── market-agents/       # Multi-agent analysis runner
+│   │   │   ├── portfolio/           # Portfolio diversification analyzer
+│   │   │   ├── pricer/              # Black-Scholes analytical option pricer
+│   │   │   ├── simulator/           # Monte Carlo Geometric Brownian Motion simulator
+│   │   │   └── strategies/          # Option strategy payoff builder
+│   │   └── next.config.js           # Static export configuration (`output: 'export'`)
+│   ├── cloudbuild.yaml              # Cloud Build spec for Options Lab
+│   └── Dockerfile                   # Multi-stage Dockerfile (Node builder + Python backend)
 ├── .github/
 │   └── workflows/
-│       └── deploy.yml               # CI/CD: GitHub Actions → Cloud Run
+│       └── deploy.yml               # CI/CD: Dual Cloud Run Deployment with concurrency controls
 ├── cloudbuild.yaml                  # Cloud Build config (VPC-SC compatible)
 ├── Dockerfile                       # Python 3.11-slim container
 ├── requirements.txt                 # Python dependencies
@@ -90,6 +112,7 @@ nasdaq-multi-agent/
 ├── upload_secrets.sh                # Upload secrets to GCP Secret Manager
 ├── init_gcp.sh                      # Initialize GCP APIs
 └── destroy_app.sh                   # Teardown script
+
 ```
 
 ---

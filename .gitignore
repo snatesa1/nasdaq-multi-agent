@@ -16,5 +16,15 @@ tests/__pycache__/
 # Exceptions for options_lab
 !options_lab/**/*.json
 !options_lab/**/*.sh
-!options_lab/**/.gitignore
+!options_lab/**/*.gitignore
+
+# Local dev & build artifacts
+.codegraph/
+CODEGRAPH.md
+build_logs.txt
+*.db
+test_env/
+scratch_holdings*.html
+options_lab/test*.py
+
 

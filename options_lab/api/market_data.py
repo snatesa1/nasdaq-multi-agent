@@ -1,3 +1,4 @@
+import os
 import logging
 from datetime import datetime, timedelta
 from typing import Dict, Any, List, Optional
@@ -6,6 +7,7 @@ import pandas as pd
 import yfinance as yf
 import requests
 from .config import settings
+
 
 logger = logging.getLogger(__name__)
 

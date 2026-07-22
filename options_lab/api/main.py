@@ -18,7 +18,9 @@ from .models import (
     SaveSessionRequest,
     UpdateSessionRequest,
     AnalyzeRequest,
+    EarningsScanRequest,
 )
+
 
 # Core imports from engine
 from engine.gbm_engine import simulate_gbm
@@ -67,6 +69,41 @@ def debug_db():
         }
     except Exception as e:
         return {"error": str(e)}
+
+@app.get("/tutor/debug_firestore")
+def debug_firestore():
+    try:
+        from google.cloud import firestore
+        import os
+        project_id = os.environ.get("GOOGLE_CLOUD_PROJECT", "optimal-aurora-495912-n0")
+        client = firestore.Client(project=project_id)
+        
+        # Test write
+        doc_ref = client.collection("tutor_sessions_debug").document("test")
+        doc_ref.set({"test": True, "timestamp": firestore.SERVER_TIMESTAMP})
+        
+        # Test read
+        doc = doc_ref.get()
+        data = doc.to_dict()
+        
+        # Delete
+        doc_ref.delete()
+        
+        return {
+            "status": "success",
+            "project_id": project_id,
+            "use_firestore_flag": database._USE_FIRESTORE,
+            "data": str(data)
+        }
+    except Exception as e:
+        import traceback
+        return {
+            "status": "failed",
+            "error": str(e),
+            "traceback": traceback.format_exc(),
+            "use_firestore_flag": database._USE_FIRESTORE
+        }
+
 
 # ── Market Data ────────────────────────────────────────────────────────────
 @app.get("/market/quote/{symbol}")
@@ -459,6 +496,40 @@ async def run_multi_agent_analysis(req: AnalyzeRequest, user=Depends(verify_fire
         return {"tickers_analyzed": len(results), "results": results}
     except Exception as e:
         logger.error(f"Multi-agent analysis failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Earnings Volatility Scanner ──────────────────────────────────────────
+@app.get("/api/earnings/upcoming")
+def get_upcoming_earnings(user=Depends(verify_firebase_token)):
+    try:
+        from .earnings_calendar import get_upcoming_earnings_calendar
+        return get_upcoming_earnings_calendar()
+    except Exception as e:
+        logger.error(f"Failed to fetch upcoming earnings: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/earnings/scan")
+async def scan_earnings(req: EarningsScanRequest, user=Depends(verify_firebase_token)):
+    try:
+        from .earnings_scanner import run_earnings_scan
+        results = await run_earnings_scan(
+            low_threshold_pct=req.low_threshold_pct,
+            min_open_interest=req.min_open_interest
+        )
+        return results
+    except Exception as e:
+        logger.error(f"Earnings scan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/earnings/volatility/{symbol}")
+async def get_earnings_volatility(symbol: str, user=Depends(verify_firebase_token)):
+    try:
+        from .agents.earnings_vol_agent import EarningsVolAgent
+        agent = EarningsVolAgent()
+        result = await agent.analyze(symbol)
+        return result.to_dict()
+    except Exception as e:
+        logger.error(f"Failed to get earnings volatility for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ── Serve Static Frontend Files ─────────────────────────────────────────────
