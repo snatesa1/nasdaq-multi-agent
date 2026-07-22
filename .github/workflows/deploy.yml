@@ -6,6 +6,10 @@ on:
       - main
       - nasdaq-multi-agent/auth
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -51,25 +55,13 @@ jobs:
           gcloud builds submit --config cloudbuild.yaml --substitutions=_IMAGE_TAG=gcr.io/${{ steps.auth.outputs.project_id }}/nasdaq-multi-agent --suppress-logs
 
       - name: Deploy to Cloud Run
-        id: deploy
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: nasdaq-multi-agent
-          image: gcr.io/${{ steps.auth.outputs.project_id }}/nasdaq-multi-agent
-          region: asia-southeast1
-          env_vars: |
-            GCP_PROJECT_ID=${{ steps.auth.outputs.project_id }}
-            SLACK_CHANNEL_ID=${{ secrets.SLACK_CHANNEL_ID }}
-            EMAIL_SENDER=${{ secrets.EMAIL_SENDER }}
-            EMAIL_RECIPIENT=${{ secrets.EMAIL_RECIPIENT }}
-            VERTEX_MODEL=gemini-flash-latest
-            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-            DISABLE_VERTEX_FALLBACK=True
-
-      - name: Verify Deployment
         run: |
-          echo "✅ Deployment complete to ${{ steps.deploy.outputs.url }}"
-          echo "🚀 Manual Trigger: curl -X POST ${{ steps.deploy.outputs.url }}/analyze"
+          gcloud run deploy nasdaq-multi-agent \
+            --image gcr.io/${{ steps.auth.outputs.project_id }}/nasdaq-multi-agent \
+            --region asia-southeast1 \
+            --platform managed \
+            --set-env-vars GCP_PROJECT_ID=${{ steps.auth.outputs.project_id }},SLACK_CHANNEL_ID=${{ secrets.SLACK_CHANNEL_ID }},EMAIL_SENDER=${{ secrets.EMAIL_SENDER }},EMAIL_RECIPIENT=${{ secrets.EMAIL_RECIPIENT }},VERTEX_MODEL=gemini-flash-latest,GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},DISABLE_VERTEX_FALLBACK=True \
+            --quiet
 
       # ── OptionsLab Deployment ─────────────────────────────────────────────
       - name: Build and Push OptionsLab (Cloud Build)
@@ -77,18 +69,11 @@ jobs:
           gcloud builds submit ./options_lab --config options_lab/cloudbuild.yaml --substitutions=_IMAGE_TAG=gcr.io/${{ steps.auth.outputs.project_id }}/options-lab --suppress-logs
 
       - name: Deploy OptionsLab to Cloud Run
-        id: deploy_options_lab
-        uses: google-github-actions/deploy-cloudrun@v2
-        with:
-          service: options-lab
-          image: gcr.io/${{ steps.auth.outputs.project_id }}/options-lab
-          region: asia-southeast1
-          env_vars: |
-            GCP_PROJECT_ID=${{ steps.auth.outputs.project_id }}
-            VERTEX_MODEL=gemini-flash-latest
-            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
-            DISABLE_VERTEX_FALLBACK=True
-
-      - name: Verify OptionsLab Deployment
         run: |
-          echo "✅ OptionsLab Deployment complete to ${{ steps.deploy_options_lab.outputs.url }}"
+          gcloud run deploy options-lab \
+            --image gcr.io/${{ steps.auth.outputs.project_id }}/options-lab \
+            --region asia-southeast1 \
+            --platform managed \
+            --set-env-vars GCP_PROJECT_ID=${{ steps.auth.outputs.project_id }},VERTEX_MODEL=gemini-flash-latest,GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }},DISABLE_VERTEX_FALLBACK=True \
+            --quiet
+
