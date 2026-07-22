@@ -16,9 +16,11 @@ Hierarchical Multi-Agent System (FastAPI) for comprehensive NASDAQ and Multi-Ass
   - **Independence Filter:** Ensures Technical, Fundamental, and Macro signals are statistically distinct.
 
 ## Options Lab & Socratic Tutor Modules [NEW]
-- **Earnings Volatility Scanner (`api/earnings_scanner.py`)**:
+- **Earnings Volatility Scanner (`api/earnings_scanner.py` & `frontend/src/app/earnings/page.tsx`)**:
   - Funnel logic: Universe Filter (S&P 500 Wikipedia scrape + NASDAQ) ➡️ 52W Low Proximity check (default 20%) ➡️ Exhaustive Fundamentals check (passes if >= 75% of available yfinance metrics like Piotroski, ROE >= 12%, Operating Margin >= 10%, Debt/Equity <= 1.5, Altman Z >= 1.8 pass) ➡️ Option Open Interest Liquidity (>= 5,000 contracts).
   - Volatility Matrix: Calculates 4-quarter pre-earnings volatility, T-1 move, and T+1 reaction.
+  - **404 Resolution**: Added and committed `options_lab/frontend/src/app/earnings/page.tsx` along with backend scanner modules (`earnings_scanner.py`, `earnings_calendar.py`, `options_liquidity.py`, `universe.py`, `earnings_vol_agent.py`) which were previously untracked locally and therefore absent from Cloud Build / Next.js static exports.
+
 - **Socratic Tutor Persistence (`api/db.py` & `api/tutor.py`)**:
   - Persists learning sessions permanently in a native GCP Firestore instance (`tutor_sessions` collection) with SQLite fallback in dev mode.
   - Summarizes transcript takeaways into 3-5 bulleted **Key Financial Learnings** dynamically using the Gemini API.
