@@ -22,7 +22,7 @@ tests/__pycache__/
 .codegraph/
 CODEGRAPH.md
 build_logs.txt
-*.db
+*.db*
 test_env/
 scratch_holdings*.html
 options_lab/test*.py

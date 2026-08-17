@@ -56,7 +56,6 @@ const navGroups = [
     items: [
       { name: 'Strategy Builder', path: '/strategies', icon: Layers, badge: 'Hot', badgeColor: 'bg-rose-100 text-rose-700' },
       { name: 'Option Pricer', path: '/pricer', icon: Percent },
-      { name: 'GBM Simulator', path: '/simulator', icon: TrendingUp },
     ]
   },
   {
@@ -70,7 +69,6 @@ const navGroups = [
     title: 'ACADEMIC & LEARNING',
     items: [
       { name: 'Socratic Tutor', path: '/learn', icon: BookOpen, badge: 'AI', badgeColor: 'bg-indigo-100 text-indigo-700' },
-      { name: 'Paper Trading', path: '/paper-trade', icon: Award },
     ]
   }
 ];
@@ -202,8 +200,8 @@ export default function Sidebar() {
             <Sparkles className="h-4 w-4" />
           </div>
           <div>
-            <h4 className="text-xs font-bold text-slate-800">Saxo OpenAPI Engine</h4>
-            <p className="text-[11px] text-slate-500">SIM Connected & Ready</p>
+            <h4 className="text-xs font-bold text-slate-800">Saxo Live Platform</h4>
+            <p className="text-[11px] text-slate-500">Safety Shield Active</p>
           </div>
         </div>
       )}

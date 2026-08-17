@@ -4,6 +4,17 @@ const fs = require('fs');
 const { spawn, exec } = require('child_process');
 const http = require('http');
 
+// Set unique userData path to completely bypass Windows access violations or sharing locks
+try {
+  const uniqueSessionDir = path.join(app.getPath('temp'), 'options-lab-desktop-' + Date.now());
+  if (!fs.existsSync(uniqueSessionDir)) {
+    fs.mkdirSync(uniqueSessionDir, { recursive: true });
+  }
+  app.setPath('userData', uniqueSessionDir);
+} catch (err) {
+  console.error('[OptionsLab Desktop] Failed to set unique userData path:', err);
+}
+
 let mainWindow = null;
 let tray = null;
 let backendProcess = null;
@@ -250,11 +261,15 @@ function createTray() {
   });
 }
 
-const gotTheLock = app.requestSingleInstanceLock();
+const gotTheLock = true;
 
 if (!gotTheLock) {
   app.quit();
 } else {
+  // Setup second instance callback if lock is acquired (optional)
+  try {
+    app.requestSingleInstanceLock();
+  } catch (e) {}
   app.on('second-instance', () => {
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();

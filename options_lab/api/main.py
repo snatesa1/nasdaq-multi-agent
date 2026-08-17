@@ -32,6 +32,7 @@ from .models import (
 )
 import asyncio
 from .saxo_client import SaxoClient
+from .tracker import log_progress
 
 
 
@@ -617,10 +618,12 @@ async def get_earnings_volatility(symbol: str, user=Depends(verify_firebase_toke
 @app.get("/api/broker/status")
 def get_broker_status(user=Depends(verify_firebase_token)):
     """Returns the operational environment, live execution safety guard, and connection health."""
+    has_token = bool(saxo_broker_client.access_token)
+    log_progress("Status Check", "INFO", f"Status queried. Has token: {has_token}")
     return {
         "environment": settings.SAXO_ENV,
         "allow_live_execution": settings.BROKER_ALLOW_LIVE_EXECUTION,
-        "has_access_token": bool(saxo_broker_client.access_token),
+        "has_access_token": has_token,
         "has_refresh_token": bool(saxo_broker_client.refresh_token),
         "needs_reauth": getattr(saxo_broker_client, 'needs_reauth', False),
         "base_url": saxo_broker_client.base_url,
@@ -645,6 +648,11 @@ def set_broker_token(payload: Dict[str, Any] = Body(...), user=Depends(verify_fi
     code = payload.get("code")
     refresh_token = payload.get("refresh_token")
 
+    # Auto-detect if they pasted a UUID code directly instead of the full URL or token
+    if token and len(token.strip()) == 36 and "-" in token:
+        code = token.strip()
+        token = None
+
     if token and ("code=" in token or token.startswith("http")):
         from urllib.parse import urlparse, parse_qs
         parsed = urlparse(token)
@@ -654,13 +662,16 @@ def set_broker_token(payload: Dict[str, Any] = Body(...), user=Depends(verify_fi
 
     if code:
         data = saxo_broker_client.exchange_code_for_token(code)
+        log_progress("OAuth Code Exchange", "SUCCESS", "Saxo code exchanged for tokens successfully.")
         return {"status": "SUCCESS", "message": "Live Saxo OAuth token successfully exchanged!", "data": data}
 
     if token:
         saxo_broker_client.set_token(token, refresh_token)
         saxo_broker_client._persist_tokens_to_env()
+        log_progress("Token Configuration", "SUCCESS", f"Developer token applied manually (Length: {len(token)})")
         return {"status": "SUCCESS", "message": "Live Saxo token successfully registered!", "environment": settings.SAXO_ENV}
 
+    log_progress("Token Configuration", "ERROR", "Token set request failed due to missing params.")
     raise HTTPException(status_code=400, detail="Missing 'token' or 'code' parameter.")
 
 
@@ -674,6 +685,7 @@ def disconnect_broker(user=Depends(verify_firebase_token)):
     saxo_broker_client.refresh_token = None
     if hasattr(saxo_broker_client, "session"):
         saxo_broker_client.session.cookies.clear()
+    log_progress("Session Disconnect", "SUCCESS", "Disconnected Saxo session and cleared access tokens.")
     logger.info("Broker Live API session disconnected and access tokens cleared.")
     return {"status": "DISCONNECTED", "message": "Live Saxo trading bot connection safely closed."}
 
@@ -685,12 +697,15 @@ async def get_broker_account(user=Depends(verify_firebase_token)):
     async with broker_concurrency_lock:
         try:
             balances = saxo_broker_client.get_account_balances()
+            log_progress("Account Fetch", "SUCCESS", f"Fetched account total equity: ${balances.get('total_equity')}")
             return BrokerAccountSummary(**balances)
         except ValueError as ve:
+            log_progress("Account Fetch", "ERROR", f"ValueError during account fetch: {ve}")
             if "authentication required" in str(ve).lower():
                 raise HTTPException(status_code=401, detail=str(ve))
             raise HTTPException(status_code=400, detail=str(ve))
         except Exception as e:
+            log_progress("Account Fetch", "ERROR", f"Exception during account fetch: {e}")
             logger.error(f"Failed to fetch broker account: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
@@ -700,12 +715,15 @@ async def get_broker_positions(user=Depends(verify_firebase_token)):
     async with broker_concurrency_lock:
         try:
             positions_data = saxo_broker_client.get_positions()
+            log_progress("Positions Fetch", "SUCCESS", f"Fetched open positions (Count: {len(positions_data.get('positions', []))})")
             return BrokerPositionsResponse(**positions_data)
         except ValueError as ve:
+            log_progress("Positions Fetch", "ERROR", f"ValueError during positions fetch: {ve}")
             if "authentication required" in str(ve).lower():
                 raise HTTPException(status_code=401, detail=str(ve))
             raise HTTPException(status_code=400, detail=str(ve))
         except Exception as e:
+            log_progress("Positions Fetch", "ERROR", f"Exception during positions fetch: {e}")
             logger.error(f"Failed to fetch broker positions: {e}")
             raise HTTPException(status_code=500, detail=str(e))
 
