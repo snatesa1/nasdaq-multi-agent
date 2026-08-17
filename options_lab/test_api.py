@@ -116,8 +116,47 @@ def test_routes():
     assert "payoff_grid" in data
     assert "max_profit" in data
     
-    # 9. Market Universe
-    print("9. Testing /market/universe...")
+    # 9. Volatility Surface & Smile
+    print("9. Testing /volatility/surface...")
+    resp = client.post("/volatility/surface", json={
+        "spot_price": 100.0,
+        "base_sigma": 0.25,
+        "risk_free_rate": 0.05,
+        "strike_ratios": [0.8, 0.9, 1.0, 1.1, 1.2],
+        "expirations_days": [30, 60, 90]
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "iv_matrix" in data
+    assert "vol_smile_30d" in data
+
+    # 10. Portfolio Net Greeks Aggregator
+    print("10. Testing /portfolio/greeks...")
+    resp = client.post("/portfolio/greeks", json={
+        "positions": [
+            {"type": "stock", "symbol": "AAPL", "quantity": 100, "spot_price": 180.0},
+            {"type": "call", "symbol": "AAPL", "quantity": -1, "spot_price": 180.0, "strike": 185.0, "days_to_expiration": 30, "volatility": 0.25}
+        ],
+        "risk_free_rate": 0.05
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "net_greeks" in data
+    assert "delta_hedge_recommendation" in data
+
+    # 11. Socratic Tutor Hint
+    print("11. Testing /tutor/hint...")
+    resp = client.post("/tutor/hint", json={
+        "chat_history": [
+            {"role": "user", "content": "How does Theta affect my covered call?"}
+        ]
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "hint" in data
+
+    # 12. Market Universe
+    print("12. Testing /market/universe...")
     resp = client.get("/market/universe")
     assert resp.status_code == 200
     data = resp.json()
@@ -131,3 +170,4 @@ def test_routes():
 if __name__ == "__main__":
     run_tests = test_routes
     run_tests()
+

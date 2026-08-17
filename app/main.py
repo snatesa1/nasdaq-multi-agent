@@ -26,12 +26,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger("nasdaq-mas")
 
+from fastapi.middleware.cors import CORSMiddleware
+from options_lab.api.main import app as options_lab_app
+
 app = FastAPI(title="NASDAQ Multi-Agent System", version="0.1.0")
 
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(options_lab_app.router)
+
 
 # ═══════════════════════════════════════════════════════════
-#  Health Check
+#  Root Landing & Health Check
 # ═══════════════════════════════════════════════════════════
+@app.get("/")
+async def root():
+    return {
+        "service": "NASDAQ & Saxo Multi-Agent Quant System",
+        "status": "running",
+        "health": "/health",
+        "interactive_docs": "/docs",
+        "version": "0.1.0"
+    }
+
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "nasdaq-multi-agent", "version": "0.1.0"}

@@ -34,10 +34,11 @@ class StrategyLeg:
             
         elif self.asset_type == "option":
             # Option payoff at maturity
+            strike_val = self.strike if self.strike is not None else 0.0
             if self.option_type == "call":
-                payoff = max(S_T - self.strike, 0.0)
+                payoff = max(S_T - strike_val, 0.0)
             elif self.option_type == "put":
-                payoff = max(self.strike - S_T, 0.0)
+                payoff = max(strike_val - S_T, 0.0)
             else:
                 payoff = 0.0
                 

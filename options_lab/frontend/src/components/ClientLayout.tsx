@@ -1,28 +1,33 @@
 'use client';
 
 import React from 'react';
+import Header from '@/components/Header';
 import Sidebar, { SidebarProvider, useSidebar } from '@/components/Sidebar';
 
 function LayoutShell({ children }: { children: React.ReactNode }) {
   const { isCollapsed } = useSidebar();
 
   return (
-    <div className="flex">
-      <Sidebar />
-      {/* Main content area — shifts based on sidebar state */}
-      <main
-        className={`flex-1 min-h-screen transition-all duration-300 ease-in-out ${
-          /* Mobile: no margin (sidebar is a drawer overlay), add top padding for mobile header */
-          'pt-14 lg:pt-0'
-        } ${
-          /* Desktop: margin matches sidebar width */
-          isCollapsed ? 'lg:ml-[72px]' : 'lg:ml-64'
-        } p-4 sm:p-6 lg:p-8`}
-      >
-        <div className="mx-auto max-w-7xl">
-          {children}
-        </div>
-      </main>
+    <div className="min-h-screen bg-[#F3F3F9] text-slate-800 flex flex-col">
+      {/* Fixed Velzon Top Header Bar */}
+      <Header />
+
+      <div className="flex flex-1 pt-16">
+        {/* Velzon Grouped Sidebar */}
+        <Sidebar />
+
+        {/* Main Dashboard Canvas — Fluid & Responsive */}
+        <main
+          className={`flex-1 transition-all duration-300 ease-in-out ${
+            /* Desktop margin matches sidebar width */
+            isCollapsed ? 'lg:ml-[72px]' : 'lg:ml-64'
+          } p-4 sm:p-6 lg:p-8 min-w-0 overflow-x-hidden`}
+        >
+          <div className="mx-auto max-w-[1600px] space-y-6">
+            {children}
+          </div>
+        </main>
+      </div>
     </div>
   );
 }

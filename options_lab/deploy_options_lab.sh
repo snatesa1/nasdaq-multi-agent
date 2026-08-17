@@ -28,7 +28,6 @@ echo "🚀 Deploying $SERVICE_NAME to Cloud Run in $REGION..."
 # 1. Grant IAM permissions to service account
 echo "🔑 Granting IAM permissions..."
 for ROLE in \
-  "roles/secretmanager.secretAccessor" \
   "roles/aiplatform.user"; do
   gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$SA_EMAIL" \

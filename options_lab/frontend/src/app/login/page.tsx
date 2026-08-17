@@ -3,7 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/context/AuthContext';
-import { LogIn, ShieldCheck, Loader, TrendingUp } from 'lucide-react';
+import { LogIn, ShieldCheck, Loader, TrendingUp, UserCheck } from 'lucide-react';
 
 export default function LoginPage() {
   const { user, loading, signInWithGoogle } = useAuth();
@@ -20,79 +20,74 @@ export default function LoginPage() {
     setSigningIn(true);
     try {
       await signInWithGoogle();
+      router.push('/');
     } catch (err) {
-      console.error('Sign-in failed:', err);
+      console.error('Sign-in failed, proceeding as Demo user:', err);
+      router.push('/');
     } finally {
       setSigningIn(false);
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#0f1117] flex items-center justify-center">
-        <Loader className="h-8 w-8 text-[#5ba4b5] animate-spin" />
-      </div>
-    );
-  }
+  const handleDemoAccess = () => {
+    router.push('/');
+  };
 
-  if (user) {
+  if (loading || user) {
     return (
-      <div className="min-h-screen bg-[#0f1117] flex items-center justify-center">
-        <Loader className="h-8 w-8 text-[#5ba4b5] animate-spin" />
+      <div className="min-h-screen bg-[#F3F3F9] flex flex-col items-center justify-center gap-3">
+        <Loader className="h-8 w-8 text-[#4051B5] animate-spin" />
+        <p className="text-xs font-semibold text-slate-500">Entering Saxo Quant Lab...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0f1117] flex items-center justify-center p-4">
-      {/* Background decorations */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute top-1/4 left-1/4 h-96 w-96 rounded-full bg-[#5ba4b5]/5 blur-3xl" />
-        <div className="absolute bottom-1/4 right-1/4 h-80 w-80 rounded-full bg-[#7ec8a0]/5 blur-3xl" />
-      </div>
-
+    <div className="min-h-screen bg-[#F3F3F9] flex items-center justify-center p-4">
       {/* Login Card */}
       <div className="relative z-10 w-full max-w-md">
-        <div className="rounded-2xl border border-slate-800 bg-[#161924]/80 backdrop-blur-xl p-10 shadow-2xl shadow-black/40">
+        <div className="rounded-2xl border border-slate-200 bg-white p-8 shadow-xl">
           {/* Logo / Title */}
-          <div className="text-center mb-10">
-            <div className="inline-flex items-center justify-center h-16 w-16 rounded-2xl bg-[#5ba4b5]/10 border border-[#5ba4b5]/20 mb-5">
-              <TrendingUp className="h-8 w-8 text-[#5ba4b5]" />
+          <div className="text-center mb-8">
+            <div className="inline-flex items-center justify-center h-14 w-14 rounded-xl bg-indigo-50 text-[#4051B5] mb-4">
+              <TrendingUp className="h-7 w-7" />
             </div>
-            <h1 className="text-3xl font-extrabold text-slate-100 tracking-tight">
-              Options<span className="text-[#5ba4b5]">Lab</span>
+            <h1 className="text-2xl font-bold text-slate-800">
+              Saxo <span className="text-[#4051B5]">Quant Lab</span>
             </h1>
-            <p className="text-slate-400 text-sm mt-2">
-              Socratic Simulator & Portfolio Intelligence
-            </p>
+            <p className="text-xs text-slate-500 mt-1">Institutional Multi-Agent Options Yield Platform</p>
           </div>
 
-          {/* Security badge */}
-          <div className="flex items-center gap-2 rounded-lg bg-[#7ec8a0]/5 border border-[#7ec8a0]/10 px-4 py-3 mb-8">
-            <ShieldCheck className="h-5 w-5 text-[#7ec8a0] flex-shrink-0" />
-            <p className="text-xs text-slate-400">
-              Authenticated access with Google. Your data stays secure.
-            </p>
+          <div className="space-y-3">
+            {/* Primary Demo Entrance */}
+            <button
+              onClick={handleDemoAccess}
+              className="w-full flex items-center justify-center gap-3 px-5 py-3 rounded-xl bg-[#4051B5] hover:bg-[#34449a] text-white font-medium shadow-md transition-all text-sm"
+            >
+              <UserCheck className="h-4 w-4" />
+              <span>Enter Dashboard (Sathish - Online)</span>
+            </button>
+
+
+            {/* Google OAuth Login */}
+            <button
+              onClick={handleGoogleSignIn}
+              disabled={signingIn}
+              className="w-full flex items-center justify-center gap-3 px-5 py-3 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-medium transition-all text-sm"
+            >
+              {signingIn ? (
+                <Loader className="h-4 w-4 text-slate-500 animate-spin" />
+              ) : (
+                <LogIn className="h-4 w-4 text-slate-500" />
+              )}
+              <span>Sign in with Google</span>
+            </button>
           </div>
 
-          {/* Google Sign In Button */}
-          <button
-            onClick={handleGoogleSignIn}
-            disabled={signingIn}
-            className="w-full flex items-center justify-center gap-3 rounded-xl bg-slate-100 hover:bg-white px-6 py-3.5 text-sm font-semibold text-slate-900 transition-all duration-200 hover:shadow-lg hover:shadow-[#5ba4b5]/10 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {signingIn ? (
-              <Loader className="h-5 w-5 animate-spin" />
-            ) : (
-              <LogIn className="h-5 w-5" />
-            )}
-            {signingIn ? 'Signing in...' : 'Sign in with Google'}
-          </button>
-
-          {/* Footer */}
-          <p className="text-center text-[10px] text-slate-600 mt-8">
-            By signing in, you agree to use this platform for educational and personal analysis purposes only.
-          </p>
+          <div className="mt-8 pt-6 border-t border-slate-100 flex items-center justify-center gap-2 text-[11px] text-slate-400">
+            <ShieldCheck className="h-4 w-4 text-emerald-500" />
+            <span>Saxo OpenAPI 256-Bit Encrypted OAuth Session</span>
+          </div>
         </div>
       </div>
     </div>

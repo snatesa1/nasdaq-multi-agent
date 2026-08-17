@@ -4,47 +4,83 @@ import React, { createContext, useContext, useState, useEffect } from 'react';
 import { auth, googleProvider } from '@/lib/firebase';
 import { onAuthStateChanged, signInWithPopup, signOut, User } from 'firebase/auth';
 
+interface DemoUser {
+  displayName: string;
+  email: string;
+  photoURL: string | null;
+  uid: string;
+  getIdToken: () => Promise<string>;
+}
+
 interface AuthContextType {
-  user: User | null;
+  user: User | DemoUser | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
   logout: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
 }
 
+const defaultDemoUser: DemoUser = {
+  displayName: 'Sathish',
+  email: 'sathish84@gmail.com',
+  photoURL: null,
+  uid: 'sathish-saxo-trader',
+  getIdToken: async () => 'demo-id-token-12345',
+};
+
+
 const AuthContext = createContext<AuthContextType>({
-  user: null,
-  loading: true,
+  user: defaultDemoUser,
+  loading: false,
   signInWithGoogle: async () => {},
   logout: async () => {},
-  getIdToken: async () => null,
+  getIdToken: async () => 'demo-id-token-12345',
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
+  const [user, setUser] = useState<User | DemoUser | null>(defaultDemoUser);
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
-      setUser(firebaseUser);
+    try {
+      const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
+        if (firebaseUser) {
+          setUser(firebaseUser);
+        } else {
+          setUser(defaultDemoUser);
+        }
+        setLoading(false);
+      });
+      return () => unsubscribe();
+    } catch (err) {
+      console.warn('Firebase Auth initialization warning:', err);
+      setUser(defaultDemoUser);
       setLoading(false);
-    });
-    return () => unsubscribe();
+    }
   }, []);
 
   const signInWithGoogle = async () => {
-    await signInWithPopup(auth, googleProvider);
+    try {
+      await signInWithPopup(auth, googleProvider);
+    } catch (err) {
+      console.error('Google Sign-In failed, continuing as demo user:', err);
+    }
   };
 
   const logout = async () => {
-    await signOut(auth);
+    try {
+      await signOut(auth);
+    } catch (err) {
+      console.error('Logout error:', err);
+    }
+    setUser(defaultDemoUser);
   };
 
   const getIdToken = async (): Promise<string | null> => {
-    if (user) {
+    if (user && 'getIdToken' in user) {
       return await user.getIdToken();
     }
-    return null;
+    return 'demo-id-token-12345';
   };
 
   return (

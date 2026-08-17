@@ -39,21 +39,10 @@ class Settings:
             logger.warning("⚠️ Could not resolve GCP Project ID")
             return ""
 
-    # ── Secret Manager helper ────────────────────────────
+    # ── Environment Secret Helper ────────────────────────
     def _get_secret(self, secret_id: str) -> str:
-        """Fetch secret from env var first, falling back to GCP Secret Manager."""
-        val = os.getenv(secret_id, "")
-        if val:
-            return val
-        try:
-            from google.cloud import secretmanager
-            client = secretmanager.SecretManagerServiceClient()
-            name = f"projects/{self.PROJECT_ID}/secrets/{secret_id}/versions/latest"
-            response = client.access_secret_version(request={"name": name})
-            return response.payload.data.decode("UTF-8").strip()
-        except Exception as e:
-            logger.warning(f"⚠️ Secret '{secret_id}' not in Secret Manager or env: {e}")
-            return ""
+        """Fetch secret strictly from environment variables."""
+        return os.getenv(secret_id, "")
 
     # ── Alpaca (OHLCV price data) ────────────────────────
     @cached_property

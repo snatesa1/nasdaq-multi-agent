@@ -172,7 +172,6 @@ def analyze_portfolio_diversification(portfolio_id: str) -> Dict[str, Any]:
     else:
         recommendations.append("Moderate diversification. Adding 3-5 uncorrelated assets from different sectors can reduce risk by up to 50% without affecting returns.")
         
-    if not correlation_warnings:
         correlation_warnings.append("No highly correlated pairs (>0.75) detected.")
         
     return {
@@ -187,3 +186,91 @@ def analyze_portfolio_diversification(portfolio_id: str) -> Dict[str, Any]:
         "correlation_warnings": correlation_warnings[:5],
         "recommendations": recommendations
     }
+
+
+def calculate_portfolio_greeks(
+    positions: List[Dict[str, Any]],
+    risk_free_rate: float = 0.05
+) -> Dict[str, Any]:
+    """
+    Calculate aggregated Net Delta, Net Gamma, Net Theta, and Net Vega
+    for a multi-leg portfolio of stocks and option contracts.
+    
+    Position structure:
+    {
+      "type": "stock" | "call" | "put",
+      "symbol": "AAPL",
+      "quantity": 10 (contracts or stock shares),
+      "spot_price": 180.0,
+      "strike": 180.0,
+      "days_to_expiration": 30,
+      "volatility": 0.25
+    }
+    """
+    from engine.black_scholes import black_scholes_greeks
+    
+    total_delta = 0.0
+    total_gamma = 0.0
+    total_theta = 0.0
+    total_vega = 0.0
+    
+    leg_greeks = []
+    
+    for pos in positions:
+        pos_type = pos.get("type", "stock").lower()
+        qty = float(pos.get("quantity", 1.0))
+        spot = float(pos.get("spot_price", 100.0))
+        
+        if pos_type == "stock":
+            leg_delta = qty * 1.0
+            leg_gamma = 0.0
+            leg_theta = 0.0
+            leg_vega = 0.0
+        else:
+            strike = float(pos.get("strike", spot))
+            days = float(pos.get("days_to_expiration", 30))
+            T = max(days / 365.0, 0.001)
+            vol = float(pos.get("volatility", 0.25))
+            
+            # Each options contract covers 100 shares
+            contract_multiplier = 100.0
+            
+            bs_g = black_scholes_greeks(spot, strike, T, risk_free_rate, vol, pos_type)
+            leg_delta = qty * contract_multiplier * bs_g["delta"]
+            leg_gamma = qty * contract_multiplier * bs_g["gamma"]
+            leg_theta = qty * contract_multiplier * bs_g["theta"]
+            leg_vega = qty * contract_multiplier * bs_g["vega"]
+            
+        total_delta += leg_delta
+        total_gamma += leg_gamma
+        total_theta += leg_theta
+        total_vega += leg_vega
+        
+        leg_greeks.append({
+            "symbol": pos.get("symbol", "N/A"),
+            "type": pos_type.upper(),
+            "quantity": qty,
+            "delta": round(leg_delta, 2),
+            "gamma": round(leg_gamma, 4),
+            "theta": round(leg_theta, 2),
+            "vega": round(leg_vega, 2)
+        })
+        
+    # Delta-neutral hedge calculation: required underlying shares to offset net delta
+    delta_hedge_shares = -round(total_delta, 2)
+    
+    return {
+        "net_greeks": {
+            "delta": round(total_delta, 2),
+            "gamma": round(total_gamma, 4),
+            "theta": round(total_theta, 2),
+            "vega": round(total_vega, 2)
+        },
+        "delta_hedge_recommendation": {
+            "required_shares": delta_hedge_shares,
+            "action": "BUY" if delta_hedge_shares > 0 else "SELL" if delta_hedge_shares < 0 else "NEUTRAL",
+            "explanation": f"{'Buy' if delta_hedge_shares > 0 else 'Sell'} {abs(delta_hedge_shares)} shares of underlying stock to achieve a Delta-Neutral (\u0394 = 0) position."
+        },
+        "leg_details": leg_greeks
+    }
+

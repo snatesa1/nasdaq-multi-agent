@@ -39,11 +39,6 @@ gcloud projects add-iam-policy-binding $PROJECT_ID \
     --member="serviceAccount:$SA_EMAIL" \
     --role="roles/cloudscheduler.admin" --quiet
 
-# Secret Manager Accessor (to access secrets if needed at build time)
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-    --member="serviceAccount:$SA_EMAIL" \
-    --role="roles/secretmanager.secretAccessor" --quiet
-
 echo "🗝️ Creating JSON key..."
 gcloud iam service-accounts keys create github-actions-key.json \
     --iam-account=$SA_EMAIL --quiet

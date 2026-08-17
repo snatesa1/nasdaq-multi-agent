@@ -1,10 +1,16 @@
 import { auth } from '@/lib/firebase';
+import {
+  BrokerStatus,
+  BrokerAccountSummary,
+  BrokerPositionsResponse,
+  BrokerOrdersResponse
+} from '@/types/broker';
 
 const getApiBase = () => {
-  if (typeof window === 'undefined') return 'http://localhost:8080';
+  if (typeof window === 'undefined') return 'http://localhost:8000';
   // Dev server redirects to local fastapi instance
   if (window.location.port === '3000' || window.location.port === '5173') {
-    return 'http://localhost:8080';
+    return 'http://localhost:8000';
   }
   return '';
 };
@@ -64,12 +70,19 @@ export const optionsApi = {
   getGreeksSurface: (params: { S: number; K: number; T: number; r: number; sigma: number; option_type: string }) =>
     apiRequest('/greeks/surface', 'POST', params),
   simulateStrategy: (params: { legs: any[]; underlying_spot: number; r?: number; sigma?: number; price_range_pct?: number; steps?: number }) =>
-
     apiRequest('/strategy/payoff', 'POST', params),
-  askTutor: (params: { message: string; chat_history: any[]; context?: any }) =>
+  getVolSurface: (params: { spot_price: number; base_sigma?: number; risk_free_rate?: number; strike_ratios?: number[]; expirations_days?: number[] }) =>
+    apiRequest('/volatility/surface', 'POST', params),
+  getPortfolioGreeks: (params: { positions: any[]; risk_free_rate?: number }) =>
+    apiRequest('/portfolio/greeks', 'POST', params),
+  askTutor: (params: { message: string; chat_history: any[]; context?: any; enable_grounding?: boolean }) =>
     apiRequest('/tutor/ask', 'POST', params),
+  getTutorHint: (params: { chat_history: any[]; context?: any }) =>
+    apiRequest('/tutor/hint', 'POST', params),
   explainConcept: (concept: string) =>
     apiRequest('/tutor/explain', 'POST', { concept }),
+  scanFundamentalIndex: (symbols?: string[]) =>
+    apiRequest('/fundamental-index/scan', 'POST', { symbols }),
 
   // ── Session Persistence ───────────────────────────────────────────────────
   listSessions: () => apiRequest('/tutor/sessions'),
@@ -121,5 +134,20 @@ export const optionsApi = {
   scanEarnings: (params: { low_threshold_pct: number; min_open_interest: number }) =>
     apiRequest('/api/earnings/scan', 'POST', params),
   getEarningsVolatility: (symbol: string) => apiRequest(`/api/earnings/volatility/${symbol}`),
+
+  // ── Broker Gateway (Live & SIM Integration) ───────────────────────────────
+  getBrokerStatus: (): Promise<BrokerStatus> => apiRequest('/api/broker/status'),
+  getBrokerAuthUrl: (): Promise<{ auth_url: string; app_name: string; redirect_url: string }> => apiRequest('/api/broker/oauth/auth-url'),
+  setBrokerToken: (payload: { token?: string; code?: string; refresh_token?: string }) => apiRequest('/api/broker/oauth/set-token', 'POST', payload),
+  disconnectBroker: () => apiRequest('/api/broker/oauth/disconnect', 'POST'),
+  getBrokerAccount: (): Promise<BrokerAccountSummary> => apiRequest('/api/broker/account'),
+
+  getBrokerPositions: (): Promise<BrokerPositionsResponse> => apiRequest('/api/broker/positions'),
+  getBrokerOrders: (): Promise<BrokerOrdersResponse> => apiRequest('/api/broker/orders'),
+  placeBrokerOrder: (payload: { uic: number; asset_type?: string; amount?: number; buy_sell?: string; order_type?: string; order_price: number }) =>
+    apiRequest('/api/broker/orders', 'POST', payload),
+  runBrokerPipelineScan: (params?: { candidates?: string[]; simulate_order_placement?: boolean }) =>
+    apiRequest('/api/broker/pipeline/scan', 'POST', params || {}),
 };
+
 

@@ -27,4 +27,15 @@ test_env/
 scratch_holdings*.html
 options_lab/test*.py
 
+# Virtual environments & node build outputs
+venv/
+venv_win/
+node_modules/
+.next/
+options_lab/frontend/out/
+options_lab/frontend/.next/
+options_lab/frontend/node_modules/
+*.log
+options_lab_tracker.log
+
 

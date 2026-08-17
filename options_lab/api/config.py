@@ -30,18 +30,8 @@ class Settings:
             return "optimal-aurora-495912-n0"
 
     def _get_secret(self, secret_id: str) -> str:
-        """Fetch secret from env var first, falling back to GCP Secret Manager."""
-        val = os.getenv(secret_id, "")
-        if val:
-            return val
-        try:
-            from google.cloud import secretmanager
-            client = secretmanager.SecretManagerServiceClient()
-            name = f"projects/{self.PROJECT_ID}/secrets/{secret_id}/versions/latest"
-            response = client.access_secret_version(request={"name": name})
-            return response.payload.data.decode("UTF-8").strip()
-        except Exception:
-            return ""
+        """Fetch secret strictly from environment variables."""
+        return os.getenv(secret_id, "")
 
     # ── AI Model ──────────────────────────────────────────────────────────────
     @cached_property
@@ -83,6 +73,69 @@ class Settings:
         """Firebase project ID (usually same as GCP project ID)."""
         return os.getenv("FIREBASE_PROJECT_ID", self.PROJECT_ID)
 
+    # ── Saxo OpenAPI ──────────────────────────────────────────────────────────
+    @cached_property
+    def SAXO_ENV(self) -> str:
+        """Environment: 'SIM' for Simulation Sandbox or 'LIVE' for Live Production Account."""
+        return os.getenv("SAXO_ENV", "SIM").upper()
+
+    @cached_property
+    def BROKER_ALLOW_LIVE_EXECUTION(self) -> bool:
+        """Safety Shield: Blocks any live order placements unless set to True."""
+        return os.getenv("BROKER_ALLOW_LIVE_EXECUTION", "false").lower() == "true"
+
+    @cached_property
+    def SAXO_TIMEOUT_SECONDS(self) -> int:
+        """HTTP connection and read timeout limit in seconds."""
+        return int(os.getenv("SAXO_TIMEOUT_SECONDS", "8"))
+
+    @cached_property
+    def SAXO_APP_NAME(self) -> str:
+        return os.getenv("SAXO_APP_NAME", "BotAlgoTrade")
+
+    @cached_property
+    def SAXO_APP_KEY(self) -> str:
+        return self._get_secret("SAXO_APP_KEY") or "996911eb7c6044c5bc9aa5bf50cdf2e9"
+
+    @cached_property
+    def SAXO_APP_SECRET(self) -> str:
+        return self._get_secret("SAXO_APP_SECRET") or "d5e63c01903b4f70b165b7b800b2a503"
+
+    @cached_property
+    def SAXO_APP_SECRET_ALT(self) -> str:
+        return self._get_secret("SAXO_APP_SECRET_ALT") or "ef9d31cb1c0b49579c6f34eac7238ad2"
+
+    @cached_property
+    def SAXO_ACCESS_TOKEN(self) -> str:
+        return self._get_secret("SAXO_ACCESS_TOKEN")
+
+    @cached_property
+    def SAXO_REFRESH_TOKEN(self) -> str:
+        return self._get_secret("SAXO_REFRESH_TOKEN")
+
+
+    @cached_property
+    def SAXO_AUTH_ENDPOINT(self) -> str:
+        if self.SAXO_ENV == "LIVE":
+            return os.getenv("SAXO_AUTH_ENDPOINT", "https://live.logonvalidation.net/authorize")
+        return os.getenv("SAXO_AUTH_ENDPOINT", "https://sim.logonvalidation.net/authorize")
+
+    @cached_property
+    def SAXO_TOKEN_ENDPOINT(self) -> str:
+        if self.SAXO_ENV == "LIVE":
+            return os.getenv("SAXO_TOKEN_ENDPOINT", "https://live.logonvalidation.net/token")
+        return os.getenv("SAXO_TOKEN_ENDPOINT", "https://sim.logonvalidation.net/token")
+
+    @cached_property
+    def SAXO_OPENAPI_BASE_URL(self) -> str:
+        if self.SAXO_ENV == "LIVE":
+            return os.getenv("SAXO_OPENAPI_BASE_URL", "https://gateway.saxobank.com/openapi/")
+        return os.getenv("SAXO_OPENAPI_BASE_URL", "https://gateway.saxobank.com/sim/openapi/")
+
+    @cached_property
+    def SAXO_REDIRECT_URL(self) -> str:
+        return os.getenv("SAXO_REDIRECT_URL", "https://bot-smart.sg.com")
+
     # ── CORS ──────────────────────────────────────────────────────────────────
     @cached_property
     def CORS_ORIGINS(self) -> list:
@@ -92,3 +145,4 @@ class Settings:
         return ["*"]
 
 settings = Settings()
+

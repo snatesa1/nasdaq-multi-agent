@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks
+from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 import logging
@@ -12,15 +12,34 @@ from .models import (
     MonteCarloPricingRequest,
     LegacyLabRequest,
     StrategyRequest,
-    ExplainerRequest,
+    VolSurfaceRequest,
+    PortfolioGreeksRequest,
     SocraticTutorRequest,
+    TutorHintRequest,
+    ExplainerRequest,
     ScenarioHedgingRequest,
     SaveSessionRequest,
     UpdateSessionRequest,
     AnalyzeRequest,
+    FundamentalIndexRequest,
+    FundamentalIndexResponse,
     EarningsScanRequest,
+    BrokerAccountSummary,
+    BrokerPositionsResponse,
+    BrokerOrdersResponse,
+    BrokerPosition,
+    BrokerOrder
 )
+import asyncio
+from .saxo_client import SaxoClient
 
+
+
+
+import sys
+_options_lab_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _options_lab_dir not in sys.path:
+    sys.path.insert(0, _options_lab_dir)
 
 # Core imports from engine
 from engine.gbm_engine import simulate_gbm
@@ -28,6 +47,7 @@ from engine.black_scholes import black_scholes_price, black_scholes_greeks, impl
 from engine.monte_carlo import pricing_monte_carlo_standard, pricing_monte_carlo_lab_legacy
 from engine.greeks import generate_greeks_surface
 from engine.strategy_simulator import simulate_strategy_payoff
+from engine.volatility_surface import generate_volatility_surface
 
 # Service imports
 from .market_data import fetch_market_data
@@ -49,12 +69,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from .fundamental_index import FundamentalIndexEngine
+
 tutor_service = SocraticTutor()
+fundamental_engine = FundamentalIndexEngine()
+saxo_broker_client = SaxoClient()
+broker_concurrency_lock = asyncio.Lock()
+
 
 # ── Health Check ───────────────────────────────────────────────────────────
 @app.get("/health")
 def health():
     return {"status": "healthy", "service": "options-lab", "version": "2.0.0"}
+
+# ── Fundamental Indexation Scan (Arnott 80/20 Replication) ───────────
+@app.post("/fundamental-index/scan")
+def scan_fundamental_index(params: FundamentalIndexRequest = FundamentalIndexRequest()):
+    try:
+        results = fundamental_engine.compute_index(symbols=params.symbols)
+        return results
+    except Exception as e:
+        logger.error(f"Fundamental Index scan failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/debug/db")
 def debug_db():
@@ -250,6 +287,35 @@ def strategy_payoff(params: StrategyRequest, user=Depends(verify_firebase_token)
         logger.error(f"Strategy payoff simulation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# ── Volatility Surface ───────────────────────────────────────────────────────
+@app.post("/volatility/surface")
+def volatility_surface(params: VolSurfaceRequest, user=Depends(verify_firebase_token)):
+    try:
+        results = generate_volatility_surface(
+            spot_price=params.spot_price,
+            base_sigma=params.base_sigma,
+            risk_free_rate=params.risk_free_rate,
+            strike_ratios=params.strike_ratios,
+            expirations_days=params.expirations_days,
+            skew_intensity=params.skew_intensity,
+            smile_convexity=params.smile_convexity
+        )
+        return results
+    except Exception as e:
+        logger.error(f"Volatility surface calculation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Portfolio Net Greeks Aggregator ──────────────────────────────────────────
+@app.post("/portfolio/greeks")
+def portfolio_greeks(params: PortfolioGreeksRequest, user=Depends(verify_firebase_token)):
+    try:
+        from .analysis import calculate_portfolio_greeks
+        positions = [p.dict() for p in params.positions]
+        return calculate_portfolio_greeks(positions=positions, risk_free_rate=params.risk_free_rate)
+    except Exception as e:
+        logger.error(f"Portfolio Greeks calculation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ── Socratic Tutor Chat ────────────────────────────────────────────────────
 @app.post("/tutor/ask")
 def tutor_ask(params: SocraticTutorRequest, user=Depends(verify_firebase_token)):
@@ -257,11 +323,25 @@ def tutor_ask(params: SocraticTutorRequest, user=Depends(verify_firebase_token))
         response = tutor_service.generate_response(
             message=params.message,
             chat_history=params.chat_history,
-            context=params.context
+            context=params.context,
+            enable_grounding=params.enable_grounding
         )
         return {"response": response}
     except Exception as e:
         logger.error(f"Tutor chat failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Socratic Tutor Pedagogical Hint ─────────────────────────────────────────
+@app.post("/tutor/hint")
+def tutor_hint(params: TutorHintRequest, user=Depends(verify_firebase_token)):
+    try:
+        hint = tutor_service.generate_hint(
+            chat_history=params.chat_history,
+            context=params.context
+        )
+        return {"hint": hint}
+    except Exception as e:
+        logger.error(f"Tutor hint generation failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ── Socratic Tutor Concept Explanation ──────────────────────────────────────
@@ -509,7 +589,7 @@ def get_upcoming_earnings(user=Depends(verify_firebase_token)):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/earnings/scan")
-async def scan_earnings(req: EarningsScanRequest, user=Depends(verify_firebase_token)):
+async def scan_earnings(req: EarningsScanRequest = Body(...), user=Depends(verify_firebase_token)):
     try:
         from .earnings_scanner import run_earnings_scan
         results = await run_earnings_scan(
@@ -531,6 +611,174 @@ async def get_earnings_volatility(symbol: str, user=Depends(verify_firebase_toke
     except Exception as e:
         logger.error(f"Failed to get earnings volatility for {symbol}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ── Broker Gateway Endpoints (Type-Safe Live & SIM Integration) ───────────
+
+@app.get("/api/broker/status")
+def get_broker_status(user=Depends(verify_firebase_token)):
+    """Returns the operational environment, live execution safety guard, and connection health."""
+    return {
+        "environment": settings.SAXO_ENV,
+        "allow_live_execution": settings.BROKER_ALLOW_LIVE_EXECUTION,
+        "has_access_token": bool(saxo_broker_client.access_token),
+        "has_refresh_token": bool(saxo_broker_client.refresh_token),
+        "needs_reauth": getattr(saxo_broker_client, 'needs_reauth', False),
+        "base_url": saxo_broker_client.base_url,
+        "timeout_seconds": saxo_broker_client.timeout,
+        "app_name": settings.SAXO_APP_NAME,
+        "status": "NEEDS_REAUTH" if getattr(saxo_broker_client, 'needs_reauth', False) else "READY"
+    }
+
+@app.get("/api/broker/oauth/auth-url")
+def get_broker_auth_url(user=Depends(verify_firebase_token)):
+    """Generates the Saxo OpenAPI OAuth login URL for authorizing the Live Akpegis-Agent app."""
+    url = saxo_broker_client.get_authorization_url()
+    return {"auth_url": url, "app_name": settings.SAXO_APP_NAME, "redirect_url": settings.SAXO_REDIRECT_URL}
+
+@app.post("/api/broker/oauth/set-token")
+def set_broker_token(payload: Dict[str, Any] = Body(...), user=Depends(verify_firebase_token)):
+    """
+    Sets the live access token or exchanges an authorization code.
+    Allows 1-click token injection from the developer portal or OAuth redirect.
+    """
+    token = payload.get("token") or payload.get("access_token")
+    code = payload.get("code")
+    refresh_token = payload.get("refresh_token")
+
+    if token and ("code=" in token or token.startswith("http")):
+        from urllib.parse import urlparse, parse_qs
+        parsed = urlparse(token)
+        query_params = parse_qs(parsed.query)
+        if "code" in query_params:
+            code = query_params["code"][0]
+
+    if code:
+        data = saxo_broker_client.exchange_code_for_token(code)
+        return {"status": "SUCCESS", "message": "Live Saxo OAuth token successfully exchanged!", "data": data}
+
+    if token:
+        saxo_broker_client.set_token(token, refresh_token)
+        saxo_broker_client._persist_tokens_to_env()
+        return {"status": "SUCCESS", "message": "Live Saxo token successfully registered!", "environment": settings.SAXO_ENV}
+
+    raise HTTPException(status_code=400, detail="Missing 'token' or 'code' parameter.")
+
+
+@app.post("/api/broker/oauth/disconnect")
+def disconnect_broker(user=Depends(verify_firebase_token)):
+    """
+    Clears live access tokens and closes active broker session.
+    Safely terminates any live trading API calls.
+    """
+    saxo_broker_client.access_token = None
+    saxo_broker_client.refresh_token = None
+    if hasattr(saxo_broker_client, "session"):
+        saxo_broker_client.session.cookies.clear()
+    logger.info("Broker Live API session disconnected and access tokens cleared.")
+    return {"status": "DISCONNECTED", "message": "Live Saxo trading bot connection safely closed."}
+
+
+
+@app.get("/api/broker/account", response_model=BrokerAccountSummary)
+async def get_broker_account(user=Depends(verify_firebase_token)):
+    """Fetches real-time portfolio balance, equity, and margin with concurrency safety."""
+    async with broker_concurrency_lock:
+        try:
+            balances = saxo_broker_client.get_account_balances()
+            return BrokerAccountSummary(**balances)
+        except ValueError as ve:
+            if "authentication required" in str(ve).lower():
+                raise HTTPException(status_code=401, detail=str(ve))
+            raise HTTPException(status_code=400, detail=str(ve))
+        except Exception as e:
+            logger.error(f"Failed to fetch broker account: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/broker/positions", response_model=BrokerPositionsResponse)
+async def get_broker_positions(user=Depends(verify_firebase_token)):
+    """Fetches current open stock and option positions with live mark prices and unrealized PnL."""
+    async with broker_concurrency_lock:
+        try:
+            positions_data = saxo_broker_client.get_positions()
+            return BrokerPositionsResponse(**positions_data)
+        except ValueError as ve:
+            if "authentication required" in str(ve).lower():
+                raise HTTPException(status_code=401, detail=str(ve))
+            raise HTTPException(status_code=400, detail=str(ve))
+        except Exception as e:
+            logger.error(f"Failed to fetch broker positions: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/broker/orders", response_model=BrokerOrdersResponse)
+async def get_broker_orders(user=Depends(verify_firebase_token)):
+    """Fetches active working orders and recently executed order history."""
+    async with broker_concurrency_lock:
+        try:
+            orders_data = saxo_broker_client.get_orders()
+            return BrokerOrdersResponse(**orders_data)
+        except ValueError as ve:
+            if "authentication required" in str(ve).lower():
+                raise HTTPException(status_code=401, detail=str(ve))
+            raise HTTPException(status_code=400, detail=str(ve))
+        except Exception as e:
+            logger.error(f"Failed to fetch broker orders: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/broker/orders")
+async def place_broker_order(
+    payload: Dict[str, Any] = Body(...),
+    user=Depends(verify_firebase_token)
+):
+    """
+    Places an order via the broker gateway.
+    Protected by the Live Safety Shield (blocks real execution unless explicitly enabled).
+    """
+    async with broker_concurrency_lock:
+        try:
+            uic = int(payload.get("uic", 0))
+            asset_type = payload.get("asset_type", "StockOption")
+            amount = int(payload.get("amount", 1))
+            buy_sell = payload.get("buy_sell", "Sell")
+            order_type = payload.get("order_type", "Limit")
+            order_price = float(payload.get("order_price", 0.0))
+
+            res = saxo_broker_client.place_order(
+                uic=uic,
+                asset_type=asset_type,
+                amount=amount,
+                buy_sell=buy_sell,
+                order_type=order_type,
+                order_price=order_price
+            )
+            return res
+        except Exception as e:
+            logger.error(f"Failed to place broker order: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/broker/pipeline/scan")
+async def run_broker_pipeline_scan(
+    payload: Optional[Dict[str, Any]] = Body(default=None),
+    user=Depends(verify_firebase_token)
+):
+    """
+    Triggers end-to-end systematic options yield scan with concurrency lock
+    to avoid duplicate or overlapping background scans.
+    """
+    async with broker_concurrency_lock:
+        try:
+            from .saxo_pipeline import SaxoPipeline
+            pipeline = SaxoPipeline(saxo_client=saxo_broker_client)
+            candidates = (payload or {}).get("candidates", ["AAPL", "NVDA", "JPM", "TSLA"])
+            simulate_order = (payload or {}).get("simulate_order_placement", True)
+
+            results = await pipeline.execute_full_pipeline_scan(
+                candidate_tickers=candidates,
+                simulate_order_placement=simulate_order
+            )
+            return results
+        except Exception as e:
+            logger.error(f"Broker pipeline scan failed: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
 
 # ── Serve Static Frontend Files ─────────────────────────────────────────────
 from fastapi.staticfiles import StaticFiles

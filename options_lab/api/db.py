@@ -30,15 +30,16 @@ _DB_PATH = os.path.join(_DATA_DIR, "optionslab.db")
 _USE_FIRESTORE = False
 _firestore_client = None
 
-try:
-    from google.cloud import firestore
-    _firestore_client = firestore.Client()
-    _USE_FIRESTORE = True
-    logger.info("Firestore storage initialized for Socratic tutor sessions.")
-except ImportError:
-    logger.warning("google-cloud-firestore module not found. Falling back to SQLite for sessions.")
-except Exception as e:
-    logger.warning(f"Could not initialize Firestore client: {e}. Falling back to SQLite for sessions.")
+if os.getenv("USE_FIRESTORE", "false").lower() == "true" or os.getenv("K_SERVICE"):
+    try:
+        from google.cloud import firestore
+        _firestore_client = firestore.Client()
+        _USE_FIRESTORE = True
+        logger.info("Firestore storage initialized for Socratic tutor sessions.")
+    except Exception as e:
+        logger.warning(f"Could not initialize Firestore client: {e}. Falling back to SQLite for sessions.")
+else:
+    logger.info("Using SQLite database for local sessions storage.")
 
 
 def _get_conn() -> sqlite3.Connection:

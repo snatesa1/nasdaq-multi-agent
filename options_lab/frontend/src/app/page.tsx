@@ -1,211 +1,593 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { 
   TrendingUp, 
+  TrendingDown,
   Cpu, 
-  HelpCircle, 
   ArrowUpRight, 
   Shield, 
   DollarSign, 
-  Activity 
+  Activity,
+  Briefcase,
+  Clock,
+  ExternalLink,
+  CheckCircle,
+  AlertTriangle,
+  RefreshCw,
+  LogOut,
+  Key,
+  Database,
+  ArrowRightLeft
 } from 'lucide-react';
 import { optionsApi } from '@/lib/api';
-import { LineChart, Line, XAxis, YAxis, Tooltip, ResponsiveContainer } from 'recharts';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
-interface Quote {
+interface Position {
+  position_id: string;
+  uic: number;
   symbol: string;
+  description: string;
+  asset_type: string;
+  option_type: string | null;
+  strike_price: number | null;
+  expiry_date: string | null;
+  amount: number;
+  open_price: number;
   current_price: number;
-  historical_volatility: number;
-  is_simulated: boolean;
+  market_value: number;
+  unrealized_pnl: number;
+  unrealized_pnl_pct: number;
+  currency: string;
 }
 
 export default function Dashboard() {
-  const [quotes, setQuotes] = useState<Record<string, Quote>>({});
-  const [loadingQuotes, setLoadingQuotes] = useState(true);
-  const [gbmPath, setGbmPath] = useState<any[]>([]);
-  const [loadingGbm, setLoadingGbm] = useState(true);
+  const router = useRouter();
+  
+  // Loading & Error States
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  
+  // Authenticated State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
+  const [devTokenInput, setDevTokenInput] = useState('');
+  
+  // Data States
+  const [brokerStatus, setBrokerStatus] = useState<any>(null);
+  const [brokerAccount, setBrokerAccount] = useState<any>(null);
+  const [positions, setPositions] = useState<Position[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
 
-  // Fetch initial quotes for major dashboard tickers
-  useEffect(() => {
-    async function fetchAll() {
-      try {
-        const symbols = ['AAPL', 'NVDA', 'PANW', 'TSLA'];
-        const results: Record<string, Quote> = {};
-        for (const sym of symbols) {
-          const data = await optionsApi.getQuote(sym);
-          results[sym] = data;
+  // Watchlist for Cash-Secured Puts (CSP) & Covered Calls (CC)
+  const cspWatchlist = [
+    { ticker: 'AAPL', price: 220.50, strike: 210.00, delta: -0.22, dte: 35, premium: 4.80, yield: 2.3, annualized: 24.0, earnings: '2026-10-29' },
+    { ticker: 'NVDA', price: 124.80, strike: 115.00, delta: -0.25, dte: 35, premium: 5.10, yield: 4.4, annualized: 46.2, earnings: '2026-11-18' },
+    { ticker: 'MSFT', price: 422.30, strike: 405.00, delta: -0.19, dte: 35, premium: 6.20, yield: 1.5, annualized: 16.0, earnings: '2026-10-27' },
+    { ticker: 'TSLA', price: 215.40, strike: 195.00, delta: -0.28, dte: 35, premium: 7.50, yield: 3.8, annualized: 40.1, earnings: '2026-10-21' }
+  ];
+
+  // Fetch all live data from Saxo Bank API
+  const fetchBrokerData = async (forceSpinner = false) => {
+    if (forceSpinner) setActionLoading(true);
+    setErrorMsg(null);
+    try {
+      // 1. Get status & verify if authenticated
+      const statusRes = await optionsApi.getBrokerStatus();
+      setBrokerStatus(statusRes);
+      
+      // If no token is set in the environment, redirect to connection screen
+      if (!statusRes?.access_token) {
+        setIsAuthenticated(false);
+        const authUrlRes = await optionsApi.getBrokerAuthUrl().catch(() => null);
+        if (authUrlRes?.auth_url) {
+          setAuthUrl(authUrlRes.auth_url);
         }
-        setQuotes(results);
-      } catch (err) {
-        console.error('Failed to load quotes:', err);
-      } finally {
-        setLoadingQuotes(false);
+        setLoading(false);
+        setActionLoading(false);
+        return;
       }
-    }
-    fetchAll();
-  }, []);
+      
+      setIsAuthenticated(true);
+      
+      // 2. Fetch Account Balances
+      const accountRes = await optionsApi.getBrokerAccount();
+      setBrokerAccount(accountRes);
+      
+      // 3. Fetch Positions
+      const positionsRes = await optionsApi.getBrokerPositions();
+      if (positionsRes?.positions) {
+        setPositions(positionsRes.positions);
+      } else {
+        setPositions([]);
+      }
 
-  // Fetch a sample single GBM path to animate on the dashboard
+      // 4. Fetch Active Orders
+      const ordersRes = await optionsApi.getBrokerOrders().catch(() => null);
+      if (ordersRes?.orders) {
+        setOrders(ordersRes.orders);
+      }
+      
+    } catch (err: any) {
+      console.error('Failed to load broker data:', err);
+      // Intercept authentication/401 errors
+      if (err.message?.includes('401') || err.message?.includes('authentication required')) {
+        setIsAuthenticated(false);
+        const authUrlRes = await optionsApi.getBrokerAuthUrl().catch(() => null);
+        if (authUrlRes?.auth_url) {
+          setAuthUrl(authUrlRes.auth_url);
+        }
+      } else {
+        setErrorMsg(err.message || 'An unexpected error occurred while communicating with the broker gateway.');
+      }
+    } finally {
+      setLoading(false);
+      setActionLoading(false);
+    }
+  };
+
   useEffect(() => {
-    async function fetchGbm() {
-      try {
-        const data = await optionsApi.simulateGbm({
-          S0: 100,
-          mu: 0.05,
-          sigma: 0.20,
-          T: 0.5,
-          N: 50,
-          num_paths: 1
-        });
-        
-        // Format path for Recharts
-        const chartData = data.paths[0].map((val: number, idx: number) => ({
-          step: idx,
-          price: parseFloat(val.toFixed(2))
-        }));
-        setGbmPath(chartData);
-      } catch (err) {
-        console.error('Failed to load GBM demo path:', err);
-      } finally {
-        setLoadingGbm(false);
-      }
-    }
-    fetchGbm();
+    fetchBrokerData();
   }, []);
 
-  return (
-    <ProtectedRoute>
-    <div className="space-y-8">
-      {/* Welcome Banner */}
-      <div className="relative overflow-hidden rounded-xl bg-gradient-to-r from-[#1e2538] to-[#141824] p-8 border border-slate-800">
-        <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-[#5ba4b5]/5 blur-3xl" />
-        <div className="absolute right-20 bottom-0 h-32 w-32 rounded-full bg-[#7ec8a0]/5 blur-3xl" />
-        
-        <div className="relative z-10 max-w-2xl space-y-4">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-[#5ba4b5]/10 px-3 py-1 text-xs font-semibold text-[#5ba4b5]">
-            <Activity className="h-3 w-3 animate-pulse" /> Socratic Learning Environment
-          </span>
-          <h1 className="text-3xl font-extrabold text-slate-100 tracking-tight sm:text-4xl">
-            Welcome to Options<span className="text-[#5ba4b5]">Lab</span>
-          </h1>
-          <p className="text-slate-400 text-sm sm:text-base leading-relaxed">
-            Welcome to your options trading and risk management playground. Run vectorized Brownian motion simulations,
-            model multi-leg option strategies, and engage with the Socratic Tutor to learn hedging and arbitrage without capital loss.
-          </p>
-          <div className="pt-2 flex flex-wrap gap-4">
-            <Link href="/learn" className="inline-flex items-center gap-2 rounded-lg bg-[#5ba4b5] px-4 py-2.5 text-sm font-semibold text-slate-900 transition hover:bg-[#4a91a2]">
-              Start Socratic Lesson <ArrowUpRight className="h-4 w-4" />
-            </Link>
-            <Link href="/simulator" className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-900/50 px-4 py-2.5 text-sm font-semibold text-slate-300 transition hover:bg-slate-800">
-              Go to Simulator
-            </Link>
-          </div>
-        </div>
-      </div>
+  // Handle Developer Token manual configuration
+  const handleSetDevToken = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!devTokenInput.trim()) return;
+    
+    setActionLoading(true);
+    setErrorMsg(null);
+    try {
+      await optionsApi.setBrokerToken({ token: devTokenInput.trim() });
+      setDevTokenInput('');
+      await fetchBrokerData(false);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to apply developer token.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
 
-      {/* Quote Grid */}
-      <div className="grid gap-6 md:grid-cols-4">
-        {loadingQuotes ? (
-          Array.from({ length: 4 }).map((_, idx) => (
-            <div key={idx} className="glass-card p-6 h-32 animate-pulse bg-slate-900/30 border border-slate-800 rounded-lg" />
-          ))
-        ) : (
-          Object.values(quotes).map((quote) => (
-            <div key={quote.symbol} className="glass-card p-6 hover:-translate-y-1 transition-all duration-300">
-              <div className="flex justify-between items-start">
-                <div>
-                  <span className="text-xs font-bold text-slate-500 uppercase tracking-wider">{quote.symbol}</span>
-                  <h3 className="text-2xl font-bold font-mono mt-1 text-slate-200">${quote.current_price.toFixed(2)}</h3>
-                </div>
-                <span className="rounded bg-[#5ba4b5]/10 px-2 py-0.5 text-[10px] font-semibold text-[#5ba4b5]">
-                  {quote.is_simulated ? 'Simulated' : 'yFinance'}
-                </span>
-              </div>
-              <div className="mt-4 flex items-center justify-between text-xs">
-                <span className="text-slate-400">Ann. Volatility</span>
-                <span className="font-mono text-[#7ec8a0] font-semibold">{(quote.historical_volatility * 100).toFixed(1)}%</span>
-              </div>
-            </div>
-          ))
-        )}
-      </div>
+  // Disconnect Broker connection (clear token)
+  const handleDisconnect = async () => {
+    const confirm = window.confirm('Are you sure you want to disconnect from Saxo Live Platform?');
+    if (!confirm) return;
 
-      {/* Main Content Grid */}
-      <div className="grid gap-8 lg:grid-cols-3">
-        {/* GBM Preview Chart */}
-        <div className="glass-card p-6 lg:col-span-2 space-y-4">
-          <div className="flex justify-between items-center">
-            <div>
-              <h2 className="text-lg font-bold text-slate-200">Geometric Brownian Motion</h2>
-              <p className="text-xs text-slate-400">Random walk simulations at S0=100, &sigma;=20%</p>
-            </div>
-            <Link href="/simulator" className="text-xs text-[#5ba4b5] hover:underline flex items-center gap-1">
-              Playground <ArrowUpRight className="h-3 w-3" />
-            </Link>
+    setActionLoading(true);
+    setErrorMsg(null);
+    try {
+      await optionsApi.disconnectBroker();
+      setIsAuthenticated(false);
+      setBrokerAccount(null);
+      setPositions([]);
+      setOrders([]);
+      // Reload authentication URL
+      const authUrlRes = await optionsApi.getBrokerAuthUrl().catch(() => null);
+      if (authUrlRes?.auth_url) {
+        setAuthUrl(authUrlRes.auth_url);
+      }
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to clear session.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  // Calculate Reserved CSP Collateral dynamically
+  // Collateral = Strike Price * absolute(qty) * 100
+  const totalCSPCollateral = positions
+    .filter(p => p.asset_type === 'StockOption' && p.option_type === 'put' && p.amount < 0)
+    .reduce((acc, curr) => acc + (Number(curr.strike_price || 0) * Math.abs(curr.amount) * 100), 0);
+
+  // CC Eligible Stock Holdings (positions with >= 100 shares)
+  const ccEligibleHoldings = positions.filter(
+    p => p.asset_type === 'Stock' && p.amount >= 100
+  );
+
+  // Loading Screen
+  if (loading) {
+    return (
+      <div className="flex flex-col items-center justify-center min-h-[500px] space-y-4">
+        <RefreshCw className="h-8 w-8 text-indigo-600 animate-spin" />
+        <p className="text-sm font-semibold text-slate-500">Querying live broker session...</p>
+      </div>
+    );
+  }
+
+  // Connection Screen (If not authenticated)
+  if (!isAuthenticated) {
+    return (
+      <div className="max-w-2xl mx-auto my-12 space-y-6">
+        <div className="velzon-card p-8 border border-indigo-100 shadow-lg text-center space-y-6 bg-white rounded-2xl">
+          <div className="mx-auto h-16 w-16 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
+            <Key className="h-8 w-8" />
           </div>
-          <div className="h-64 w-full">
-            {loadingGbm ? (
-              <div className="h-full w-full flex items-center justify-center text-xs text-slate-400">Loading paths...</div>
+          
+          <div className="space-y-2">
+            <h1 className="text-2xl font-bold text-slate-900">Connect your Saxo Account</h1>
+            <p className="text-sm text-slate-500">
+              Saxo Live Platform API authentication is required to access your holdings, metrics, and manage your CSP/CC Wheel strategies.
+            </p>
+          </div>
+
+          <div className="p-4 bg-amber-50 border border-amber-200 rounded-xl text-left flex items-start gap-3">
+            <Shield className="h-5 w-5 text-amber-600 mt-0.5 flex-shrink-0" />
+            <div className="text-xs text-amber-800 space-y-1">
+              <span className="font-bold">Live Execution Shield Active:</span>
+              <p>The application is restricted to read-only mode by default. No real order executions or portfolio changes will occur unless explicitly configured in environment flags.</p>
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row justify-center gap-4 pt-4">
+            {authUrl ? (
+              <a 
+                href={authUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-md transition-colors"
+              >
+                Sign In with Saxo OpenAPI <ExternalLink className="h-4 w-4" />
+              </a>
             ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <LineChart data={gbmPath}>
-                  <XAxis dataKey="step" tick={{ fill: '#64748b', fontSize: 10 }} stroke="rgba(255,255,255,0.05)" />
-                  <YAxis domain={['auto', 'auto']} tick={{ fill: '#64748b', fontSize: 10 }} stroke="rgba(255,255,255,0.05)" />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#1a1d24', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px' }}
-                    labelStyle={{ color: '#64748b', fontSize: 10 }}
-                    itemStyle={{ color: '#5ba4b5', fontSize: 12 }}
-                  />
-                  <Line type="monotone" dataKey="price" stroke="#5ba4b5" strokeWidth={2} dot={false} />
-                </LineChart>
-              </ResponsiveContainer>
+              <button 
+                onClick={() => fetchBrokerData(true)} 
+                disabled={actionLoading}
+                className="px-6 py-3 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-sm transition-colors flex items-center justify-center gap-2"
+              >
+                {actionLoading && <RefreshCw className="h-4 w-4 animate-spin" />}
+                Retry Broker Lookup
+              </button>
             )}
           </div>
         </div>
 
-        {/* Lesson Roadmap */}
-        <div className="glass-card p-6 space-y-4">
-          <h2 className="text-lg font-bold text-slate-200">Socratic Syllabus</h2>
-          <div className="space-y-4">
-            <div className="flex gap-3">
-              <div className="h-8 w-8 rounded-lg bg-[#5ba4b5]/10 text-[#5ba4b5] flex items-center justify-center flex-shrink-0">
-                <Cpu className="h-4 w-4" />
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold text-slate-200">GBM & Monte Carlo Pricing</h4>
-                <p className="text-xs text-slate-400 mt-0.5">Explore conditional expectation pricing models.</p>
-                <Link href="/simulator" className="text-xs text-[#5ba4b5] hover:underline mt-1.5 inline-block">Start Lab &rarr;</Link>
-              </div>
-            </div>
+        {/* Manual Token Fallback Card */}
+        <div className="velzon-card p-6 border border-slate-200 bg-white rounded-xl shadow-sm space-y-4">
+          <div>
+            <h3 className="text-sm font-bold text-slate-800">Developer Access Token</h3>
+            <p className="text-xs text-slate-400">Configure a 24-hour developer access token directly from the Saxo Portal.</p>
+          </div>
+          <form onSubmit={handleSetDevToken} className="flex gap-2">
+            <input 
+              type="text" 
+              placeholder="Paste Saxo developer token here..."
+              value={devTokenInput}
+              onChange={(e) => setDevTokenInput(e.target.value)}
+              className="flex-1 px-3.5 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
+            />
+            <button 
+              type="submit"
+              disabled={actionLoading || !devTokenInput.trim()}
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-200 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5"
+            >
+              {actionLoading && <RefreshCw className="h-3 w-3 animate-spin" />}
+              Apply
+            </button>
+          </form>
+        </div>
 
-            <div className="flex gap-3">
-              <div className="h-8 w-8 rounded-lg bg-[#7ec8a0]/10 text-[#7ec8a0] flex items-center justify-center flex-shrink-0">
-                <DollarSign className="h-4 w-4" />
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold text-slate-200">Income Generation (Selling Calls)</h4>
-                <p className="text-xs text-slate-400 mt-0.5">Covered Calls vs Cash-Secured Puts.</p>
-                <Link href="/strategies" className="text-xs text-[#7ec8a0] hover:underline mt-1.5 inline-block">Design Strategy &rarr;</Link>
-              </div>
-            </div>
+        {errorMsg && (
+          <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+      </div>
+    );
+  }
 
-            <div className="flex gap-3">
-              <div className="h-8 w-8 rounded-lg bg-red-500/10 text-[#dc3545] flex items-center justify-center flex-shrink-0">
-                <Shield className="h-4 w-4" />
-              </div>
-              <div>
-                <h4 className="text-sm font-semibold text-slate-200">Hedging & Capital Preservation</h4>
-                <p className="text-xs text-slate-400 mt-0.5">How to collar shares of PANW, AAPL, etc.</p>
-                <Link href="/learn" className="text-xs text-[#dc3545] hover:underline mt-1.5 inline-block">Discuss with Tutor &rarr;</Link>
-              </div>
-            </div>
+  return (
+    <ProtectedRoute>
+      <div className="space-y-6">
+        
+        {/* Top Header Bar */}
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-bold text-slate-800 tracking-tight">OPTIONS LAB GATEWAY</h1>
+            <p className="text-xs text-slate-400 font-medium">Saxo Live Production Portfolio &amp; Strategy Center</p>
+          </div>
+          <div className="flex items-center gap-3">
+            {actionLoading && <RefreshCw className="h-4 w-4 text-indigo-600 animate-spin" />}
+            <button 
+              onClick={() => fetchBrokerData(true)}
+              disabled={actionLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 disabled:bg-slate-100 rounded-lg text-slate-700 text-xs font-bold transition shadow-sm"
+            >
+              <RefreshCw className="h-3.5 w-3.5" /> Refresh Data
+            </button>
+            <button 
+              onClick={handleDisconnect}
+              disabled={actionLoading}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-lg text-xs font-bold transition shadow-sm"
+            >
+              <LogOut className="h-3.5 w-3.5" /> Disconnect
+            </button>
           </div>
         </div>
+
+        {errorMsg && (
+          <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0" />
+            <span>{errorMsg}</span>
+          </div>
+        )}
+
+        {/* ── 1. Executive Metrics Grid (4-Column Portfolio Stats) ────────────────── */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
+          
+          <div className="velzon-card p-5 bg-white border border-slate-150 rounded-xl shadow-sm flex items-center gap-4">
+            <div className="h-10 w-10 bg-indigo-50 rounded-lg text-indigo-600 flex items-center justify-center border border-indigo-100">
+              <Briefcase className="h-5 w-5" />
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Net Account Value</span>
+              <span className="text-lg font-bold font-mono text-slate-800">
+                ${brokerAccount?.total_equity ? Number(brokerAccount.total_equity).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'}
+              </span>
+              <span className="text-[10px] text-slate-400 block font-mono">Currency: {brokerAccount?.currency || 'USD'}</span>
+            </div>
+          </div>
+
+          <div className="velzon-card p-5 bg-white border border-slate-150 rounded-xl shadow-sm flex items-center gap-4">
+            <div className="h-10 w-10 bg-emerald-50 rounded-lg text-emerald-600 flex items-center justify-center border border-emerald-100">
+              <DollarSign className="h-5 w-5" />
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Available Cash</span>
+              <span className="text-lg font-bold font-mono text-slate-800">
+                ${brokerAccount?.cash_available ? Number(brokerAccount.cash_available).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}) : '0.00'}
+              </span>
+              <span className="text-[10px] text-emerald-600 font-bold block">Live Cash Account</span>
+            </div>
+          </div>
+
+          <div className="velzon-card p-5 bg-white border border-slate-150 rounded-xl shadow-sm flex items-center gap-4">
+            <div className="h-10 w-10 bg-amber-50 rounded-lg text-amber-600 flex items-center justify-center border border-amber-100">
+              <Shield className="h-5 w-5" />
+            </div>
+            <div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">CSP Collateral Locked</span>
+              <span className="text-lg font-bold font-mono text-slate-800">
+                ${totalCSPCollateral.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+              </span>
+              <span className="text-[10px] text-amber-600 font-bold block">Secured Puts Exposure</span>
+            </div>
+          </div>
+
+          {/* Unrealized P&L Card with proper P&L formula coloring */}
+          <div className="velzon-card p-5 bg-white border border-slate-150 rounded-xl shadow-sm flex items-center gap-4">
+            {brokerAccount?.total_equity && positions.length > 0 ? (
+              (() => {
+                const totalPnL = positions.reduce((acc, curr) => acc + curr.unrealized_pnl, 0);
+                const isProfit = totalPnL >= 0;
+                // Calculate P&L % vs portfolio equity
+                const pnlPct = brokerAccount.total_equity > 0 ? (totalPnL / brokerAccount.total_equity) * 100 : 0;
+                
+                return (
+                  <>
+                    <div className={`h-10 w-10 rounded-lg flex items-center justify-center border ${
+                      isProfit ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 'bg-rose-50 text-rose-600 border-rose-100'
+                    }`}>
+                      {isProfit ? <TrendingUp className="h-5 w-5" /> : <TrendingDown className="h-5 w-5" />}
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Positions P&L</span>
+                      <span className={`text-lg font-bold font-mono ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {isProfit ? '+' : ''}${totalPnL.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                      </span>
+                      <span className={`text-[10px] font-bold block ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
+                        {isProfit ? '+' : ''}{pnlPct.toFixed(2)}% of Portfolio
+                      </span>
+                    </div>
+                  </>
+                );
+              })()
+            ) : (
+              <>
+                <div className="h-10 w-10 bg-slate-50 rounded-lg text-slate-500 flex items-center justify-center border border-slate-100">
+                  <Activity className="h-5 w-5" />
+                </div>
+                <div>
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Positions P&L</span>
+                  <span className="text-lg font-bold font-mono text-slate-800">$0.00</span>
+                  <span className="text-[10px] text-slate-400 block font-mono">0.00%</span>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+
+        {/* ── 2. Live Saxo Holdings & Positions Table ────────────────────────────── */}
+        <div className="velzon-card p-6 bg-white border border-slate-150 rounded-xl shadow-sm space-y-4">
+          <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <Database className="h-4 w-4 text-indigo-600" /> Live Saxo Holdings &amp; Open Positions
+              </h3>
+              <p className="text-[11px] text-slate-400">Current holdings extracted directly from Saxo live platform, with verified percentage returns.</p>
+            </div>
+            <span className="text-xs font-bold text-slate-500 font-mono">
+              Count: {positions.length}
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            {positions.length > 0 ? (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="py-2.5 px-3">Symbol</th>
+                    <th className="py-2.5 px-3">Description</th>
+                    <th className="py-2.5 px-3 text-center">Asset Class</th>
+                    <th className="py-2.5 px-3 text-center">Side</th>
+                    <th className="py-2.5 px-3 text-right">Quantity</th>
+                    <th className="py-2.5 px-3 text-right">Cost Price</th>
+                    <th className="py-2.5 px-3 text-right">Mark Price</th>
+                    <th className="py-2.5 px-3 text-right">Market Value</th>
+                    <th className="py-2.5 px-3 text-right">Unrealized P&L</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                  {positions.map((p) => {
+                    const isProfit = p.unrealized_pnl >= 0;
+                    const side = p.amount >= 0 ? 'Long' : 'Short';
+                    const isOption = p.asset_type === 'StockOption' || p.asset_type === 'Option';
+
+                    return (
+                      <tr key={p.position_id} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="py-3 px-3 font-bold text-slate-900">{p.symbol}</td>
+                        <td className="py-3 px-3 text-slate-500 max-w-xs truncate" title={p.description}>
+                          {p.description}
+                          {isOption && p.expiry_date && (
+                            <span className="block text-[9px] text-slate-400 font-mono mt-0.5">
+                              Expiry: {p.expiry_date} | Strike: ${p.strike_price} {p.option_type?.toUpperCase()}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold uppercase">
+                            {p.asset_type === 'StockOption' ? 'Option' : p.asset_type}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className={`inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                            side === 'Long' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                          }`}>
+                            {side}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-800">
+                          {p.amount.toLocaleString()}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-slate-600">
+                          ${p.open_price.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-slate-600">
+                          ${p.current_price.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-slate-800">
+                          ${p.market_value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono">
+                          <span className={`font-bold block ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {isProfit ? '+' : ''}{p.unrealized_pnl.toFixed(2)} {p.currency}
+                          </span>
+                          <span className={`text-[10px] block font-semibold ${isProfit ? 'text-emerald-500' : 'text-rose-500'}`}>
+                            {isProfit ? '+' : ''}{p.unrealized_pnl_pct.toFixed(2)}%
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <div className="flex flex-col items-center justify-center p-8 bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-2">
+                <Database className="h-6 w-6 text-slate-400" />
+                <p className="text-xs font-semibold text-slate-500">No active positions found in your Saxo Account.</p>
+                <p className="text-[10px] text-slate-400">If you hold assets, click Refresh Data or verify your credentials.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── 3. CSP & CC strategy layouts (Split Side-by-Side Panel) ───────────── */}
+        <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
+
+          {/* Cash-Secured Puts (CSP) Watchlist Monitor */}
+          <div className="velzon-card p-6 bg-white border border-slate-150 rounded-xl shadow-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                <ArrowRightLeft className="h-4 w-4 text-emerald-600" /> CSP Watchlist &amp; Opportunity Scanner
+              </h3>
+              <p className="text-[11px] text-slate-400">Scan for cash-secured puts yield setups targeting ~0.20 to 0.30 Delta strikes.</p>
+            </div>
+            
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="py-2 px-3">Ticker</th>
+                    <th className="py-2 px-3 text-right">Stock Price</th>
+                    <th className="py-2 px-3 text-right">Target Put Strike</th>
+                    <th className="py-2 px-3 text-center">Delta</th>
+                    <th className="py-2 px-3 text-right">Premium</th>
+                    <th className="py-2 px-3 text-right">Annual Yield</th>
+                    <th className="py-2 px-3 text-center">Earnings Date</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs text-slate-600 font-medium">
+                  {cspWatchlist.map((c) => (
+                    <tr key={c.ticker} className="hover:bg-slate-50/50 transition-colors">
+                      <td className="py-2.5 px-3 font-bold text-slate-900">{c.ticker}</td>
+                      <td className="py-2.5 px-3 text-right font-mono">${c.price.toFixed(2)}</td>
+                      <td className="py-2.5 px-3 text-right font-mono font-bold text-indigo-600">${c.strike.toFixed(2)}</td>
+                      <td className="py-2.5 px-3 text-center font-mono text-rose-600 font-bold">{c.delta.toFixed(2)}</td>
+                      <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-800">${c.premium.toFixed(2)}</td>
+                      <td className="py-2.5 px-3 text-right font-mono text-emerald-600 font-bold">+{c.annualized}%</td>
+                      <td className="py-2.5 px-3 text-center font-mono text-slate-400 text-[10px]">{c.earnings}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Covered Calls (CC) Opportunity Engine */}
+          <div className="velzon-card p-6 bg-white border border-slate-150 rounded-xl shadow-sm space-y-4">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-1.5">
+                <Cpu className="h-4 w-4 text-indigo-600" /> CC Opportunity Engine
+              </h3>
+              <p className="text-[11px] text-slate-400">Monitors stock holdings with 100+ shares eligible for selling covered calls.</p>
+            </div>
+            
+            <div className="overflow-x-auto">
+              {ccEligibleHoldings.length > 0 ? (
+                <table className="w-full text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                      <th className="py-2 px-3">Holding</th>
+                      <th className="py-2 px-3 text-right">Shares Held</th>
+                      <th className="py-2 px-3 text-right">Cost Price</th>
+                      <th className="py-2 px-3 text-right">Current Price</th>
+                      <th className="py-2 px-3 text-right">Target Call Strike</th>
+                      <th className="py-2 px-3 text-right">Est. Premium</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-xs text-slate-600 font-medium">
+                    {ccEligibleHoldings.map((h) => {
+                      // Estimate target strike at ~5-10% OTM call
+                      const targetStrike = Math.round(h.current_price * 1.07);
+                      const estimatedPremium = (h.current_price * 0.02); // 2% premium
+                      return (
+                        <tr key={h.position_id} className="hover:bg-slate-50/50 transition-colors">
+                          <td className="py-2.5 px-3 font-bold text-slate-900">{h.symbol}</td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-800">{h.amount.toLocaleString()}</td>
+                          <td className="py-2.5 px-3 text-right font-mono">${h.open_price.toFixed(2)}</td>
+                          <td className="py-2.5 px-3 text-right font-mono">${h.current_price.toFixed(2)}</td>
+                          <td className="py-2.5 px-3 text-right font-mono font-bold text-indigo-600">${targetStrike.toFixed(2)}</td>
+                          <td className="py-2.5 px-3 text-right font-mono text-emerald-600 font-bold">${estimatedPremium.toFixed(2)}</td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                <div className="flex flex-col items-center justify-center p-6 bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-1">
+                  <Activity className="h-5 w-5 text-slate-400" />
+                  <p className="text-[11px] font-semibold text-slate-500">No stock positions with &gt;= 100 shares found.</p>
+                  <p className="text-[10px] text-slate-400">Buy 100 shares of any watchlist asset to enable Covered Calls.</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+        </div>
+
       </div>
-    </div>
     </ProtectedRoute>
   );
 }
