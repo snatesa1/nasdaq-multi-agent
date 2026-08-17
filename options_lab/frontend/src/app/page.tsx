@@ -79,7 +79,7 @@ export default function Dashboard() {
       setBrokerStatus(statusRes);
       
       // If no token is set in the environment, redirect to connection screen
-      if (!statusRes?.access_token) {
+      if (!statusRes?.has_access_token) {
         setIsAuthenticated(false);
         const authUrlRes = await optionsApi.getBrokerAuthUrl().catch(() => null);
         if (authUrlRes?.auth_url) {
