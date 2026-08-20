@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { 
   Compass, 
+
   ShieldAlert, 
   ShieldCheck, 
   Upload, 
@@ -22,7 +23,10 @@ import {
   ChevronUp,
   Award,
   Activity,
-  ArrowRight
+  ArrowRight,
+  ExternalLink,
+  Search,
+  Radio
 } from 'lucide-react';
 import { optionsApi } from '@/lib/api';
 
@@ -33,6 +37,10 @@ export default function BehavioralLabPage() {
   const [auditData, setAuditData] = useState<any>(null);
   const [campaigns, setCampaigns] = useState<any[]>([]);
   const [newsItems, setNewsItems] = useState<any[]>([]);
+  const [newsRefreshing, setNewsRefreshing] = useState<boolean>(false);
+  const [lastNewsUpdate, setLastNewsUpdate] = useState<string>('');
+  const [newsCategory, setNewsCategory] = useState<string>('ALL');
+  const [newsSearch, setNewsSearch] = useState<string>('');
   const [expandedTicker, setExpandedTicker] = useState<string | null>(null);
 
   // Safety Shield Interactive Simulator State
@@ -48,9 +56,16 @@ export default function BehavioralLabPage() {
 
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Load baseline audit and news on mount
+  // Load baseline audit and news on mount + 10-minute auto-feeder
   useEffect(() => {
     loadData();
+
+    // 10-minute automated background news feeder
+    const newsInterval = setInterval(() => {
+      fetchLiveNews(false);
+    }, 10 * 60 * 1000);
+
+    return () => clearInterval(newsInterval);
   }, []);
 
   const loadData = async () => {
@@ -59,17 +74,36 @@ export default function BehavioralLabPage() {
       const [auditRes, campRes, newsRes] = await Promise.all([
         optionsApi.getBehavioralAudit(),
         optionsApi.getHistoricalCampaigns(),
-        optionsApi.getPortfolioNews(15)
+        optionsApi.getPortfolioNews(30)
       ]);
       setAuditData(auditRes);
       setCampaigns(campRes?.campaigns || []);
-      setNewsItems(newsRes?.news || []);
+      if (newsRes?.news) {
+        setNewsItems(newsRes.news);
+        setLastNewsUpdate(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      }
     } catch (err) {
       console.error('Failed to load behavioral audit data:', err);
     } finally {
       setLoading(false);
     }
   };
+
+  const fetchLiveNews = async (showSpinner = true) => {
+    if (showSpinner) setNewsRefreshing(true);
+    try {
+      const newsRes = await optionsApi.getPortfolioNews(35);
+      if (newsRes?.news) {
+        setNewsItems(newsRes.news);
+        setLastNewsUpdate(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
+      }
+    } catch (err) {
+      console.warn('Failed to refresh news feed:', err);
+    } finally {
+      if (showSpinner) setNewsRefreshing(false);
+    }
+  };
+
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -587,36 +621,175 @@ export default function BehavioralLabPage() {
       )}
 
       {/* ── Tab 4: Portfolio News Wire ─────────────────────────────────── */}
-      {activeTab === 'news' && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
-          <div className="flex items-center justify-between border-b border-slate-200 pb-4 mb-4">
-            <div>
-              <h2 className="text-lg font-bold text-slate-900">Saxo Portfolio News Wire</h2>
-              <p className="text-xs text-slate-500">Real-time market flow and institutional headline stream.</p>
-            </div>
-            <span className="text-xs font-semibold px-3 py-1 bg-indigo-50 text-indigo-700 rounded-full">
-              Live Feed
-            </span>
-          </div>
+      {activeTab === 'news' && (() => {
+        const filteredNews = newsItems.filter(item => {
+          const matchCat = newsCategory === 'ALL' || item.category === newsCategory;
+          const matchSearch = !newsSearch.trim() || 
+            (item.headline && item.headline.toLowerCase().includes(newsSearch.toLowerCase())) ||
+            (item.source && item.source.toLowerCase().includes(newsSearch.toLowerCase())) ||
+            (item.category && item.category.toLowerCase().includes(newsSearch.toLowerCase()));
+          return matchCat && matchSearch;
+        });
 
-          <div className="divide-y divide-slate-100">
-            {newsItems.map((item, idx) => (
-              <div key={idx} className="py-3 flex items-start justify-between gap-4 hover:bg-slate-50/60 p-2 rounded-xl transition">
-                <div className="flex items-start gap-3">
-                  <div className="px-2 py-1 bg-slate-100 text-slate-700 font-mono text-xs font-bold rounded-lg shrink-0">
-                    {item.time || '18:00'}
-                  </div>
-                  <div>
-                    <h4 className="text-sm font-bold text-slate-900">{item.headline}</h4>
-                    <span className="text-xs text-slate-400 font-medium">Source: {item.source || 'Saxo Wire'} · {item.category || 'Equities'}</span>
-                  </div>
+        const categories = ['ALL', 'Crypto', 'Earnings', 'Macro/Fed', 'Tech', 'Derivatives', 'Equities'];
+
+        return (
+          <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-5">
+            
+            {/* Header with Live Pulsing Badge & Refresh Button */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-150 pb-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-lg font-bold text-slate-900">Live Saxo &amp; Portfolio News Wire</h2>
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                    <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                  </span>
                 </div>
-                <ArrowRight className="w-4 h-4 text-slate-300 shrink-0 mt-1" />
+                <p className="text-xs text-slate-500 mt-0.5">
+                  Real-time market flow &amp; financial headlines • Auto-refreshes every 10 min
+                  {lastNewsUpdate && <span className="ml-2 font-mono font-bold text-slate-600">· Last sync: {lastNewsUpdate}</span>}
+                </p>
               </div>
-            ))}
+
+              {/* Action Controls */}
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => fetchLiveNews(true)}
+                  disabled={newsRefreshing}
+                  className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 disabled:bg-slate-100 text-indigo-700 disabled:text-slate-400 font-bold text-xs rounded-xl border border-indigo-200 transition shadow-sm"
+                  title="Trigger instant live news refresh"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${newsRefreshing ? 'animate-spin text-indigo-600' : ''}`} />
+                  {newsRefreshing ? 'Refreshing Feed...' : 'Refresh Feed'}
+                </button>
+              </div>
+            </div>
+
+            {/* Filter Pills & Search Bar */}
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pt-1">
+              
+              {/* Category Pills */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                {categories.map((cat) => {
+                  const count = cat === 'ALL' ? newsItems.length : newsItems.filter(i => i.category === cat).length;
+                  const isActive = newsCategory === cat;
+                  
+                  return (
+                    <button
+                      key={cat}
+                      onClick={() => setNewsCategory(cat)}
+                      className={`px-3 py-1 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                        isActive 
+                          ? 'bg-slate-900 text-white shadow-sm' 
+                          : 'bg-slate-100 hover:bg-slate-200 text-slate-600'
+                      }`}
+                    >
+                      <span>{cat}</span>
+                      <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${
+                        isActive ? 'bg-slate-700 text-slate-200' : 'bg-slate-200 text-slate-600'
+                      }`}>
+                        {count}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Search Box */}
+              <div className="relative min-w-[220px]">
+                <Search className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Filter headlines or ticker..."
+                  value={newsSearch}
+                  onChange={(e) => setNewsSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-1.5 text-xs bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 font-medium text-slate-800"
+                />
+              </div>
+            </div>
+
+            {/* News Headline List */}
+            <div className="divide-y divide-slate-100 pt-2">
+              {filteredNews.length > 0 ? (
+                filteredNews.map((item, idx) => {
+                  const isCrypto = item.category === 'Crypto';
+                  const isEarnings = item.category === 'Earnings';
+                  const isMacro = item.category === 'Macro/Fed';
+                  const isTech = item.category === 'Tech';
+
+                  return (
+                    <div 
+                      key={idx} 
+                      className="py-3 px-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/80 rounded-xl transition group"
+                    >
+                      <div className="flex items-start gap-3 min-w-0">
+                        <div className="px-2 py-1 bg-slate-100 text-slate-700 font-mono text-[11px] font-bold rounded-lg shrink-0 border border-slate-200">
+                          {item.time || 'Live'}
+                        </div>
+                        
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold uppercase ${
+                              isCrypto ? 'bg-purple-100 text-purple-700 border border-purple-200' :
+                              isEarnings ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                              isMacro ? 'bg-sky-100 text-sky-800 border border-sky-200' :
+                              isTech ? 'bg-indigo-100 text-indigo-800 border border-indigo-200' :
+                              'bg-slate-100 text-slate-700 border border-slate-200'
+                            }`}>
+                              {item.category || 'Equities'}
+                            </span>
+                            <span className="text-[11px] font-semibold text-slate-500">
+                              {item.source || 'Saxo News'}
+                            </span>
+                          </div>
+                          
+                          {item.link ? (
+                            <a
+                              href={item.link}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-sm font-bold text-slate-800 hover:text-indigo-600 transition block group-hover:text-indigo-600"
+                            >
+                              {item.headline}
+                            </a>
+                          ) : (
+                            <h4 className="text-sm font-bold text-slate-800">{item.headline}</h4>
+                          )}
+                        </div>
+                      </div>
+
+                      {item.link && (
+                        <a
+                          href={item.link}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="self-end sm:self-center p-1.5 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition shrink-0"
+                          title="Read full article"
+                        >
+                          <ExternalLink className="w-4 h-4" />
+                        </a>
+                      )}
+                    </div>
+                  );
+                })
+              ) : (
+                <div className="py-12 text-center text-slate-400 text-xs">
+                  No headlines match the selected category or filter.
+                </div>
+              )}
+            </div>
+
+            {/* Footer Summary */}
+            <div className="text-[11px] text-slate-400 pt-3 border-t border-slate-100 flex items-center justify-between">
+              <span>Showing {filteredNews.length} of {newsItems.length} active market wire items</span>
+              <span className="font-semibold text-indigo-600">Continuous 10-min background sync</span>
+            </div>
+
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
+
