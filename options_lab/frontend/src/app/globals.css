@@ -3,16 +3,22 @@
 @tailwind utilities;
 
 :root {
-  --background: #12141a;
-  --foreground: #e4e6eb;
-  --card-bg: rgba(26, 29, 36, 0.7);
-  --card-border: rgba(255, 255, 255, 0.06);
-  --primary: #5ba4b5;      /* soft teal */
-  --primary-hover: #4a91a2;
-  --profit: #7ec8a0;       /* mild sage green */
-  --loss: #dc3545;         /* crimson red */
-  --accent: #d4a853;       /* warm gold */
-  --border-glow: rgba(91, 164, 181, 0.25);
+  --background: #f3f3f9;
+  --foreground: #212529;
+  --muted: #878a99;
+  --card-bg: #ffffff;
+  --card-border: #e9ebec;
+  --primary: #4051b5;         /* Velzon Indigo */
+  --primary-hover: #36449e;
+  --primary-light: #eef0f7;
+  --profit: #0ab39c;          /* Velzon Emerald */
+  --profit-light: #daf5f1;
+  --loss: #f06548;            /* Velzon Coral/Rose */
+  --loss-light: #fde8e4;
+  --warning: #f7b84b;         /* Velzon Amber */
+  --warning-light: #fef4e3;
+  --accent: #299cdb;          /* Velzon Cyan */
+  --accent-light: #e0f2fe;
 }
 
 body {
@@ -20,70 +26,79 @@ body {
   background-color: var(--background);
   font-family: 'Inter', system-ui, -apple-system, sans-serif;
   overflow-x: hidden;
-  background-image: 
-    radial-gradient(at 0% 0%, rgba(91, 164, 181, 0.08) 0px, transparent 50%),
-    radial-gradient(at 50% 0%, rgba(212, 168, 83, 0.04) 0px, transparent 50%),
-    radial-gradient(at 100% 100%, rgba(126, 200, 160, 0.05) 0px, transparent 50%);
-  background-attachment: fixed;
+  min-height: 100vh;
 }
 
-/* Glassmorphism utility card styles */
-.glass-card {
+/* Velzon Card Container */
+.velzon-card {
   background: var(--card-bg);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
   border: 1px solid var(--card-border);
-  border-radius: 12px;
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+  border-radius: 0.75rem; /* rounded-xl */
+  box-shadow: 0 1px 2px 0 rgba(56, 65, 74, 0.05);
+  transition: all 0.25s ease-in-out;
 }
 
-.glass-card:hover {
-  border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.4);
+.velzon-card:hover {
+  box-shadow: 0 5px 12px 0 rgba(56, 65, 74, 0.08);
 }
 
-/* Soft glow effects */
-.glow-primary {
-  box-shadow: 0 0 15px var(--border-glow);
+/* Metric Pill Badges */
+.badge-soft-success {
+  background-color: var(--profit-light);
+  color: var(--profit);
+  border: 1px solid rgba(10, 179, 156, 0.15);
 }
 
-.glow-profit {
-  box-shadow: 0 0 15px rgba(126, 200, 160, 0.15);
+.badge-soft-danger {
+  background-color: var(--loss-light);
+  color: var(--loss);
+  border: 1px solid rgba(240, 101, 72, 0.15);
 }
 
-.glow-loss {
-  box-shadow: 0 0 15px rgba(220, 53, 69, 0.15);
+.badge-soft-warning {
+  background-color: var(--warning-light);
+  color: var(--warning);
+  border: 1px solid rgba(247, 184, 75, 0.15);
 }
 
-/* Custom scrollbars */
+.badge-soft-primary {
+  background-color: var(--primary-light);
+  color: var(--primary);
+  border: 1px solid rgba(64, 81, 181, 0.15);
+}
+
+/* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(0, 0, 0, 0.1);
+  background: #f1f1f5;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: #cbd5e1;
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.25);
+  background: #94a3b8;
 }
 
-/* Inputs and Forms */
+/* Velzon Inputs & Selects */
 input, select, textarea {
-  background: rgba(18, 20, 26, 0.6);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  color: #fff;
+  background: #ffffff;
+  border: 1px solid #ced4da;
+  color: #212529;
+  border-radius: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  font-size: 0.875rem;
   transition: all 0.2s ease-in-out;
 }
 
 input:focus, select:focus, textarea:focus {
   border-color: var(--primary);
   outline: none;
-  box-shadow: 0 0 0 2px var(--border-glow);
+  box-shadow: 0 0 0 3px rgba(64, 81, 181, 0.12);
 }

@@ -1,0 +1,13 @@
+{
+  "name": "options-lab-desktop",
+  "version": "2.0.0",
+  "description": "OptionsLab Desktop & Autonomous Trading Gateway",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev"
+  },
+  "dependencies": {
+    "electron": "^33.2.1"
+  }
+}

@@ -1,10 +1,16 @@
 import { auth } from '@/lib/firebase';
+import {
+  BrokerStatus,
+  BrokerAccountSummary,
+  BrokerPositionsResponse,
+  BrokerOrdersResponse
+} from '@/types/broker';
 
 const getApiBase = () => {
-  if (typeof window === 'undefined') return 'http://localhost:8080';
+  if (typeof window === 'undefined') return 'http://localhost:8000';
   // Dev server redirects to local fastapi instance
   if (window.location.port === '3000' || window.location.port === '5173') {
-    return 'http://localhost:8080';
+    return 'http://localhost:8000';
   }
   return '';
 };
@@ -64,12 +70,19 @@ export const optionsApi = {
   getGreeksSurface: (params: { S: number; K: number; T: number; r: number; sigma: number; option_type: string }) =>
     apiRequest('/greeks/surface', 'POST', params),
   simulateStrategy: (params: { legs: any[]; underlying_spot: number; r?: number; sigma?: number; price_range_pct?: number; steps?: number }) =>
-
     apiRequest('/strategy/payoff', 'POST', params),
-  askTutor: (params: { message: string; chat_history: any[]; context?: any }) =>
+  getVolSurface: (params: { spot_price: number; base_sigma?: number; risk_free_rate?: number; strike_ratios?: number[]; expirations_days?: number[] }) =>
+    apiRequest('/volatility/surface', 'POST', params),
+  getPortfolioGreeks: (params: { positions: any[]; risk_free_rate?: number }) =>
+    apiRequest('/portfolio/greeks', 'POST', params),
+  askTutor: (params: { message: string; chat_history: any[]; context?: any; enable_grounding?: boolean }) =>
     apiRequest('/tutor/ask', 'POST', params),
+  getTutorHint: (params: { chat_history: any[]; context?: any }) =>
+    apiRequest('/tutor/hint', 'POST', params),
   explainConcept: (concept: string) =>
     apiRequest('/tutor/explain', 'POST', { concept }),
+  scanFundamentalIndex: (symbols?: string[]) =>
+    apiRequest('/fundamental-index/scan', 'POST', { symbols }),
 
   // ── Session Persistence ───────────────────────────────────────────────────
   listSessions: () => apiRequest('/tutor/sessions'),
@@ -97,7 +110,7 @@ export const optionsApi = {
   listPortfolios: () => apiRequest('/api/portfolio'),
   getPortfolio: (id: string) => apiRequest(`/api/portfolio/${id}`),
   analyzePortfolio: (id: string) => apiRequest(`/api/portfolio/${id}/analyze`),
-  syncPortfolio: (spreadsheetId?: string) => apiRequest(spreadsheetId ? `/api/portfolio/sync?spreadsheet_id=${spreadsheetId}` : '/api/portfolio/sync', 'POST'),
+  syncPortfolio: (spreadsheetId?: string) => apiRequest(spreadsheetId ? `/api/portfolio/sync?spreadsheet_id=${encodeURIComponent(spreadsheetId)}` : '/api/portfolio/sync', 'POST'),
   deletePortfolio: async (id: string) => {
     const url = `${API_BASE_URL}/api/portfolio/${id}`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -121,5 +134,57 @@ export const optionsApi = {
   scanEarnings: (params: { low_threshold_pct: number; min_open_interest: number }) =>
     apiRequest('/api/earnings/scan', 'POST', params),
   getEarningsVolatility: (symbol: string) => apiRequest(`/api/earnings/volatility/${symbol}`),
+
+  // ── Broker Gateway (Live & SIM Integration) ───────────────────────────────
+  getBrokerStatus: (): Promise<BrokerStatus> => apiRequest('/api/broker/status'),
+  getBrokerAuthUrl: (): Promise<{ auth_url: string; app_name: string; redirect_url: string }> => apiRequest('/api/broker/oauth/auth-url'),
+  setBrokerToken: (payload: { token?: string; code?: string; refresh_token?: string }) => apiRequest('/api/broker/oauth/set-token', 'POST', payload),
+  disconnectBroker: () => apiRequest('/api/broker/oauth/disconnect', 'POST'),
+  getBrokerAccount: (): Promise<BrokerAccountSummary> => apiRequest('/api/broker/account'),
+
+  getBrokerPositions: (): Promise<BrokerPositionsResponse> => apiRequest('/api/broker/positions'),
+  getBrokerOrders: (): Promise<BrokerOrdersResponse> => apiRequest('/api/broker/orders'),
+  getBrokerClosedPositions: (): Promise<{ trades: any[]; count: number }> => apiRequest('/api/broker/closed-positions'),
+  getBrokerOrderBlotter: (): Promise<any> => apiRequest('/api/broker/order-blotter'),
+  getBrokerWatchlists: (): Promise<{ watchlists: any[] }> => apiRequest('/api/broker/watchlists'),
+  getBrokerWatchlistInstruments: (watchlistId: string): Promise<{ watchlist_id: string; instruments: any[] }> =>
+    apiRequest(`/api/broker/watchlist/${encodeURIComponent(watchlistId)}`),
+  scanCspOpportunities: (source: string = 'saxo', watchlistId?: string): Promise<{ source: string; scanned_symbols: string[]; opportunities: any[] }> =>
+    apiRequest(watchlistId ? `/api/scanner/csp?source=${source}&watchlist_id=${encodeURIComponent(watchlistId)}` : `/api/scanner/csp?source=${source}`),
+  placeBrokerOrder: (payload: { uic: number; asset_type?: string; amount?: number; buy_sell?: string; order_type?: string; order_price: number }) =>
+    apiRequest('/api/broker/orders', 'POST', payload),
+  runBrokerPipelineScan: (params?: { candidates?: string[]; simulate_order_placement?: boolean }) =>
+    apiRequest('/api/broker/pipeline/scan', 'POST', params || {}),
+
+  // ── Multi-Year Trade History & Behavioral Forensics ───────────────────────
+  uploadPdfReport: async (file: File) => {
+    const url = `${API_BASE_URL}/api/history/upload-pdf`;
+    const formData = new FormData();
+    formData.append('file', file);
+    const headers: Record<string, string> = {};
+    try {
+      await auth.authStateReady();
+      const token = await auth.currentUser?.getIdToken();
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+    } catch (e) { /* no-op */ }
+    const res = await fetch(url, { method: 'POST', headers, body: formData });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`PDF upload failed: ${err}`);
+    }
+    return await res.json();
+  },
+  initSampleReport: () => apiRequest('/api/history/sample-init', 'POST'),
+  listReports: () => apiRequest('/api/history/reports'),
+  getHistoricalCampaigns: (reportId?: string) =>
+    apiRequest(reportId ? `/api/history/campaigns?report_id=${encodeURIComponent(reportId)}` : '/api/history/campaigns'),
+  getBehavioralAudit: (reportId?: string) =>
+    apiRequest(reportId ? `/api/history/behavioral-audit?report_id=${encodeURIComponent(reportId)}` : '/api/history/behavioral-audit'),
+  getPortfolioNews: (top: number = 25) =>
+    apiRequest(`/api/history/news?top=${top}`),
+  checkOrderSafety: (payload: any) =>
+    apiRequest('/api/shield/check-order', 'POST', payload),
 };
+
+
 

@@ -31,10 +31,6 @@ echo "🚀 Deploying $SERVICE_NAME to Cloud Run in $REGION..."
 echo "🔑 Granting IAM permissions..."
 gcloud projects add-iam-policy-binding $PROJECT_ID \
   --member="serviceAccount:$SA_EMAIL" \
-  --role="roles/secretmanager.secretAccessor" --quiet
-
-gcloud projects add-iam-policy-binding $PROJECT_ID \
-  --member="serviceAccount:$SA_EMAIL" \
   --role="roles/aiplatform.user" --quiet
 
 # 2. Build and Push Image

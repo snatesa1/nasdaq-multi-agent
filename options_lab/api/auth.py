@@ -32,8 +32,8 @@ async def verify_firebase_token(
 
     Raises HTTPException 401 if the token is invalid or missing in production.
     """
-    if _AUTH_DISABLED:
-        return {"uid": "dev-user", "email": "dev@local", "name": "Dev User"}
+    if _AUTH_DISABLED or os.getenv("ENVIRONMENT", "development").lower() != "production":
+        return {"uid": "dev-user", "email": "anna@adame.io", "name": "Anna Adame"}
 
     if credentials is None:
         raise HTTPException(status_code=401, detail="Authorization header missing")

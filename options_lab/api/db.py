@@ -30,15 +30,16 @@ _DB_PATH = os.path.join(_DATA_DIR, "optionslab.db")
 _USE_FIRESTORE = False
 _firestore_client = None
 
-try:
-    from google.cloud import firestore
-    _firestore_client = firestore.Client()
-    _USE_FIRESTORE = True
-    logger.info("Firestore storage initialized for Socratic tutor sessions.")
-except ImportError:
-    logger.warning("google-cloud-firestore module not found. Falling back to SQLite for sessions.")
-except Exception as e:
-    logger.warning(f"Could not initialize Firestore client: {e}. Falling back to SQLite for sessions.")
+if os.getenv("USE_FIRESTORE", "false").lower() == "true" or os.getenv("K_SERVICE"):
+    try:
+        from google.cloud import firestore
+        _firestore_client = firestore.Client()
+        _USE_FIRESTORE = True
+        logger.info("Firestore storage initialized for Socratic tutor sessions.")
+    except Exception as e:
+        logger.warning(f"Could not initialize Firestore client: {e}. Falling back to SQLite for sessions.")
+else:
+    logger.info("Using SQLite database for local sessions storage.")
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -93,6 +94,14 @@ def _init_db():
                 last_synced   TEXT,
                 FOREIGN KEY (portfolio_id) REFERENCES portfolios(id) ON DELETE CASCADE,
                 UNIQUE(portfolio_id, symbol)
+            )
+        """)
+        # ── Saxo Live Cache ──────────────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS saxo_cache (
+                key         TEXT PRIMARY KEY,
+                data        TEXT NOT NULL,
+                updated_at  TEXT NOT NULL
             )
         """)
         conn.commit()
@@ -203,21 +212,31 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
     return data
 
 
-def update_session(session_id: str, messages: List[Dict[str, str]], title: Optional[str] = None) -> Optional[Dict[str, Any]]:
+def update_session(
+    session_id: str, 
+    messages: List[Dict[str, str]], 
+    title: Optional[str] = None,
+    generate_learnings: bool = False
+) -> Optional[Dict[str, Any]]:
     """Append / overwrite messages for an existing session."""
     now = datetime.now(timezone.utc).isoformat()
-    learnings = get_key_learnings(messages)
+    
+    # Only invoke LLM summarization on explicit title updates or when requested
+    learnings = None
+    if generate_learnings or (title is not None and len(messages) >= 4):
+        learnings = get_key_learnings(messages)
 
     if _USE_FIRESTORE and _firestore_client:
         try:
             doc_ref = _firestore_client.collection("tutor_sessions").document(session_id)
-            update_data = {
+            update_data: Dict[str, Any] = {
                 "messages": messages,
                 "updated_at": now,
-                "key_learnings": learnings
             }
             if title:
                 update_data["title"] = title
+            if learnings:
+                update_data["key_learnings"] = learnings
             doc_ref.set(update_data, merge=True)
             doc = doc_ref.get()
             if doc.exists:
@@ -229,15 +248,25 @@ def update_session(session_id: str, messages: List[Dict[str, str]], title: Optio
     messages_json = json.dumps(messages)
 
     with _get_conn() as conn:
-        if title:
+        if title and learnings:
             conn.execute(
                 "UPDATE sessions SET messages=?, updated_at=?, title=?, key_learnings=? WHERE id=?",
                 (messages_json, now, title, learnings, session_id)
             )
-        else:
+        elif title:
+            conn.execute(
+                "UPDATE sessions SET messages=?, updated_at=?, title=? WHERE id=?",
+                (messages_json, now, title, session_id)
+            )
+        elif learnings:
             conn.execute(
                 "UPDATE sessions SET messages=?, updated_at=?, key_learnings=? WHERE id=?",
                 (messages_json, now, learnings, session_id)
+            )
+        else:
+            conn.execute(
+                "UPDATE sessions SET messages=?, updated_at=? WHERE id=?",
+                (messages_json, now, session_id)
             )
         conn.commit()
         row = conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
@@ -407,3 +436,49 @@ def upsert_portfolio_tickers(
         rd["price"] = rd.get("current_price", 0.0)
         res.append(rd)
     return res
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  SAXO LIVE PERSISTENT CACHE
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def set_saxo_cache(key: str, data: Any):
+    """Store Saxo broker data in SQLite cache."""
+    try:
+        with _get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO saxo_cache (key, data, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(key) DO UPDATE SET
+                    data = excluded.data,
+                    updated_at = excluded.updated_at
+                """,
+                (key, json.dumps(data), datetime.now(timezone.utc).isoformat())
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to write saxo cache for {key}: {e}")
+
+def get_saxo_cache(key: str) -> Optional[Any]:
+    """Retrieve cached Saxo broker data from SQLite."""
+    try:
+        with _get_conn() as conn:
+            row = conn.execute("SELECT data FROM saxo_cache WHERE key = ?", (key,)).fetchone()
+            if row:
+                return json.loads(row["data"])
+    except Exception as e:
+        logger.error(f"Failed to read saxo cache for {key}: {e}")
+    return None
+
+def clear_saxo_cache():
+    """Wipes all cached Saxo broker data on disconnect."""
+    try:
+        with _get_conn() as conn:
+            conn.execute("DELETE FROM saxo_cache")
+            conn.commit()
+            logger.info("Cleared all Saxo cache records from SQLite.")
+    except Exception as e:
+        logger.error(f"Failed to clear saxo cache: {e}")
+
+

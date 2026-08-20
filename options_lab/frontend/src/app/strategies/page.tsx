@@ -42,7 +42,6 @@ export default function StrategiesPage() {
     has_naked_short: false
   });
 
-  // Built-in presets
   const applyPreset = (presetName: string) => {
     let presetLegs: Leg[] = [];
     if (presetName === 'covered_call') {
@@ -205,288 +204,241 @@ export default function StrategiesPage() {
 
   return (
     <ProtectedRoute>
-    <div className="space-y-8">
-      {/* Header */}
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-slate-100">Options Strategy Playground</h1>
-        <p className="text-slate-400 text-sm">Assemble multi-leg derivative positions and evaluate their visual time-decay P&L.</p>
-      </div>
-
-      {/* Preset bar */}
-      <div className="flex flex-wrap gap-3">
-        <button onClick={() => applyPreset('covered_call')} className="rounded-lg bg-slate-900 border border-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:border-[#7ec8a0] hover:text-[#7ec8a0] transition">
-          Covered Call
-        </button>
-        <button onClick={() => applyPreset('secured_put')} className="rounded-lg bg-slate-900 border border-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:border-[#5ba4b5] hover:text-[#5ba4b5] transition">
-          Cash-Secured Put
-        </button>
-        <button onClick={() => applyPreset('naked_call')} className="rounded-lg bg-slate-900 border border-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:border-[#dc3545] hover:text-[#dc3545] transition">
-          Naked Call (High Risk)
-        </button>
-        <button onClick={() => applyPreset('straddle')} className="rounded-lg bg-slate-900 border border-slate-800 px-4 py-2 text-xs font-semibold text-slate-300 hover:border-[#d4a853] hover:text-[#d4a853] transition">
-          Long Straddle
-        </button>
-      </div>
-
-      <div className="grid gap-8 lg:grid-cols-3">
-        {/* Legs editor */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="glass-card p-6 space-y-4">
-            <div className="flex justify-between items-center border-b border-slate-800 pb-3">
-              <h3 className="text-md font-bold text-slate-200 flex items-center gap-2">
-                <Layers className="h-4 w-4 text-[#5ba4b5]" /> Position Legs
-              </h3>
-              <button 
-                onClick={addLeg}
-                className="flex items-center gap-1 text-xs text-[#5ba4b5] hover:underline font-semibold"
-              >
-                <Plus className="h-3 w-3" /> Add Leg
-              </button>
-            </div>
-
-            <div className="space-y-4">
-              {legs.map((leg, index) => (
-                <div key={leg.id} className="grid grid-cols-2 md:grid-cols-7 gap-3 items-center border-b border-slate-800/40 pb-4">
-                  <div>
-                    <label className="text-[10px] text-slate-500 font-bold block mb-1">Asset</label>
-                    <select 
-                      value={leg.asset_type}
-                      onChange={(e) => updateLeg(leg.id, 'asset_type', e.target.value)}
-                      className="rounded p-1.5 w-full text-xs"
-                    >
-                      <option value="stock">Stock</option>
-                      <option value="option">Option</option>
-                    </select>
-                  </div>
-
-                  {leg.asset_type === 'option' ? (
-                    <>
-                      <div>
-                        <label className="text-[10px] text-slate-500 font-bold block mb-1">Type</label>
-                        <select 
-                          value={leg.option_type || 'call'}
-                          onChange={(e) => updateLeg(leg.id, 'option_type', e.target.value)}
-                          className="rounded p-1.5 w-full text-xs"
-                        >
-                          <option value="call">Call</option>
-                          <option value="put">Put</option>
-                        </select>
-                      </div>
-                      <div>
-                        <label className="text-[10px] text-slate-500 font-bold block mb-1">Strike</label>
-                        <input 
-                          type="number" value={leg.strike}
-                          onChange={(e) => updateLeg(leg.id, 'strike', Number(e.target.value))}
-                          className="rounded p-1.5 w-full text-xs font-mono"
-                        />
-                      </div>
-                    </>
-                  ) : (
-                    <div className="col-span-2 text-xs text-slate-500 italic mt-3 text-center">
-                      Underlying Shares
-                    </div>
-                  )}
-
-                  <div>
-                    <label className="text-[10px] text-slate-500 font-bold block mb-1">Position</label>
-                    <select 
-                      value={leg.position}
-                      onChange={(e) => updateLeg(leg.id, 'position', e.target.value)}
-                      className="rounded p-1.5 w-full text-xs"
-                    >
-                      <option value="long">Buy (Long)</option>
-                      <option value="short">Sell (Short)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-slate-500 font-bold block mb-1">Price/Premium</label>
-                    <input 
-                      type="number" step="0.1" value={leg.entry_price}
-                      onChange={(e) => updateLeg(leg.id, 'entry_price', Number(e.target.value))}
-                      className="rounded p-1.5 w-full text-xs font-mono"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="text-[10px] text-slate-500 font-bold block mb-1">Quantity</label>
-                    <input 
-                      type="number" min="1" value={leg.quantity}
-                      onChange={(e) => updateLeg(leg.id, 'quantity', Number(e.target.value))}
-                      className="rounded p-1.5 w-full text-xs font-mono"
-                    />
-                  </div>
-
-                  <div className="flex justify-center mt-3">
-                    <button 
-                      onClick={() => removeLeg(leg.id)}
-                      className="text-red-500 hover:text-red-400 p-1.5"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Payoff chart */}
-          <div className="glass-card p-6 space-y-4">
-            <h3 className="text-md font-bold text-slate-200">Profit & Loss Trajectory</h3>
-            <div className="h-64 w-full">
-              <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={payoffGrid}>
-                  <defs>
-                    <linearGradient id="profitGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#7ec8a0" stopOpacity={0.2}/>
-                      <stop offset="95%" stopColor="#7ec8a0" stopOpacity={0}/>
-                    </linearGradient>
-                    <linearGradient id="lossGrad" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="#dc3545" stopOpacity={0}/>
-                      <stop offset="95%" stopColor="#dc3545" stopOpacity={0.2}/>
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="spot" stroke="rgba(255,255,255,0.05)" tick={{ fill: '#64748b', fontSize: 10 }} />
-                  <YAxis stroke="rgba(255,255,255,0.05)" tick={{ fill: '#64748b', fontSize: 10 }} />
-                  <Tooltip 
-                    contentStyle={{ backgroundColor: '#161924', border: '1px solid rgba(255,255,255,0.1)', borderRadius: '6px' }}
-                    labelStyle={{ color: '#64748b', fontSize: 10 }}
-                  />
-                  <ReferenceLine y={0} stroke="rgba(255,255,255,0.15)" strokeWidth={1.5} />
-                  <ReferenceLine x={underlyingSpot} stroke="rgba(255,255,255,0.1)" strokeDasharray="3 3" />
-                  
-                  {/* Primary Area showing expiry P&L */}
-                  <Area 
-                    type="monotone" 
-                    dataKey="expiry_pl" 
-                    stroke="#7ec8a0" 
-                    strokeWidth={2.5} 
-                    fill="url(#profitGrad)" 
-                    dot={false} 
-                  />
-                  {/* Secondary Line showing early decay payoff */}
-                  <Area 
-                    type="monotone" 
-                    dataKey="midway_pl" 
-                    stroke="#5ba4b5" 
-                    strokeWidth={1.5} 
-                    strokeDasharray="4 4"
-                    fill="none" 
-                    dot={false} 
-                  />
-                </AreaChart>
-              </ResponsiveContainer>
-            </div>
-            <div className="flex justify-center gap-6 text-[10px] text-slate-400">
-              <div className="flex items-center gap-1.5">
-                <div className="h-0.5 w-6 bg-[#7ec8a0]" /> Expiry Payoff
-              </div>
-              <div className="flex items-center gap-1.5">
-                <div className="h-0.5 w-6 bg-[#5ba4b5] border-dashed border-t" /> Midway (Time-decay)
-              </div>
-            </div>
+      <div className="space-y-6 pb-12">
+        {/* Banner Header - Velzon Light Theme */}
+        <div className="relative overflow-hidden rounded-xl bg-white p-6 sm:p-8 border border-slate-200/80 shadow-sm">
+          <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-indigo-50/60 blur-2xl" />
+          <div className="relative z-10 max-w-3xl space-y-3">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-[#4051B5] border border-indigo-100">
+              <Layers className="h-3.5 w-3.5" /> Strategy Builder & Payoff Engine
+            </span>
+            <h1 className="text-2xl font-bold text-slate-800 tracking-tight sm:text-3xl">
+              Options Strategy <span className="text-[#4051B5]">Playground</span>
+            </h1>
+            <p className="text-slate-500 text-xs sm:text-sm leading-relaxed">
+              Assemble multi-leg derivative positions, evaluate risk profile metrics, margin collateral requirements, and visualize time-decay P&L curves across underlying price movements.
+            </p>
           </div>
         </div>
 
-        {/* Risk summary & inputs */}
-        <div className="space-y-6">
-          <div className="glass-card p-6 space-y-6 h-fit">
-            <h3 className="text-md font-bold text-slate-200">Risk Profile</h3>
+        {/* Preset Selection Buttons */}
+        <div className="flex flex-wrap gap-3">
+          <button onClick={() => applyPreset('covered_call')} className="rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 hover:border-[#4051B5] hover:text-[#4051B5] shadow-sm transition">
+            Covered Call
+          </button>
+          <button onClick={() => applyPreset('secured_put')} className="rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 hover:border-emerald-500 hover:text-emerald-600 shadow-sm transition">
+            Cash-Secured Put (Wheel)
+          </button>
+          <button onClick={() => applyPreset('naked_call')} className="rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 hover:border-rose-500 hover:text-rose-600 shadow-sm transition">
+            Naked Call (High Risk)
+          </button>
+          <button onClick={() => applyPreset('straddle')} className="rounded-xl bg-white border border-slate-200 px-4 py-2.5 text-xs font-bold text-slate-700 hover:border-amber-500 hover:text-amber-600 shadow-sm transition">
+            Long Straddle
+          </button>
+        </div>
 
-            <div className="space-y-3 text-xs font-mono">
-              <div className="flex justify-between items-center py-2 border-b border-slate-800">
-                <span className="text-slate-400">Net Flow</span>
-                <span className={`font-semibold ${riskMetrics.net_premium >= 0 ? 'text-[#7ec8a0]' : 'text-slate-200'}`}>
-                  {riskMetrics.net_premium >= 0 
-                    ? `+$${riskMetrics.net_premium.toFixed(2)} (Credit)` 
-                    : `-$${Math.abs(riskMetrics.net_premium).toFixed(2)} (Debit)`
-                  }
-                </span>
+        <div className="grid gap-6 lg:grid-cols-3">
+          {/* Legs Editor Panel */}
+          <div className="lg:col-span-2 space-y-6">
+            <div className="p-6 border border-slate-200/80 bg-white rounded-xl shadow-sm space-y-4">
+              <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                  <Layers className="h-4 w-4 text-[#4051B5]" /> Position Legs Configuration
+                </h3>
+                <button 
+                  onClick={addLeg}
+                  className="flex items-center gap-1 text-xs text-[#4051B5] hover:underline font-bold"
+                >
+                  <Plus className="h-3.5 w-3.5" /> Add Leg
+                </button>
               </div>
 
-              <div className="flex justify-between items-center py-2 border-b border-slate-800">
-                <span className="text-slate-400">Max Profit</span>
-                <span className="font-semibold text-[#7ec8a0]">{riskMetrics.max_profit}</span>
+              <div className="space-y-4">
+                {legs.map((leg) => (
+                  <div key={leg.id} className="grid grid-cols-2 md:grid-cols-7 gap-3 items-center border-b border-slate-100 pb-4">
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-bold block mb-1">Asset</label>
+                      <select 
+                        value={leg.asset_type}
+                        onChange={(e) => updateLeg(leg.id, 'asset_type', e.target.value)}
+                        className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 w-full text-xs text-slate-800 font-medium"
+                      >
+                        <option value="stock">Stock</option>
+                        <option value="option">Option</option>
+                      </select>
+                    </div>
+
+                    {leg.asset_type === 'option' ? (
+                      <>
+                        <div>
+                          <label className="text-[10px] text-slate-400 font-bold block mb-1">Type</label>
+                          <select 
+                            value={leg.option_type || 'call'}
+                            onChange={(e) => updateLeg(leg.id, 'option_type', e.target.value)}
+                            className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 w-full text-xs text-slate-800 font-medium"
+                          >
+                            <option value="call">Call</option>
+                            <option value="put">Put</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="text-[10px] text-slate-400 font-bold block mb-1">Strike</label>
+                          <input 
+                            type="number" value={leg.strike}
+                            onChange={(e) => updateLeg(leg.id, 'strike', Number(e.target.value))}
+                            className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 w-full text-xs font-mono font-bold text-slate-800"
+                          />
+                        </div>
+                      </>
+                    ) : (
+                      <div className="col-span-2 text-xs text-slate-400 font-medium mt-3 text-center">
+                        Underlying Shares
+                      </div>
+                    )}
+
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-bold block mb-1">Position</label>
+                      <select 
+                        value={leg.position}
+                        onChange={(e) => updateLeg(leg.id, 'position', e.target.value)}
+                        className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 w-full text-xs text-slate-800 font-medium"
+                      >
+                        <option value="long">Buy (Long)</option>
+                        <option value="short">Sell (Short)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-bold block mb-1">Price</label>
+                      <input 
+                        type="number" value={leg.entry_price} step="0.1"
+                        onChange={(e) => updateLeg(leg.id, 'entry_price', Number(e.target.value))}
+                        className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 w-full text-xs font-mono font-bold text-slate-800"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] text-slate-400 font-bold block mb-1">Contracts</label>
+                      <input 
+                        type="number" value={leg.quantity} min="1"
+                        onChange={(e) => updateLeg(leg.id, 'quantity', Number(e.target.value))}
+                        className="bg-slate-50 border border-slate-200 rounded-lg p-1.5 w-full text-xs font-mono font-bold text-slate-800"
+                      />
+                    </div>
+
+                    <div className="flex justify-end pt-4 md:pt-0">
+                      <button 
+                        onClick={() => removeLeg(leg.id)}
+                        className="p-1.5 text-slate-400 hover:text-rose-600 transition"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Payoff Chart */}
+            <div className="p-6 border border-slate-200/80 bg-white rounded-xl shadow-sm space-y-4">
+              <div className="flex justify-between items-center">
+                <h3 className="text-base font-bold text-slate-800">Visual Payoff Diagram at Expiration</h3>
+                <div className="flex items-center gap-4 text-xs font-semibold">
+                  <span className="flex items-center gap-1.5 text-[#4051B5]">
+                    <span className="w-3 h-0.5 bg-[#4051B5] rounded"></span> Expiration P&L
+                  </span>
+                  <span className="flex items-center gap-1.5 text-[#0AB39C]">
+                    <span className="w-3 h-0.5 border-t-2 border-dashed border-[#0AB39C]"></span> Midway (Time-decay)
+                  </span>
+                </div>
+              </div>
+              <div className="h-72 w-full pt-4">
+                <ResponsiveContainer width="100%" height="100%">
+                  <AreaChart data={payoffGrid}>
+                    <defs>
+                      <linearGradient id="profitGrad" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#4051B5" stopOpacity={0.25}/>
+                        <stop offset="95%" stopColor="#4051B5" stopOpacity={0.0}/>
+                      </linearGradient>
+                    </defs>
+                    <XAxis dataKey="spot" stroke="#475569" fontSize={11} tickFormatter={(val) => `$${val}`} />
+                    <YAxis stroke="#475569" fontSize={11} tickFormatter={(val) => `$${Number(val).toFixed(0)}`} />
+                    <Tooltip 
+                      contentStyle={{ backgroundColor: '#ffffff', borderColor: '#e2e8f0', borderRadius: '12px', color: '#1e293b', fontWeight: 'bold' }}
+                      formatter={(val: any, name: string) => [
+                        `$${Number(val).toFixed(2)}`,
+                        name === 'expiry_pl' ? 'Expiration P&L' : 'Midway P&L'
+                      ]}
+                      labelFormatter={(val) => `Spot Price: $${val}`}
+                    />
+                    <ReferenceLine y={0} stroke="#64748b" strokeDasharray="3 3" />
+                    <ReferenceLine x={underlyingSpot} stroke="#4051B5" strokeDasharray="3 3" label={{ value: 'Current Spot', fill: '#4051B5', fontSize: 10, fontWeight: 'bold' }} />
+                    <Area type="monotone" dataKey="expiry_pl" name="expiry_pl" stroke="#4051B5" strokeWidth={2.5} fill="url(#profitGrad)" />
+                    <Area type="monotone" dataKey="midway_pl" name="midway_pl" stroke="#0AB39C" strokeWidth={1.5} strokeDasharray="4 4" fill="none" />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+            </div>
+          </div>
+
+          {/* Right Metrics Panel */}
+          <div className="space-y-6">
+            <div className="p-6 border border-slate-200/80 bg-white rounded-xl shadow-sm space-y-5">
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Strategy Environment</h3>
+              <div className="space-y-4">
+                <div>
+                  <label className="text-xs text-slate-600 font-bold block mb-1">Underlying Spot Price ($)</label>
+                  <input 
+                    type="number" value={underlyingSpot}
+                    onChange={(e) => setUnderlyingSpot(Number(e.target.value))}
+                    className="bg-slate-50 border border-slate-200 rounded-lg p-2 w-full text-xs font-mono font-bold text-slate-800"
+                  />
+                </div>
+                <div>
+                  <label className="text-xs text-slate-600 font-bold block mb-1">Implied Volatility (IV %)</label>
+                  <input 
+                    type="number" value={sigma * 100} step="1"
+                    onChange={(e) => setSigma(Number(e.target.value) / 100)}
+                    className="bg-slate-50 border border-slate-200 rounded-lg p-2 w-full text-xs font-mono font-bold text-slate-800"
+                  />
+                </div>
               </div>
 
-              <div className="flex justify-between items-center py-2 border-b border-slate-800">
-                <span className="text-slate-400">Max Loss</span>
-                <span className={`font-semibold ${riskMetrics.max_loss.includes('Unlimited') ? 'text-[#dc3545]' : 'text-slate-200'}`}>
-                  {riskMetrics.max_loss}
-                </span>
-              </div>
+              <hr className="border-slate-100" />
 
-              <div className="flex justify-between items-center py-2 border-b border-slate-800">
-                <span className="text-slate-400">Break-Even Points</span>
-                <span className="font-semibold text-[#d4a853]">
-                  {riskMetrics.breakevens.length > 0 
-                    ? riskMetrics.breakevens.map(b => `$${b}`).join(', ') 
-                    : 'None'
-                  }
-                </span>
-              </div>
-
-              {riskMetrics.margin_required > 0 && (
-                <div className="flex justify-between items-center py-2 text-[#d4a853]">
-                  <span>Est. Margin Required</span>
-                  <span className="font-semibold">${riskMetrics.margin_required.toFixed(2)}</span>
+              <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Risk Profile Metrics</h3>
+              
+              {riskMetrics.has_naked_short && (
+                <div className="flex items-center gap-2 p-3 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-bold">
+                  <ShieldAlert className="h-4 w-4 shrink-0 text-rose-600" />
+                  <span>Warning: Position contains uncovered naked short options!</span>
                 </div>
               )}
-            </div>
 
-            {/* General parameters */}
-            <div className="border-t border-slate-800 pt-4 space-y-4">
-              <div>
-                <label className="text-[10px] text-slate-500 font-bold block mb-1">Underlying Spot Price</label>
-                <input 
-                  type="number" value={underlyingSpot}
-                  onChange={(e) => setUnderlyingSpot(Number(e.target.value))}
-                  className="rounded p-1.5 w-full text-xs font-mono"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-[10px] text-slate-500 font-bold block mb-1">Annual Rate (r)</label>
-                  <input 
-                    type="number" step="0.01" value={r}
-                    onChange={(e) => setR(Number(e.target.value))}
-                    className="rounded p-1.5 w-full text-xs font-mono"
-                  />
+              <div className="space-y-3">
+                <div className="flex justify-between items-center p-3 rounded-lg bg-emerald-50/50 border border-emerald-100">
+                  <span className="text-xs text-slate-600 font-bold">Max Profit</span>
+                  <span className="text-xs font-mono font-extrabold text-emerald-600">{riskMetrics.max_profit}</span>
                 </div>
-                <div>
-                  <label className="text-[10px] text-slate-500 font-bold block mb-1">Volatility (&sigma;)</label>
-                  <input 
-                    type="number" step="0.01" value={sigma}
-                    onChange={(e) => setSigma(Number(e.target.value))}
-                    className="rounded p-1.5 w-full text-xs font-mono"
-                  />
+                <div className="flex justify-between items-center p-3 rounded-lg bg-rose-50/50 border border-rose-100">
+                  <span className="text-xs text-slate-600 font-bold">Max Loss</span>
+                  <span className="text-xs font-mono font-extrabold text-rose-600">{riskMetrics.max_loss}</span>
+                </div>
+                <div className="flex justify-between items-center p-3 rounded-lg bg-slate-50 border border-slate-200">
+                  <span className="text-xs text-slate-600 font-bold">Net Premium</span>
+                  <span className="text-xs font-mono font-bold text-slate-800">
+                    {riskMetrics.net_premium >= 0 ? `+$${riskMetrics.net_premium.toFixed(2)} (Credit)` : `-$${Math.abs(riskMetrics.net_premium).toFixed(2)} (Debit)`}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center p-3 rounded-lg bg-slate-50 border border-slate-200">
+                  <span className="text-xs text-slate-600 font-bold">Margin Required</span>
+                  <span className="text-xs font-mono font-bold text-[#4051B5]">${riskMetrics.margin_required.toFixed(2)}</span>
                 </div>
               </div>
             </div>
           </div>
-
-          {/* Naked Short callout */}
-          {riskMetrics.has_naked_short && (
-            <div className="rounded-lg bg-red-500/5 p-4 border border-red-500/10 text-xs">
-              <div className="flex gap-2">
-                <ShieldAlert className="h-4 w-4 text-[#dc3545] flex-shrink-0 mt-0.5" />
-                <div className="space-y-1">
-                  <p className="font-semibold text-slate-200 uppercase tracking-wider text-[10px]">Short Naked Option Warning</p>
-                  <p className="text-slate-400 leading-relaxed">
-                    Selling options naked (without underlying shares or collateral) exposes you to severe margin requirements and 
-                    theoretically infinite loss potentials if the market breaches your strike. Consider changing to a **Covered Call** or buying an OTM option to limit your risk.
-                  </p>
-                  <Link href="/learn" className="text-xs text-[#5ba4b5] hover:underline font-semibold block mt-1">
-                    Ask the Socratic Tutor how to hedge this naked call &rarr;
-                  </Link>
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </div>
-    </div>
     </ProtectedRoute>
   );
 }

@@ -23,7 +23,6 @@ gcloud config set project $PROJECT_ID
 echo "🚀 Enabling required APIs..."
 gcloud services enable \
   aiplatform.googleapis.com \
-  secretmanager.googleapis.com \
   run.googleapis.com \
   artifactregistry.googleapis.com \
   cloudbuild.googleapis.com \
