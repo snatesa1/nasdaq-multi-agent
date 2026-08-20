@@ -485,15 +485,22 @@ export default function Dashboard() {
             const spyBenchmarkPct = 3.2;
             const qqqBenchmarkPct = 4.5;
 
-            const chartData = positions.length > 0
-              ? positions.map(p => ({
-                  symbol: p.symbol || p.description.slice(0, 8),
-                  market_value: Math.abs(Math.round(p.market_value)),
-                  unrealized_pnl: parseFloat(p.unrealized_pnl.toFixed(2)),
-                  return_pct: parseFloat(p.unrealized_pnl_pct.toFixed(2)),
-                  spy_return: spyBenchmarkPct,
-                  qqq_return: qqqBenchmarkPct,
-                }))
+            const chartData = positions && positions.length > 0
+              ? positions.map(p => {
+                  const mktVal = Math.abs(Math.round(Number(p.market_value) || 0));
+                  const unPnl = parseFloat((Number(p.unrealized_pnl) || 0).toFixed(2));
+                  const retPct = parseFloat((Number(p.unrealized_pnl_pct) || 0).toFixed(2));
+                  const sym = p.symbol || (p.description ? p.description.slice(0, 8) : 'POS');
+
+                  return {
+                    symbol: sym,
+                    market_value: mktVal,
+                    unrealized_pnl: unPnl,
+                    return_pct: retPct,
+                    spy_return: spyBenchmarkPct,
+                    qqq_return: qqqBenchmarkPct,
+                  };
+                })
               : [
                   { symbol: 'AAPL', market_value: 22000, unrealized_pnl: 1450, return_pct: 7.1, spy_return: spyBenchmarkPct, qqq_return: qqqBenchmarkPct },
                   { symbol: 'NVDA', market_value: 12500, unrealized_pnl: -320, return_pct: -2.5, spy_return: spyBenchmarkPct, qqq_return: qqqBenchmarkPct },
@@ -501,11 +508,12 @@ export default function Dashboard() {
                   { symbol: 'TSLA', market_value: 21500, unrealized_pnl: 890, return_pct: 4.3, spy_return: spyBenchmarkPct, qqq_return: qqqBenchmarkPct },
                 ];
 
-            const totalVal = chartData.reduce((acc, c) => acc + c.market_value, 0);
-            const totalPnl = chartData.reduce((acc, c) => acc + c.unrealized_pnl, 0);
+            const totalVal = chartData.reduce((acc, c) => acc + (c.market_value || 0), 0);
+            const totalPnl = chartData.reduce((acc, c) => acc + (c.unrealized_pnl || 0), 0);
             const avgPortReturn = totalVal > 0 ? (totalPnl / totalVal) * 100 : 0;
             const alphaVsSpy = avgPortReturn - spyBenchmarkPct;
             const alphaVsQqq = avgPortReturn - qqqBenchmarkPct;
+
 
             return (
               <>
@@ -921,25 +929,34 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                  {positions.map((p) => {
-                    const isProfit = p.unrealized_pnl >= 0;
-                    const side = p.amount >= 0 ? 'Long' : 'Short';
+                  {positions.map((p, idx) => {
+                    const unPnl = Number(p.unrealized_pnl) || 0;
+                    const unPnlPct = Number(p.unrealized_pnl_pct) || 0;
+                    const openPrice = Number(p.open_price) || 0;
+                    const curPrice = Number(p.current_price) || 0;
+                    const mktVal = Number(p.market_value) || 0;
+                    const amt = Number(p.amount) || 0;
+                    const isProfit = unPnl >= 0;
+                    const side = amt >= 0 ? 'Long' : 'Short';
                     const isOption = p.asset_type === 'StockOption' || p.asset_type === 'Option';
+                    const sym = p.symbol || 'UNK';
+                    const desc = p.description || sym;
+                    const curr = p.currency || 'USD';
 
                     return (
-                      <tr key={p.position_id} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="py-3 px-3 font-bold text-slate-900">{p.symbol}</td>
-                        <td className="py-3 px-3 text-slate-500 max-w-xs truncate" title={p.description}>
-                          {p.description}
+                      <tr key={p.position_id || `pos-${idx}`} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="py-3 px-3 font-bold text-slate-900">{sym}</td>
+                        <td className="py-3 px-3 text-slate-500 max-w-xs truncate" title={desc}>
+                          {desc}
                           {isOption && p.expiry_date && (
                             <span className="block text-[9px] text-slate-400 font-mono mt-0.5">
-                              Expiry: {p.expiry_date} | Strike: ${p.strike_price} {p.option_type?.toUpperCase()}
+                              Expiry: {p.expiry_date} | Strike: ${p.strike_price || '-'} {p.option_type?.toUpperCase() || ''}
                             </span>
                           )}
                         </td>
                         <td className="py-3 px-3 text-center">
                           <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold uppercase">
-                            {p.asset_type === 'StockOption' ? 'Option' : p.asset_type}
+                            {p.asset_type === 'StockOption' ? 'Option' : (p.asset_type || 'Stock')}
                           </span>
                         </td>
                         <td className="py-3 px-3 text-center">
@@ -950,28 +967,29 @@ export default function Dashboard() {
                           </span>
                         </td>
                         <td className="py-3 px-3 text-right font-mono font-bold text-slate-800">
-                          {p.amount.toLocaleString()}
+                          {amt.toLocaleString()}
                         </td>
                         <td className="py-3 px-3 text-right font-mono text-slate-600">
-                          ${p.open_price.toFixed(2)}
+                          ${openPrice.toFixed(2)}
                         </td>
                         <td className="py-3 px-3 text-right font-mono text-slate-600">
-                          ${p.current_price.toFixed(2)}
+                          ${curPrice.toFixed(2)}
                         </td>
                         <td className="py-3 px-3 text-right font-mono text-slate-800">
-                          ${p.market_value.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                          ${mktVal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
                         </td>
                         <td className="py-3 px-3 text-right font-mono">
                           <span className={`font-bold block ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {isProfit ? '+' : ''}{p.unrealized_pnl.toFixed(2)} {p.currency}
+                            {isProfit ? '+' : ''}{unPnl.toFixed(2)} {curr}
                           </span>
                           <span className={`text-[10px] block font-semibold ${isProfit ? 'text-emerald-500' : 'text-rose-500'}`}>
-                            {isProfit ? '+' : ''}{p.unrealized_pnl_pct.toFixed(2)}%
+                            {isProfit ? '+' : ''}{unPnlPct.toFixed(2)}%
                           </span>
                         </td>
                       </tr>
                     );
                   })}
+
                 </tbody>
               </table>
             ) : (
