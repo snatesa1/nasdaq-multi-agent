@@ -1057,9 +1057,47 @@ def check_order_behavioral_safety(
         return eval_result
     except Exception as e:
         logger.error(f"Safety check failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+# ── Client-Side Error Telemetry & Unified Logger ───────────────────────────
 
-# ── Serve Static Frontend Files ─────────────────────────────────────────────
+@app.post("/api/logs/client-error")
+async def log_client_error(payload: Dict[str, Any] = Body(...)):
+    """Ingests, formats, and persists frontend runtime exceptions and telemetry."""
+    level = payload.get("level", "error").upper()
+    msg = payload.get("message", "Unknown client exception")
+    source = payload.get("source", "frontend")
+    stack = payload.get("stack", "")
+    comp_stack = payload.get("componentStack", "")
+    url = payload.get("url", "")
+    ts = payload.get("timestamp", datetime.now().isoformat())
+
+    formatted_log = (
+        f"\n🔴 [FRONTEND RUNTIME EXCEPTION] [{ts}]\n"
+        f"   Level: {level}\n"
+        f"   Message: {msg}\n"
+        f"   URL: {url}\n"
+        f"   Source: {source}\n"
+    )
+    if stack:
+        formatted_log += f"   Stack: {stack}\n"
+    if comp_stack:
+        formatted_log += f"   Component Hierarchy: {comp_stack}\n"
+
+    print(formatted_log)
+    logger.error(formatted_log)
+
+    # Persist to client_errors.log
+    try:
+        log_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+        os.makedirs(log_dir, exist_ok=True)
+        log_file = os.path.join(log_dir, "client_errors.log")
+        with open(log_file, "a", encoding="utf-8") as f:
+            f.write(formatted_log + "\n" + "-"*80 + "\n")
+    except Exception as e_log:
+        logger.warning(f"Failed writing to client_errors.log: {e_log}")
+
+    return {"status": "LOGGED", "timestamp": ts}
+
+
 
 from fastapi.staticfiles import StaticFiles
 

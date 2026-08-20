@@ -178,6 +178,30 @@ async function createWindow() {
     }
   });
 
+  // Stream all renderer console logs and errors directly to terminal & logs
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    const levelLabels = ['LOG', 'INFO', 'WARN', 'ERROR'];
+    const label = levelLabels[level] || 'LOG';
+    const cleanSource = sourceId ? path.basename(sourceId) : 'renderer';
+    const logLine = `[Frontend ${label}] (${cleanSource}:${line}) ${message}`;
+    
+    if (level === 3) {
+      console.error(`\x1b[31m${logLine}\x1b[0m`);
+    } else if (level === 2) {
+      console.warn(`\x1b[33m${logLine}\x1b[0m`);
+    } else {
+      console.log(logLine);
+    }
+  });
+
+  // Enable F12 and Ctrl+Shift+I for DevTools inspection
+  mainWindow.webContents.on('before-input-event', (event, input) => {
+    if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
+      mainWindow.webContents.toggleDevTools();
+      event.preventDefault();
+    }
+  });
+
   mainWindow.once('ready-to-show', () => {
     mainWindow.webContents.reloadIgnoringCache();
     if (!isHidden) {
@@ -185,6 +209,7 @@ async function createWindow() {
       mainWindow.focus();
     }
   });
+
 
   mainWindow.on('close', (event) => {
 
