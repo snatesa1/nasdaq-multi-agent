@@ -1110,7 +1110,17 @@ class NoCacheStaticFiles(StaticFiles):
         response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
+        response.headers["Content-Security-Policy"] = (
+            "default-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:* https: data: blob:; "
+            "script-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:* https:; "
+            "style-src 'self' 'unsafe-inline' https: fonts.googleapis.com; "
+            "font-src 'self' data: https: fonts.gstatic.com; "
+            "img-src 'self' data: blob: https:; "
+            "connect-src 'self' http://127.0.0.1:* http://localhost:* https: ws: wss:; "
+            "frame-src 'self' https:;"
+        )
         return response
+
 
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "out")
 if os.path.exists(frontend_path):

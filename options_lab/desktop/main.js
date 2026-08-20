@@ -111,6 +111,24 @@ async function createWindow() {
     if (session.defaultSession) {
       await session.defaultSession.clearCache();
       await session.defaultSession.clearStorageData();
+
+      // Configure hardened Content Security Policy (No unsafe-eval)
+      session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+        callback({
+          responseHeaders: {
+            ...details.responseHeaders,
+            'Content-Security-Policy': [
+              "default-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:* https: data: blob:; " +
+              "script-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:* https:; " +
+              "style-src 'self' 'unsafe-inline' https: fonts.googleapis.com; " +
+              "font-src 'self' data: https: fonts.gstatic.com; " +
+              "img-src 'self' data: blob: https:; " +
+              "connect-src 'self' http://127.0.0.1:* http://localhost:* https: ws: wss:; " +
+              "frame-src 'self' https:;"
+            ]
+          }
+        });
+      });
     }
   } catch (e) {}
 
@@ -130,6 +148,7 @@ async function createWindow() {
       cache: false
     }
   });
+
 
   const isDev = process.argv.includes('--dev');
   const isHidden = process.argv.includes('--hidden');
