@@ -849,30 +849,41 @@ export default function Dashboard() {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                        {filteredOrders.map((ord) => {
-                          const isTraded = ord.status === 'Traded' || ord.status === 'Filled';
-                          const isExpired = ord.status === 'Expired';
-                          const isCancelled = ord.status === 'Cancelled';
+                        {filteredOrders.map((ord, idx) => {
+                          const statusStr = typeof ord.status === 'object' ? (ord.status?.name || 'Traded') : String(ord.status || 'Traded');
+                          const isTraded = statusStr === 'Traded' || statusStr === 'Filled';
+                          const isExpired = statusStr === 'Expired';
+                          const isCancelled = statusStr === 'Cancelled';
+                          
+                          const instStr = typeof ord.instrument === 'object' ? (ord.instrument?.Description || ord.symbol || 'Instrument') : String(ord.instrument || ord.symbol || 'Instrument');
+                          const orderIdStr = String(ord.order_id || `ORD-${idx}`);
+                          const buySellStr = typeof ord.buy_sell === 'object' ? (ord.buy_sell?.name || 'Trade') : String(ord.buy_sell || 'Trade');
+                          const durationStr = typeof ord.duration === 'object' ? (ord.duration?.DurationType || 'Day Order') : String(ord.duration || 'Day Order');
+                          const orderTypeStr = typeof ord.order_type === 'object' ? (ord.order_type?.name || 'Limit') : String(ord.order_type || 'Limit');
+                          const timeStr = typeof ord.time === 'object' ? JSON.stringify(ord.time) : String(ord.time || '-');
+                          const accountStr = typeof ord.account === 'object' ? (ord.account?.AccountId || 'Primary') : String(ord.account || '-');
+                          const priceNum = Number(ord.price) || 0;
+                          const qtyNum = Number(ord.quantity) || 1;
                           
                           return (
-                            <tr key={ord.order_id} className="hover:bg-slate-50/80 transition-colors">
+                            <tr key={orderIdStr} className="hover:bg-slate-50/80 transition-colors">
                               <td className="py-2.5 px-3 font-bold text-slate-900 flex items-center gap-1.5">
                                 <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 inline-block"></span>
-                                {ord.instrument}
+                                {instStr}
                               </td>
-                              <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400">{ord.order_id}</td>
+                              <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400">{orderIdStr}</td>
                               <td className="py-2.5 px-3">
                                 <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  ord.buy_sell === 'Sell to Open' ? 'bg-purple-50 text-purple-700 border border-purple-100' :
-                                  ord.buy_sell === 'Buy to Close' ? 'bg-sky-50 text-sky-700 border border-sky-100' :
+                                  buySellStr === 'Sell to Open' ? 'bg-purple-50 text-purple-700 border border-purple-100' :
+                                  buySellStr === 'Buy to Close' ? 'bg-sky-50 text-sky-700 border border-sky-100' :
                                   'bg-indigo-50 text-indigo-700 border border-indigo-100'
                                 }`}>
-                                  {ord.buy_sell}
+                                  {buySellStr}
                                 </span>
                               </td>
-                              <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-800">{ord.quantity}</td>
+                              <td className="py-2.5 px-3 text-center font-mono font-bold text-slate-800">{qtyNum}</td>
                               <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-900">
-                                ${ord.price.toFixed(2)} <span className="text-[10px] text-slate-400 font-normal">{ord.order_type}</span>
+                                ${priceNum.toFixed(2)} <span className="text-[10px] text-slate-400 font-normal">{orderTypeStr}</span>
                               </td>
                               <td className="py-2.5 px-3 text-center">
                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
@@ -880,15 +891,16 @@ export default function Dashboard() {
                                   isExpired ? 'bg-amber-100 text-amber-700' :
                                   'bg-slate-200 text-slate-600'
                                 }`}>
-                                  {ord.status}
+                                  {statusStr}
                                 </span>
                               </td>
-                              <td className="py-2.5 px-3 text-slate-500 text-[11px]">{ord.duration}</td>
-                              <td className="py-2.5 px-3 text-slate-400 text-[11px] font-mono">{ord.time}</td>
-                              <td className="py-2.5 px-3 text-slate-500 font-mono text-[10px]">{ord.account}</td>
+                              <td className="py-2.5 px-3 text-slate-500 text-[11px]">{durationStr}</td>
+                              <td className="py-2.5 px-3 text-slate-400 text-[11px] font-mono">{timeStr}</td>
+                              <td className="py-2.5 px-3 text-slate-500 font-mono text-[10px]">{accountStr}</td>
                             </tr>
                           );
                         })}
+
                       </tbody>
                     </table>
                   </div>

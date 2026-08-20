@@ -765,27 +765,34 @@ class SaxoClient:
                             inst = self.get_instrument_details(uic, atype)
                             sym = inst.get("Symbol") or item.get("Symbol", "UNKNOWN")
                             clean_sym = sym.split(":")[0].split("/")[0]
-                            desc = inst.get("Description") or item.get("Description", clean_sym)
-                            
+                            raw_dur = item.get("Duration") or item.get("OrderDuration")
+                            if isinstance(raw_dur, dict):
+                                dur_str = raw_dur.get("DurationType", "Day Order")
+                            elif isinstance(raw_dur, str):
+                                dur_str = raw_dur
+                            else:
+                                dur_str = "Day Order"
+
                             verified_blotter.insert(0, {
-                                "order_id": oid,
-                                "instrument": desc,
-                                "symbol": clean_sym,
-                                "buy_sell": item.get("BuySell", "Buy"),
+                                "order_id": str(oid),
+                                "instrument": str(desc),
+                                "symbol": str(clean_sym),
+                                "buy_sell": str(item.get("BuySell", "Buy")),
                                 "quantity": float(item.get("Amount", 1.0)),
                                 "price": float(item.get("Price", 0.0)),
-                                "order_type": item.get("OrderType", "Limit"),
-                                "status": item.get("Status", "Traded"),
-                                "duration": item.get("Duration", "Day Order"),
-                                "time": item.get("ActivityTime", now_iso),
-                                "value_date": item.get("ValueDate", "-"),
-                                "account": item.get("AccountId", "33888/221497"),
+                                "order_type": str(item.get("OrderType", "Limit")),
+                                "status": str(item.get("Status", "Traded")),
+                                "duration": dur_str,
+                                "time": str(item.get("ActivityTime", now_iso)),
+                                "value_date": str(item.get("ValueDate", "-")),
+                                "account": str(item.get("AccountId", "33888/221497")),
                                 "currency": "USD",
                                 "asset_type": atype,
                                 "underlying": clean_sym
                             })
         except Exception as e_audit:
             logger.debug(f"Live Saxo blotter query sync non-critical: {e_audit}")
+
 
         # Summary statistics
         total = len(verified_blotter)
