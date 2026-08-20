@@ -15,6 +15,9 @@ try {
   console.error('[OptionsLab Desktop] Failed to set unique userData path:', err);
 }
 
+// Disable HTTP Cache completely to prevent loading stale JS/CSS compiled assets
+app.commandLine.appendSwitch('disable-http-cache');
+
 let mainWindow = null;
 let tray = null;
 let backendProcess = null;

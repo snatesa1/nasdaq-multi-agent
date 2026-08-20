@@ -45,31 +45,39 @@ class VertexGeminiProvider(LLMProvider):
         from ..config import settings
         api_key = settings.GEMINI_API_KEY
         if api_key:
-            try:
-                import requests
-                # Invoke the free Gemini API via Google AI Studio
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self._model_name}:generateContent"
-                headers = {
-                    "Content-Type": "application/json",
-                    "X-goog-api-key": api_key
-                }
-                data = {
-                    "contents": [{"parts": [{"text": prompt}]}]
-                }
-                logger.info(f"Calling free Gemini API via Google AI Studio for model: {self._model_name}")
-                response = requests.post(url, headers=headers, json=data, timeout=30)
-                response.raise_for_status()
-                res_json = response.json()
-                return res_json["candidates"][0]["content"]["parts"][0]["text"]
-            except Exception as e:
-                logger.warning(f"⚠️ Free Gemini API call failed: {e}. Falling back to Vertex AI.")
+            import requests
+            headers = {
+                "Content-Type": "application/json",
+                "X-goog-api-key": api_key
+            }
+            data = {
+                "contents": [{"parts": [{"text": prompt}]}]
+            }
+            models_to_try = list(settings.GEMINI_MODEL_POOL)
+            if self._model_name and self._model_name not in models_to_try:
+                models_to_try.insert(0, self._model_name)
+
+            for model_cand in models_to_try:
+                try:
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_cand}:generateContent"
+                    logger.info(f"Calling Gemini API via Google AI Studio for model: {model_cand}")
+                    response = requests.post(url, headers=headers, json=data, timeout=25)
+                    if response.status_code == 200:
+                        res_json = response.json()
+                        return res_json["candidates"][0]["content"]["parts"][0]["text"]
+                    elif response.status_code in (429, 503):
+                        logger.warning(f"⚠️ Gemini model '{model_cand}' returned {response.status_code}. Trying next model...")
+                        continue
+                except Exception as e:
+                    logger.warning(f"⚠️ Free Gemini API call for '{model_cand}' failed: {e}. Trying next model...")
+                    continue
 
         import vertexai
         from vertexai.generative_models import GenerativeModel
 
         # Explicitly pass project_id to avoid calling Cloud Resource Manager API
         vertexai.init(project=settings.PROJECT_ID)
-        model = GenerativeModel(self._model_name)
+        model = GenerativeModel("gemini-2.5-flash")
         response = model.generate_content(prompt)
         return response.text
 

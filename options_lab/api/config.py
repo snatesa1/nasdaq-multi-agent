@@ -33,10 +33,29 @@ class Settings:
         """Fetch secret strictly from environment variables."""
         return os.getenv(secret_id, "")
 
-    # ── AI Model ──────────────────────────────────────────────────────────────
+    # ── AI Model & Round-Robin Load Balancing Pool ────────────────────────────
     @cached_property
     def VERTEX_MODEL(self) -> str:
-        return os.getenv("VERTEX_MODEL", "gemini-flash-latest")
+        return os.getenv("VERTEX_MODEL", "gemini-2.5-flash-lite")
+
+    @cached_property
+    def GEMINI_MODEL_POOL(self) -> list:
+        """
+        Pool of Gemini models used for Round-Robin load balancing and instant failover.
+        Prioritizes high-throughput Lite models (15 RPM / 500 RPD) then standard Flash models.
+        """
+        raw_pool = os.getenv("GEMINI_MODEL_POOL", "")
+        if raw_pool:
+            return [m.strip() for m in raw_pool.split(",") if m.strip()]
+        return [
+            "gemini-3.1-flash-lite",
+            "gemini-3.5-flash-lite",
+            "gemini-3.7-flash",
+            "gemini-3.6-flash",
+            "gemini-flash-lite-latest",
+            "gemini-flash-latest",
+            "gemini-2.5-flash"
+        ]
 
     @cached_property
     def GEMINI_API_KEY(self) -> str:

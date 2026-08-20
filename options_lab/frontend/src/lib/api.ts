@@ -110,7 +110,7 @@ export const optionsApi = {
   listPortfolios: () => apiRequest('/api/portfolio'),
   getPortfolio: (id: string) => apiRequest(`/api/portfolio/${id}`),
   analyzePortfolio: (id: string) => apiRequest(`/api/portfolio/${id}/analyze`),
-  syncPortfolio: (spreadsheetId?: string) => apiRequest(spreadsheetId ? `/api/portfolio/sync?spreadsheet_id=${spreadsheetId}` : '/api/portfolio/sync', 'POST'),
+  syncPortfolio: (spreadsheetId?: string) => apiRequest(spreadsheetId ? `/api/portfolio/sync?spreadsheet_id=${encodeURIComponent(spreadsheetId)}` : '/api/portfolio/sync', 'POST'),
   deletePortfolio: async (id: string) => {
     const url = `${API_BASE_URL}/api/portfolio/${id}`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -144,10 +144,47 @@ export const optionsApi = {
 
   getBrokerPositions: (): Promise<BrokerPositionsResponse> => apiRequest('/api/broker/positions'),
   getBrokerOrders: (): Promise<BrokerOrdersResponse> => apiRequest('/api/broker/orders'),
+  getBrokerClosedPositions: (): Promise<{ trades: any[]; count: number }> => apiRequest('/api/broker/closed-positions'),
+  getBrokerOrderBlotter: (): Promise<any> => apiRequest('/api/broker/order-blotter'),
+  getBrokerWatchlists: (): Promise<{ watchlists: any[] }> => apiRequest('/api/broker/watchlists'),
+  getBrokerWatchlistInstruments: (watchlistId: string): Promise<{ watchlist_id: string; instruments: any[] }> =>
+    apiRequest(`/api/broker/watchlist/${encodeURIComponent(watchlistId)}`),
+  scanCspOpportunities: (source: string = 'saxo', watchlistId?: string): Promise<{ source: string; scanned_symbols: string[]; opportunities: any[] }> =>
+    apiRequest(watchlistId ? `/api/scanner/csp?source=${source}&watchlist_id=${encodeURIComponent(watchlistId)}` : `/api/scanner/csp?source=${source}`),
   placeBrokerOrder: (payload: { uic: number; asset_type?: string; amount?: number; buy_sell?: string; order_type?: string; order_price: number }) =>
     apiRequest('/api/broker/orders', 'POST', payload),
   runBrokerPipelineScan: (params?: { candidates?: string[]; simulate_order_placement?: boolean }) =>
     apiRequest('/api/broker/pipeline/scan', 'POST', params || {}),
+
+  // ── Multi-Year Trade History & Behavioral Forensics ───────────────────────
+  uploadPdfReport: async (file: File) => {
+    const url = `${API_BASE_URL}/api/history/upload-pdf`;
+    const formData = new FormData();
+    formData.append('file', file);
+    const headers: Record<string, string> = {};
+    try {
+      await auth.authStateReady();
+      const token = await auth.currentUser?.getIdToken();
+      if (token) headers['Authorization'] = 'Bearer ' + token;
+    } catch (e) { /* no-op */ }
+    const res = await fetch(url, { method: 'POST', headers, body: formData });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`PDF upload failed: ${err}`);
+    }
+    return await res.json();
+  },
+  initSampleReport: () => apiRequest('/api/history/sample-init', 'POST'),
+  listReports: () => apiRequest('/api/history/reports'),
+  getHistoricalCampaigns: (reportId?: string) =>
+    apiRequest(reportId ? `/api/history/campaigns?report_id=${encodeURIComponent(reportId)}` : '/api/history/campaigns'),
+  getBehavioralAudit: (reportId?: string) =>
+    apiRequest(reportId ? `/api/history/behavioral-audit?report_id=${encodeURIComponent(reportId)}` : '/api/history/behavioral-audit'),
+  getPortfolioNews: (top: number = 25) =>
+    apiRequest(`/api/history/news?top=${top}`),
+  checkOrderSafety: (payload: any) =>
+    apiRequest('/api/shield/check-order', 'POST', payload),
 };
+
 
 

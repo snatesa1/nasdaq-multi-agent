@@ -56,8 +56,10 @@ const navGroups = [
     items: [
       { name: 'Strategy Builder', path: '/strategies', icon: Layers, badge: 'Hot', badgeColor: 'bg-rose-100 text-rose-700' },
       { name: 'Option Pricer', path: '/pricer', icon: Percent },
+      { name: 'Behavioral Forensics', path: '/behavioral-lab', icon: Compass, badge: 'New', badgeColor: 'bg-indigo-100 text-indigo-700' },
     ]
   },
+
   {
     title: 'MARKET SCANNER',
     items: [
@@ -69,6 +71,7 @@ const navGroups = [
     title: 'ACADEMIC & LEARNING',
     items: [
       { name: 'Socratic Tutor', path: '/learn', icon: BookOpen, badge: 'AI', badgeColor: 'bg-indigo-100 text-indigo-700' },
+      { name: 'What-If Scenarios', path: '/paper-trade', icon: Award },
     ]
   }
 ];

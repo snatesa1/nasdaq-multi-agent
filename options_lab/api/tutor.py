@@ -23,10 +23,125 @@ LEARNLM SOCRATIC PEDAGOGY PRINCIPLES:
 
 """
 
+import threading
+
 class SocraticTutor:
     def __init__(self):
-        self.model_name = settings.VERTEX_MODEL
+        self._model_pool = list(settings.GEMINI_MODEL_POOL)
+        if not self._model_pool:
+            self._model_pool = ["gemini-2.5-flash-lite", "gemini-2.5-flash", "gemini-1.5-flash"]
+        self._rr_index = 0
+        self._lock = threading.Lock()
+
+    def _get_ordered_models(self) -> List[str]:
+        """
+        Returns models ordered starting from the current round-robin index,
+        distributing requests evenly across the pool to balance RPM and RPD.
+        """
+        with self._lock:
+            start_idx = self._rr_index % len(self._model_pool)
+            self._rr_index = (self._rr_index + 1) % len(self._model_pool)
         
+        # Rotated list: e.g. [Model_i, Model_i+1, ..., Model_i-1]
+        return self._model_pool[start_idx:] + self._model_pool[:start_idx]
+
+    def _call_gemini_with_fallback(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        enable_grounding: bool = False,
+        timeout: int = 25
+    ) -> Optional[str]:
+        """
+        Executes a prompt across the Round-Robin model pool with instant failover on 429/503/timeout.
+        """
+        api_key = settings.GEMINI_API_KEY
+        ordered_models = self._get_ordered_models()
+
+        if api_key:
+            import requests
+            headers = {"Content-Type": "application/json"}
+            payload: Dict[str, Any] = {
+                "contents": [{"parts": [{"text": prompt}]}]
+            }
+            if system_prompt:
+                payload["systemInstruction"] = {
+                    "parts": [{"text": system_prompt}]
+                }
+            if enable_grounding:
+                payload["tools"] = [{"googleSearch": {}}]
+
+            for model in ordered_models:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
+                try:
+                    logger.info(f"⚡ [Round-Robin Load Balancer] Calling Gemini model '{model}' (grounding={enable_grounding})...")
+                    resp = requests.post(url, headers=headers, json=payload, timeout=timeout)
+                    
+                    if resp.status_code == 200:
+                        res_json = resp.json()
+                        candidate = res_json.get("candidates", [{}])[0]
+                        text_content = candidate.get("content", {}).get("parts", [{}])[0].get("text", "")
+                        if text_content:
+                            # Attach grounding citations if present
+                            grounding_metadata = candidate.get("groundingMetadata", {})
+                            web_sources = grounding_metadata.get("groundingChunks", [])
+                            if web_sources:
+                                text_content += "\n\n**🔍 Grounding Sources:**\n"
+                                for chunk in web_sources[:3]:
+                                    web = chunk.get("web", {})
+                                    if web.get("uri") and web.get("title"):
+                                        text_content += f"- [{web['title']}]({web['uri']})\n"
+                            return text_content
+                    elif resp.status_code in (429, 503):
+                        logger.warning(f"⚠️ Model '{model}' returned HTTP {resp.status_code} (Rate Limit / Unavailable). Failing over immediately to next model...")
+                        continue
+                    else:
+                        logger.warning(f"⚠️ Model '{model}' returned HTTP {resp.status_code}: {resp.text[:120]}. Failing over...")
+                        continue
+                except Exception as e:
+                    logger.warning(f"⚠️ Error or timeout connecting to model '{model}': {e}. Failing over to next model...")
+                    continue
+
+        # Vertex AI fallback if configured & not disabled
+        if os.getenv("DISABLE_VERTEX_FALLBACK", "false").lower() != "true":
+            try:
+                import vertexai
+                from vertexai.generative_models import GenerativeModel, Tool
+                location = os.getenv("GCP_LOCATION") or os.getenv("VERTEX_LOCATION") or "us-central1"
+                vertexai.init(project=settings.PROJECT_ID, location=location)
+                
+                tools = [Tool.from_google_search_retrieval()] if enable_grounding else None
+                model_inst = GenerativeModel(
+                    model_name="gemini-2.5-flash",
+                    system_instruction=system_prompt,
+                    tools=tools
+                )
+                response = model_inst.generate_content(prompt)
+                if response and response.text:
+                    return response.text
+            except Exception as e:
+                logger.error(f"Vertex AI fallback failed: {e}")
+
+        return None
+
+    def _prune_context(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Prunes large nested arrays, path matrices, and verbose payloads from context
+        to maintain a compact, high-speed context window.
+        """
+        pruned = {}
+        for k, v in context.items():
+            if isinstance(v, list):
+                if len(v) > 5:
+                    pruned[k] = v[:5] + [f"... ({len(v) - 5} more items omitted for brevity)"]
+                else:
+                    pruned[k] = v
+            elif isinstance(v, dict):
+                pruned[k] = {sub_k: sub_v for sub_k, sub_v in list(v.items())[:8]}
+            elif isinstance(v, (str, int, float, bool)) or v is None:
+                pruned[k] = v
+        return pruned
+
     def generate_response(
         self,
         message: str,
@@ -40,99 +155,35 @@ class SocraticTutor:
         prompt_parts = []
         
         if context:
-            prompt_parts.append(f"CURRENT PLAYGROUND/PORTFOLIO CONTEXT:\n{json.dumps(context, indent=2)}\n\n")
+            pruned_ctx = self._prune_context(context)
+            prompt_parts.append(f"CURRENT PLAYGROUND/PORTFOLIO CONTEXT:\n{json.dumps(pruned_ctx, indent=2)}\n\n")
             
         prompt_parts.append("CONVERSATION HISTORY:")
-        for msg in chat_history:
-            role = "User" if msg["role"] == "user" else "Assistant"
-            prompt_parts.append(f"{role}: {msg['content']}")
+        # Keep last 10 messages for high-speed response times and low token usage
+        recent_history = chat_history[-10:] if len(chat_history) > 10 else chat_history
+        for msg in recent_history:
+            role = "User" if msg.get("role") == "user" else "Assistant"
+            prompt_parts.append(f"{role}: {msg.get('content', '')}")
             
         prompt_parts.append(f"User: {message}")
         prompt_parts.append("Assistant:")
         
         full_prompt = "\n".join(prompt_parts)
 
-        api_key = settings.GEMINI_API_KEY
-        if api_key:
-            import requests
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={api_key}"
-            headers = {"Content-Type": "application/json"}
-            
-            data = {
-                "systemInstruction": {
-                    "parts": [{"text": TUTOR_SYSTEM_PROMPT}]
-                },
-                "contents": [{"parts": [{"text": full_prompt}]}]
-            }
-            
-            if enable_grounding:
-                data["tools"] = [{"googleSearch": {}}]
+        result = self._call_gemini_with_fallback(
+            prompt=full_prompt,
+            system_prompt=TUTOR_SYSTEM_PROMPT,
+            enable_grounding=enable_grounding,
+            timeout=25
+        )
 
-            # Try up to 3 times with exponential backoff
-            for attempt in range(1, 4):
-                try:
-                    logger.info(f"Calling Gemini API via Google AI Studio for Socratic Tutor (attempt {attempt}): {self.model_name} (grounding={enable_grounding})")
-                    response = requests.post(url, headers=headers, json=data, timeout=60)
-                    response.raise_for_status()
-                    res_json = response.json()
-                    
-                    candidate = res_json["candidates"][0]
-                    text_content = candidate["content"]["parts"][0]["text"]
-                    
-                    # Check for Google Search Grounding sources
-                    grounding_metadata = candidate.get("groundingMetadata", {})
-                    web_sources = grounding_metadata.get("groundingChunks", [])
-                    if web_sources:
-                        text_content += "\n\n**🔍 Grounding Sources:**\n"
-                        for chunk in web_sources[:3]:
-                            web = chunk.get("web", {})
-                            if web.get("uri") and web.get("title"):
-                                text_content += f"- [{web['title']}]({web['uri']})\n"
-                                
-                    return text_content
-                except Exception as e:
-                    logger.warning(f"⚠️ Gemini API attempt {attempt} failed: {e}")
-                    if attempt < 3:
-                        import time
-                        time.sleep(1)
+        if result:
+            return result
 
-        # Check if Vertex AI fallback is disabled
-        if os.getenv("DISABLE_VERTEX_FALLBACK", "false").lower() == "true":
-            logger.error("Vertex AI fallback is disabled and Gemini API failed.")
-            return (
-                "I apologize, but I encountered a network timeout connecting to Gemini. "
-                "Please try sending your message again."
-            )
-
-        try:
-            import vertexai
-            from vertexai.generative_models import GenerativeModel, Tool
-            location = os.getenv("GCP_LOCATION") or os.getenv("VERTEX_LOCATION") or "us-central1"
-            vertexai.init(project=settings.PROJECT_ID, location=location)
-            
-            vertex_model_name = self.model_name
-            if vertex_model_name == "gemini-flash-latest":
-                vertex_model_name = "gemini-2.5-flash"
-            elif vertex_model_name == "gemini-1.5-flash":
-                vertex_model_name = "gemini-1.5-flash-002"
-            elif vertex_model_name == "gemini-1.5-pro":
-                vertex_model_name = "gemini-1.5-pro-002"
-                
-            tools = [Tool.from_google_search_retrieval()] if enable_grounding else None
-            
-            model = GenerativeModel(
-                model_name=vertex_model_name,
-                system_instruction=TUTOR_SYSTEM_PROMPT,
-                tools=tools
-            )
-            response = model.generate_content(full_prompt)
-            return response.text
-        except Exception as e:
-            logger.error(f"Error generating Socratic tutor response: {e}")
-            return (
-                "I apologize, but I encountered an error connecting to my core brain (Gemini). "
-                "Let me know what options strategy or Greeks question you'd like to break down."
-            )
+        return (
+            "I apologize, but I encountered a temporary connection issue. "
+            "Let's continue: what is your quantitative intuition or risk objective for this position?"
+        )
 
     def generate_hint(
         self,
@@ -157,20 +208,10 @@ CONVERSATION HISTORY:
 ACTIVE CONTEXT:
 {json.dumps(context or {}, indent=2)}
 """
-        api_key = settings.GEMINI_API_KEY
-        if api_key:
-            try:
-                import requests
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={api_key}"
-                headers = {"Content-Type": "application/json"}
-                data = {"contents": [{"parts": [{"text": prompt}]}]}
-                response = requests.post(url, headers=headers, json=data, timeout=20)
-                response.raise_for_status()
-                res_json = response.json()
-                return "💡 **Hint:** " + res_json["candidates"][0]["content"]["parts"][0]["text"]
-            except Exception as e:
-                logger.warning(f"Failed to generate hint via AI Studio: {e}")
-                
+        result = self._call_gemini_with_fallback(prompt=prompt, timeout=15)
+        if result:
+            return "💡 **Hint:** " + result.replace("💡 **Hint:**", "").strip()
+
         return "💡 **Hint:** Think about how time decay (Theta) accelerates as expiration approaches, and consider the direction of your Delta exposure."
 
     def get_concept_explanation(self, concept: str) -> str:
@@ -185,30 +226,11 @@ Include:
 3. A short question for the reader to test their intuition about the concept.
 Use clear Markdown formatting with nice headings.
 """
-        api_key = settings.GEMINI_API_KEY
-        if api_key:
-            try:
-                import requests
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={api_key}"
-                headers = {"Content-Type": "application/json"}
-                data = {"contents": [{"parts": [{"text": prompt}]}]}
-                response = requests.post(url, headers=headers, json=data, timeout=30)
-                response.raise_for_status()
-                res_json = response.json()
-                return res_json["candidates"][0]["content"]["parts"][0]["text"]
-            except Exception as e:
-                logger.warning(f"⚠️ Concept explanation failed via AI Studio: {e}")
+        result = self._call_gemini_with_fallback(prompt=prompt, timeout=20)
+        if result:
+            return result
 
-        try:
-            import vertexai
-            from vertexai.generative_models import GenerativeModel
-            vertexai.init(project=settings.PROJECT_ID)
-            model = GenerativeModel(self.model_name)
-            response = model.generate_content(prompt)
-            return response.text
-        except Exception as e:
-            logger.error(f"Error generating explanation for {concept}: {e}")
-            return f"Unable to fetch automated explanation for '{concept}'. Let's talk about it directly!"
+        return f"Unable to fetch automated explanation for '{concept}'. Let's discuss its options mechanics directly!"
 
     def summarize_learnings(self, chat_history: List[Dict[str, str]]) -> str:
         """
@@ -218,9 +240,9 @@ Use clear Markdown formatting with nice headings.
             return "- Started a Socratic learning session."
             
         transcript = []
-        for msg in chat_history:
-            role = "User" if msg["role"] == "user" else "Tutor"
-            transcript.append(f"{role}: {msg['content']}")
+        for msg in chat_history[-12:]:
+            role = "User" if msg.get("role") == "user" else "Tutor"
+            transcript.append(f"{role}: {msg.get('content', '')}")
         full_transcript = "\n".join(transcript)
         
         prompt = f"""
@@ -231,27 +253,8 @@ Return only the bullet points in plain text format, with each point starting wit
 CHAT HISTORY:
 {full_transcript}
 """
-        api_key = settings.GEMINI_API_KEY
-        if api_key:
-            try:
-                import requests
-                url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_name}:generateContent?key={api_key}"
-                headers = {"Content-Type": "application/json"}
-                data = {"contents": [{"parts": [{"text": prompt}]}]}
-                response = requests.post(url, headers=headers, json=data, timeout=30)
-                response.raise_for_status()
-                res_json = response.json()
-                return res_json["candidates"][0]["content"]["parts"][0]["text"].strip()
-            except Exception as e:
-                logger.warning(f"⚠️ summarize_learnings failed via AI Studio: {e}")
+        result = self._call_gemini_with_fallback(prompt=prompt, timeout=20)
+        if result:
+            return result.strip()
 
-        try:
-            import vertexai
-            from vertexai.generative_models import GenerativeModel
-            vertexai.init(project=settings.PROJECT_ID)
-            model = GenerativeModel(self.model_name)
-            response = model.generate_content(prompt)
-            return response.text.strip()
-        except Exception as e:
-            logger.error(f"Error generating learning summary: {e}")
-            return "- Discussed options Greeks and volatility strategies."
+        return "- Discussed options Greeks, volatility surfaces, and systematic trading strategies."

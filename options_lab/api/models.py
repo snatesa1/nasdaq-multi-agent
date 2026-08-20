@@ -190,3 +190,16 @@ class BrokerOrdersResponse(BaseModel):
     orders: List[BrokerOrder] = Field(default=[], description="List of historical/active orders")
     updated_at: str = Field(..., description="ISO timestamp")
 
+class SafetyCheckRequest(BaseModel):
+    symbol: str = Field(..., description="Target ticker symbol")
+    asset_type: str = Field("StockOption", description="Asset type e.g. Stock, StockOption")
+    buy_sell: str = Field("Sell", description="'Buy' or 'Sell'")
+    strike: Optional[float] = Field(None, description="Strike price if option")
+    delta: Optional[float] = Field(None, description="Option Delta")
+    dte: Optional[int] = Field(None, description="Days to expiration")
+    order_value: float = Field(0.0, description="Total dollar value of proposed order")
+    portfolio_equity: float = Field(100000.0, description="Current total portfolio equity")
+    current_ticker_exposure: float = Field(0.0, description="Existing exposure in ticker")
+    recent_loss_amount: float = Field(0.0, description="Recent major loss if within 24h")
+
+

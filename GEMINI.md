@@ -21,6 +21,13 @@ Hierarchical Multi-Agent System (FastAPI) for comprehensive NASDAQ and Multi-Ass
 - **Full Static & Runtime Synchronization**: When modifying frontend code (`src/app/...`), NEVER consider the work done until a fresh production build/export (`npm run build` into `out/`) or active runtime server is verified, compiled, and proven responding.
 - **Automated Validation Scripts**: Always create and execute verification test scripts to check live ports, API status codes, file timestamps, and rendered components.
 - **No White-Box Guesswork**: Inspect actual file timestamps, process trees, and runtime logs before delivering results.
+- **Context Compression & Anti-Bloating**:
+  1. Mandate CodeGraph exploration (`codegraph_explore`) for codebase research.
+  2. Maintain a sliding history window ($\le 10$ messages) in Socratic Tutor (`tutor.py`).
+  3. Prune bulky simulation arrays and raw matrices via `_prune_context()` before LLM ingestion.
+  4. Delegate heavy research and wide search operations to subagents (`invoke_subagent`).
+  5. Slice file reads to bounded line ranges (`StartLine`/`EndLine`).
+
 
 
 ## Options Lab & Socratic Tutor Modules [NEW]
@@ -130,6 +137,18 @@ Hierarchical Multi-Agent System (FastAPI) for comprehensive NASDAQ and Multi-Ass
 - **Earnings Page Crash Fix**: Resolved the missing `Sparkles` icon import in `options_lab/frontend/src/app/earnings/page.tsx` and introduced comprehensive null-safety checks (`?.` and `?? 0` operators) on all `volatility_metrics` attributes to guarantee crash-free page state transitions.
 - **Chrome OAuth Redirect Routing**: Configured the Electron main process `main.js` using `webContents.setWindowOpenHandler` and `will-navigate` listeners to intercept all external HTTP requests (such as the Saxo OpenAPI authorization link) and automatically launch them in the system's native default browser (Google Chrome) instead of rendering them in the app frame.
 - **Saxo Token Refresh Safety Guard**: Implemented `needs_reauth` lifecycle state tracking in `SaxoClient` to prevent infinite 401 client request retry loops on expired refresh tokens. Updates `/api/broker/status` with `NEEDS_REAUTH` state so the frontend can display a clean OAuth sign-in flow.
+- **Saxo Multi-Year Trade History, PDF Chunker & Behavioral Forensics Engine (2026-08-20) [NEW]**:
+  1. **Dual Ingestion Engine (`pdf_report_parser.py` & `trade_history_ingest.py`)**: Parses multi-page authentic Saxo PDF account statements (Portfolio Reports, Closed Positions Reports) and OpenAPI history chunks (`/clientreporting/v1/`, `/hist/v3/transactions`, `/hist/v4/performance/timeseries`). Stores normalized schemas in SQLite (`saxo_reports`, `saxo_options_history`, `saxo_stock_history`, `saxo_quarterly_performance`, `saxo_holdings_history`).
+  2. **Campaign Lifecycle Stitcher (`campaign_stitcher.py`)**: Reconstructs complete multi-leg option and stock strategy campaigns (Wheel lifecycles, covered call series, bag-holds) from raw transaction records.
+  3. **Behavioral Bias Forensics (`behavioral_forensics.py`)**: Quantifies psychological and discipline flaws—such as the Option Volatility Drag (e.g. losing -$5,089 on short PANW calls against a +$5,962 stock surge), unhedged bag-holding (-82.7% on PLUG), and systematic consistency (+100% win rate on Visa & IBM options). Computes composite Discipline Score (0-100) and letter grades.
+  4. **Behavioral Safety Shield (`safety_shield.py`)**: Hard real-time circuit breakers that evaluate pre-flight orders against behavioral rules:
+     - *Momentum Call Delta Guard*: Restricts call selling to Delta $\le 0.18$ on high-beta growth stocks to prevent upside destruction.
+     - *Gamma Expiration Guard*: Blocks selling options $< 21$ DTE.
+     - *Revenge Cooldown*: 24-hour execution lockout following a loss $> \$1,000$.
+     - *Concentration Risk Cap*: Hard $15\%$ maximum single-ticker capital exposure.
+  5. **Next.js Behavioral Lab Cockpit (`frontend/src/app/behavioral-lab/page.tsx`)**: Velzon Galaxy Light institutional UI featuring a 4-KPI forensic ribbon, bias diagnostic cards, quarterly P&L evolution, interactive stitched campaign table, pre-flight safety shield simulator, and live Saxo news wire feed (`/api/history/news`).
+
+
 
 
 
