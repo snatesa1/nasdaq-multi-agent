@@ -471,3 +471,14 @@ def get_saxo_cache(key: str) -> Optional[Any]:
         logger.error(f"Failed to read saxo cache for {key}: {e}")
     return None
 
+def clear_saxo_cache():
+    """Wipes all cached Saxo broker data on disconnect."""
+    try:
+        with _get_conn() as conn:
+            conn.execute("DELETE FROM saxo_cache")
+            conn.commit()
+            logger.info("Cleared all Saxo cache records from SQLite.")
+    except Exception as e:
+        logger.error(f"Failed to clear saxo cache: {e}")
+
+

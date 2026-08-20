@@ -696,17 +696,20 @@ def set_broker_token(payload: Dict[str, Any] = Body(...), user=Depends(verify_fi
 @app.post("/api/broker/oauth/disconnect")
 def disconnect_broker(user=Depends(verify_firebase_token)):
     """
-    Clears live access tokens and closes active broker session.
-    Safely terminates any live trading API calls.
+    Clears live access tokens, wipes cached Saxo records, and closes active broker session.
     """
     saxo_broker_client.access_token = None
     saxo_broker_client.refresh_token = None
+    saxo_broker_client.needs_reauth = True
+    saxo_broker_client.token_acquired_at = None
     saxo_broker_client._persist_tokens_to_env()
     if hasattr(saxo_broker_client, "session"):
         saxo_broker_client.session.cookies.clear()
-    log_progress("Session Disconnect", "SUCCESS", "Disconnected Saxo session and cleared access tokens.")
-    logger.info("Broker Live API session disconnected and access tokens cleared.")
+    database.clear_saxo_cache()
+    log_progress("Session Disconnect", "SUCCESS", "Disconnected Saxo session, wiped SQLite cache, and cleared access tokens.")
+    logger.info("Broker Live API session disconnected, SQLite cache cleared, and access tokens wiped.")
     return {"status": "DISCONNECTED", "message": "Live Saxo trading bot connection safely closed."}
+
 
 
 

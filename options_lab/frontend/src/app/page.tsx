@@ -109,26 +109,41 @@ export default function Dashboard() {
   const [dynamicCspWatchlist, setDynamicCspWatchlist] = useState(defaultCspList);
 
   // Fetch all live data from Saxo Bank API
-  // Fetch all live data from Saxo Bank API & Live Market Stream
+  // Fetch all live data from Saxo Bank API
   const fetchBrokerData = async (forceSpinner = false) => {
     if (forceSpinner) setActionLoading(true);
     setErrorMsg(null);
     try {
-      // 1. Fetch status in parallel with account & positions for zero-hang fast boot
-      const [statusRes, accountRes, positionsRes, blotterRes, wlRes] = await Promise.allSettled([
-        optionsApi.getBrokerStatus(),
+      // 1. Fetch status first
+      const statusRes = await optionsApi.getBrokerStatus().catch(() => null);
+      if (statusRes) {
+        setBrokerStatus(statusRes);
+      }
+
+      // If disconnected or no access token present, immediately show Connection & Token screen
+      if (!statusRes?.has_access_token) {
+        setIsAuthenticated(false);
+        setBrokerAccount(null);
+        setPositions([]);
+        setOrders([]);
+        const authUrlRes = await optionsApi.getBrokerAuthUrl().catch(() => null);
+        if (authUrlRes?.auth_url) {
+          setAuthUrl(authUrlRes.auth_url);
+        }
+        setLoading(false);
+        setActionLoading(false);
+        return;
+      }
+
+      setIsAuthenticated(true);
+
+      // 2. Fetch account, positions, blotter and watchlists in parallel
+      const [accountRes, positionsRes, blotterRes, wlRes] = await Promise.allSettled([
         optionsApi.getBrokerAccount(),
         optionsApi.getBrokerPositions(),
         optionsApi.getBrokerOrderBlotter(),
         optionsApi.getBrokerWatchlists()
       ]);
-
-      if (statusRes.status === 'fulfilled' && statusRes.value) {
-        setBrokerStatus(statusRes.value);
-      }
-
-      // Always authenticate & show dashboard if account or positions are available
-      setIsAuthenticated(true);
 
       if (accountRes.status === 'fulfilled' && accountRes.value) {
         setBrokerAccount(accountRes.value);
@@ -146,7 +161,7 @@ export default function Dashboard() {
         setSaxoWatchlists(wlRes.value.watchlists);
       }
 
-      // 2. Scan live CSP opportunities in background
+      // 3. Scan live CSP opportunities in background
       try {
         const scanRes = await optionsApi.scanCspOpportunities('saxo', selectedWatchlistId);
         if (scanRes?.opportunities && scanRes.opportunities.length > 0) {
@@ -158,12 +173,17 @@ export default function Dashboard() {
       
     } catch (err: any) {
       console.error('Failed to load broker data:', err);
-      setIsAuthenticated(true); // Gracefully display live-enriched fallback
+      if (err.message?.includes('401') || err.message?.includes('authentication required')) {
+        setIsAuthenticated(false);
+      } else {
+        setErrorMsg(err.message || 'Error communicating with Saxo OpenAPI.');
+      }
     } finally {
       setLoading(false);
       setActionLoading(false);
     }
   };
+
 
 
   const handleWatchlistChange = async (wlId: string) => {

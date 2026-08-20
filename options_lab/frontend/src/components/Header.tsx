@@ -158,12 +158,16 @@ export default function Header() {
               <div className="border-t border-slate-100 my-1" />
               <button
                 onClick={async () => {
+                  setShowUserMenu(false);
                   try {
                     await optionsApi.disconnectBroker();
                   } catch (e) {
                     console.error("Failed to disconnect broker:", e);
                   }
-                  logout();
+                  await logout();
+                  if (typeof window !== 'undefined') {
+                    window.location.href = '/';
+                  }
                 }}
                 className="w-full text-left flex items-center gap-2 px-4 py-2 text-rose-600 hover:bg-rose-50 transition font-medium"
               >
@@ -171,6 +175,7 @@ export default function Header() {
               </button>
             </div>
           )}
+
         </div>
       </div>
     </header>
