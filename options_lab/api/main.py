@@ -710,156 +710,9 @@ def disconnect_broker(user=Depends(verify_firebase_token)):
 
 
 
-def enrich_positions_with_live_market_data(positions_data: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Enriches open positions with real-time live market spot prices and recalculates
-    market values and unrealized PnL so the dashboard is NEVER stale.
-    """
-    positions = positions_data.get("positions", [])
-    if not positions:
-        # Authentic baseline holdings from verified Saxo report
-        positions = [
-            {
-                "position_id": "POS_COIN_100",
-                "uic": 22304545,
-                "symbol": "COIN",
-                "description": "Coinbase Global Inc",
-                "asset_type": "Stock",
-                "option_type": None,
-                "strike_price": None,
-                "expiry_date": None,
-                "amount": 100.0,
-                "open_price": 140.0,
-                "current_price": 160.20,
-                "market_value": 16020.0,
-                "unrealized_pnl": 2020.0,
-                "unrealized_pnl_pct": 14.43,
-                "currency": "USD"
-            },
-            {
-                "position_id": "POS_COIN_SEP26_210C",
-                "uic": 59604400,
-                "symbol": "COIN",
-                "description": "Coinbase Global Inc Sep2026 210 Call",
-                "asset_type": "StockOption",
-                "option_type": "call",
-                "strike_price": 210.0,
-                "expiry_date": "2026-09-18",
-                "amount": -1.0,
-                "open_price": 2.40,
-                "current_price": 1.85,
-                "market_value": -185.0,
-                "unrealized_pnl": 55.0,
-                "unrealized_pnl_pct": 22.92,
-                "currency": "USD"
-            },
-            {
-                "position_id": "POS_IBM_SEP26_195P",
-                "uic": 59603236,
-                "symbol": "IBM",
-                "description": "International Business Machines Sep2026 195 Put",
-                "asset_type": "StockOption",
-                "option_type": "put",
-                "strike_price": 195.0,
-                "expiry_date": "2026-09-04",
-                "amount": -1.0,
-                "open_price": 2.50,
-                "current_price": 0.12,
-                "market_value": -12.0,
-                "unrealized_pnl": 238.0,
-                "unrealized_pnl_pct": 95.22,
-                "currency": "USD"
-            },
-            {
-                "position_id": "POS_PLUG_200",
-                "uic": 1233,
-                "symbol": "PLUG",
-                "description": "Plug Power Inc",
-                "asset_type": "Stock",
-                "option_type": None,
-                "strike_price": None,
-                "expiry_date": None,
-                "amount": 200.0,
-                "open_price": 13.0,
-                "current_price": 2.25,
-                "market_value": 450.0,
-                "unrealized_pnl": -2150.0,
-                "unrealized_pnl_pct": -82.69,
-                "currency": "USD"
-            },
-            {
-                "position_id": "POS_XMS_ETF_5000",
-                "uic": 3345196,
-                "symbol": "O9A",
-                "description": "Xtrackers MSCI Singapore UCITS ETF",
-                "asset_type": "Stock",
-                "option_type": None,
-                "strike_price": None,
-                "expiry_date": None,
-                "amount": 5000.0,
-                "open_price": 2.309,
-                "current_price": 2.787,
-                "market_value": 13935.0,
-                "unrealized_pnl": 2390.0,
-                "unrealized_pnl_pct": 20.70,
-                "currency": "USD"
-            }
-        ]
-
-    enriched_positions = []
-    for p in positions:
-        sym = p.get("symbol", "").strip().upper()
-        asset_type = p.get("asset_type", "Stock")
-        amount = float(p.get("amount", 1.0))
-        open_price = float(p.get("open_price", 0.0))
-        multiplier = 100 if "Option" in asset_type else 1
-        cost_basis = open_price * abs(amount) * multiplier
-        current_price = float(p.get("current_price", open_price))
-
-        # Dynamically fetch real-time market quote for stocks & ETFs
-        if asset_type in ["Stock", "Etf", "Equity"] and sym:
-            try:
-                lookup_sym = "COIN" if sym == "COIN" else ("PLUG" if sym == "PLUG" else sym.replace(".", "-"))
-                if lookup_sym in ["COIN", "PLUG", "IBM", "AAPL", "NVDA", "AMZN"]:
-                    mkt = fetch_market_data(lookup_sym)
-                    spot = float(mkt.get("current_price", 0.0))
-                    if spot > 0.0:
-                        current_price = spot
-            except Exception as e_quote:
-                logger.debug(f"Live quote fetch for {sym} non-critical: {e_quote}")
-
-        # Derive accurate market value & unrealized PnL
-        if amount > 0:  # Long equity / ETF
-            pnl = (current_price - open_price) * amount * multiplier
-            market_val = current_price * amount * multiplier
-        else:  # Short option
-            pnl = (open_price - current_price) * abs(amount) * multiplier
-            market_val = -(current_price * abs(amount) * multiplier)
-
-        pnl_pct = (pnl / cost_basis * 100.0) if cost_basis > 0 else 0.0
-
-        enriched_p = dict(p)
-        enriched_p["current_price"] = round(current_price, 2)
-        enriched_p["market_value"] = round(market_val, 2)
-        enriched_p["unrealized_pnl"] = round(pnl, 2)
-        enriched_p["unrealized_pnl_pct"] = round(pnl_pct, 2)
-        enriched_positions.append(enriched_p)
-
-    total_unrealized_pnl = sum(p["unrealized_pnl"] for p in enriched_positions)
-    
-    return {
-        "environment": positions_data.get("environment", "LIVE"),
-        "status": "LIVE_MARKET_ENRICHED",
-        "total_positions_count": len(enriched_positions),
-        "total_unrealized_pnl": round(total_unrealized_pnl, 2),
-        "positions": enriched_positions,
-        "updated_at": datetime.now().isoformat()
-    }
-
-
 @app.get("/api/broker/account", response_model=BrokerAccountSummary)
 async def get_broker_account(user=Depends(verify_firebase_token)):
-    """Fetches real-time portfolio balance, equity, and margin, with automatic live market recalculation."""
+    """Fetches real-time portfolio balance, equity, and margin directly from Saxo OpenAPI."""
     async with broker_concurrency_lock:
         try:
             balances = saxo_broker_client.get_account_balances()
@@ -867,49 +720,39 @@ async def get_broker_account(user=Depends(verify_firebase_token)):
             log_progress("Account Fetch", "SUCCESS", f"Fetched account total equity: ${balances.get('total_equity')}")
             return BrokerAccountSummary(**balances)
         except Exception as e:
-            # Fallback to local SQLite cache or authentic report baseline
-            cached = database.get_saxo_cache("account_summary") or {}
-            
-            # Recalculate live equity based on cash + live-enriched position values
-            cached_positions = database.get_saxo_cache("positions") or {}
-            enriched = enrich_positions_with_live_market_data(cached_positions)
-            pos_market_value = sum(p["market_value"] for p in enriched["positions"] if p["amount"] > 0)
-            cash_avail = float(cached.get("cash_available") or 71984.46)
-            total_eq = round(cash_avail + pos_market_value, 2)
-
-            account_data = {
-                "status": "LIVE_ENRICHED_CONNECTED",
-                "environment": settings.SAXO_ENV,
-                "cash_available": cash_avail,
-                "total_equity": total_eq,
-                "margin_available": 95000.0,
-                "margin_used": round(pos_market_value * 0.3, 2),
-                "currency": "USD",
-                "account_id": "33888/221497",
-                "updated_at": datetime.now().isoformat()
-            }
-            database.set_saxo_cache("account_summary", account_data)
-            return BrokerAccountSummary(**account_data)
+            cached = database.get_saxo_cache("account_summary")
+            if cached:
+                logger.info("Serving cached Saxo account summary from SQLite.")
+                return BrokerAccountSummary(**cached)
+            log_progress("Account Fetch", "ERROR", f"Exception during account fetch: {e}")
+            logger.error(f"Failed to fetch broker account: {e}")
+            if "authentication required" in str(e).lower() or "401" in str(e):
+                raise HTTPException(status_code=401, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/broker/positions", response_model=BrokerPositionsResponse)
 async def get_broker_positions(user=Depends(verify_firebase_token)):
-    """Fetches current open stock and option positions with live market spot prices and mark valuations."""
+    """Fetches current open stock and option positions directly from Saxo OpenAPI."""
     async with broker_concurrency_lock:
         try:
             positions_data = saxo_broker_client.get_positions()
-            enriched = enrich_positions_with_live_market_data(positions_data)
-            database.set_saxo_cache("positions", enriched)
-            log_progress("Positions Fetch", "SUCCESS", f"Fetched open positions (Count: {len(enriched.get('positions', []))})")
-            return BrokerPositionsResponse(**enriched)
+            database.set_saxo_cache("positions", positions_data)
+            log_progress("Positions Fetch", "SUCCESS", f"Fetched open positions (Count: {len(positions_data.get('positions', []))})")
+            return BrokerPositionsResponse(**positions_data)
         except Exception as e:
-            cached = database.get_saxo_cache("positions") or {}
-            enriched = enrich_positions_with_live_market_data(cached)
-            database.set_saxo_cache("positions", enriched)
-            return BrokerPositionsResponse(**enriched)
+            cached = database.get_saxo_cache("positions")
+            if cached:
+                logger.info("Serving cached Saxo positions from SQLite.")
+                return BrokerPositionsResponse(**cached)
+            log_progress("Positions Fetch", "ERROR", f"Exception during positions fetch: {e}")
+            logger.error(f"Failed to fetch broker positions: {e}")
+            if "authentication required" in str(e).lower() or "401" in str(e):
+                raise HTTPException(status_code=401, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/broker/orders", response_model=BrokerOrdersResponse)
 async def get_broker_orders(user=Depends(verify_firebase_token)):
-    """Fetches active working orders and recently executed order history with SQLite caching."""
+    """Fetches active working orders and recently executed order history directly from Saxo OpenAPI."""
     async with broker_concurrency_lock:
         try:
             orders_data = saxo_broker_client.get_orders()
@@ -918,18 +761,13 @@ async def get_broker_orders(user=Depends(verify_firebase_token)):
         except Exception as e:
             cached = database.get_saxo_cache("orders")
             if cached:
+                logger.info("Serving cached Saxo orders from SQLite.")
                 return BrokerOrdersResponse(**cached)
-            # Default authentic blotter
-            blotter = saxo_broker_client.get_order_blotter()
-            orders_data = {
-                "environment": settings.SAXO_ENV,
-                "status": "LIVE_CACHED",
-                "total_orders_count": len(blotter.get("orders", [])),
-                "orders": blotter.get("orders", []),
-                "updated_at": datetime.now().isoformat()
-            }
-            database.set_saxo_cache("orders", orders_data)
-            return BrokerOrdersResponse(**orders_data)
+            logger.error(f"Failed to fetch broker orders: {e}")
+            if "authentication required" in str(e).lower() or "401" in str(e):
+                raise HTTPException(status_code=401, detail=str(e))
+            raise HTTPException(status_code=500, detail=str(e))
+
 
 
 @app.get("/api/broker/cache")

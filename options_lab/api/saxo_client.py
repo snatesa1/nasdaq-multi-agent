@@ -357,6 +357,7 @@ class SaxoClient:
             self.refresh_token = refresh_token.strip()
         self.needs_reauth = False
         self.token_acquired_at = datetime.now()
+        self._persist_tokens_to_env()
         logger.info(f"SaxoClient access token manually set for {self.environment} environment.")
 
     def get_orders(self) -> Dict[str, Any]:
