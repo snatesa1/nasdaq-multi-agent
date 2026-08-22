@@ -176,9 +176,22 @@ class TradeStagingEngine:
             else:
                 uic = 123456
 
-        # Determine buy/sell action
+        # Determine buy/sell action and derivative type
         buy_sell = "Sell" if ("CSP" in strategy or "CC" in strategy or "SHORT" in strategy) else "Buy"
         asset_type = "StockOption" if ("CSP" in strategy or "CC" in strategy or "OPTION" in strategy) else "Stock"
+        opt_type = "Put" if "CSP" in strategy else ("Call" if "CC" in strategy else "Put")
+
+        # Resolve exact Option Contract UIC from Saxo Option Space if derivative
+        if asset_type == "StockOption":
+            opt_uic = self.saxo_client.resolve_option_contract_uic(
+                underlying_uic=uic,
+                symbol=symbol,
+                strike=strike,
+                option_type=opt_type,
+                dte=dte
+            )
+            if opt_uic:
+                uic = opt_uic
 
         # 4. Place Order on Saxo
         record["approved_at"] = now_iso
@@ -192,7 +205,8 @@ class TradeStagingEngine:
                 amount=contracts,
                 buy_sell=buy_sell,
                 order_type="Limit",
-                order_price=premium_est if asset_type == "StockOption" else spot_price
+                order_price=premium_est if asset_type == "StockOption" else spot_price,
+                to_open_close="ToOpen"
             )
 
             record["executed_at"] = datetime.now().isoformat()

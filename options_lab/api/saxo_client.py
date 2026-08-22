@@ -971,6 +971,58 @@ class SaxoClient:
 
         return None
 
+    def resolve_option_contract_uic(
+        self,
+        underlying_uic: int,
+        symbol: str,
+        strike: float,
+        option_type: str = "Put",
+        dte: int = 35
+    ) -> Optional[int]:
+        """
+        Resolves the specific Saxo Option Contract UIC from the option space / chain.
+        """
+        if not self.access_token or underlying_uic <= 0:
+            return None
+        
+        try:
+            # 1. Query Saxo OpenAPI contractoptionspaces for the underlying
+            url = f"{self.base_url}ref/v1/instruments/contractoptionspaces/{underlying_uic}?OptionSpaceSegment=All"
+            resp = self._make_authenticated_request("GET", url)
+            if resp.status_code == 200:
+                data = resp.json()
+                spaces = data.get("OptionSpaces", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                best_uic = None
+                min_diff = float("inf")
+                target_put_call = option_type.capitalize()
+
+                for space in spaces:
+                    specific_opts = space.get("SpecificOptions", [])
+                    for opt in specific_opts:
+                        opt_strike = float(opt.get("StrikePrice", opt.get("Strike", 0.0)))
+                        opt_pc = opt.get("PutCall", "")
+                        opt_uic = int(opt.get("Uic", opt.get("Identifier", 0)))
+                        if opt_pc.lower() == target_put_call.lower() and opt_uic > 0:
+                            diff = abs(opt_strike - strike)
+                            if diff < min_diff:
+                                min_diff = diff
+                                best_uic = opt_uic
+                                if diff == 0:
+                                    return best_uic
+                if best_uic:
+                    return best_uic
+
+            # 2. Keyword fallback search
+            search_query = f"{symbol} {int(strike)} {option_type.upper()}"
+            instruments = self.search_instruments(search_query, asset_types=["StockOption"])
+            if instruments and len(instruments) > 0:
+                first = instruments[0]
+                return int(first.get("Uic") or first.get("Identifier") or 0)
+        except Exception as e:
+            logger.debug(f"Option UIC resolution fallback to underlying for {symbol}: {e}")
+
+        return None
+
     # ── Trading & Order Execution Endpoints with Safety Shield ────────────────
     def place_order(
         self, 
@@ -980,6 +1032,7 @@ class SaxoClient:
         buy_sell: str = "Sell", 
         order_type: str = "Limit", 
         order_price: float = 0.0,
+        to_open_close: str = "ToOpen",
         account_key: Optional[str] = None
     ) -> Dict[str, Any]:
         """
@@ -1027,6 +1080,10 @@ class SaxoClient:
                 "ManualOrder": True,
                 "OrderRelation": "StandAlone"
             }
+            # Mandatory netting directive for derivatives (StockOption, FuturesOption, StockIndexOption, CfdIndexOption)
+            if asset_type in ["StockOption", "FuturesOption", "StockIndexOption", "CfdIndexOption"]:
+                payload["ToOpenClose"] = to_open_close or "ToOpen"
+
             if acc_key:
                 payload["AccountKey"] = acc_key
             
