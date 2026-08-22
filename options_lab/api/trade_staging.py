@@ -193,11 +193,13 @@ class TradeStagingEngine:
             record["saxo_order_id"] = str(saxo_res.get("order_id", saxo_res.get("OrderId", f"ORD-SAXO-{trade_id}")))
             record["saxo_order_response"] = json.dumps(saxo_res)
             
-            # Check if order went through or blocked by config flag
+            # Check if order went through or blocked by config flag or error
             if saxo_res.get("status") in ["LIVE_EXECUTION_BLOCKED_BY_SAFETY_SHIELD"]:
                 record["status"] = "BLOCKED_SAFETY_CONFIG"
+            elif "error" in saxo_res or saxo_res.get("status", "").endswith("_ERROR"):
+                record["status"] = "EXECUTION_ERROR"
             else:
-                record["status"] = "FILLED" if self.saxo_client.environment == "SIM" or "order_id" in saxo_res else "PLACED"
+                record["status"] = "FILLED" if self.saxo_client.environment == "SIM" and "order_id" in saxo_res else "PLACED"
 
             database.save_staged_trade(record)
 

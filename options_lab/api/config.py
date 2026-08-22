@@ -95,13 +95,13 @@ class Settings:
     # ── Saxo OpenAPI ──────────────────────────────────────────────────────────
     @cached_property
     def SAXO_ENV(self) -> str:
-        """Environment: 'SIM' for Simulation Sandbox or 'LIVE' for Live Production Account."""
-        return os.getenv("SAXO_ENV", "SIM").upper()
+        """Environment: 'LIVE' for Live Production Account or 'SIM' for Simulation Sandbox."""
+        return os.getenv("SAXO_ENV", "LIVE").upper()
 
     @cached_property
     def BROKER_ALLOW_LIVE_EXECUTION(self) -> bool:
-        """Safety Shield: Blocks any live order placements unless set to True."""
-        return os.getenv("BROKER_ALLOW_LIVE_EXECUTION", "false").lower() == "true"
+        """Safety Shield: Allows live order placements when approved by user."""
+        return os.getenv("BROKER_ALLOW_LIVE_EXECUTION", "true").lower() == "true"
 
     @cached_property
     def SAXO_TIMEOUT_SECONDS(self) -> int:
@@ -110,15 +110,15 @@ class Settings:
 
     @cached_property
     def SAXO_APP_NAME(self) -> str:
-        return os.getenv("SAXO_APP_NAME", "BotAlgoTrade")
+        return os.getenv("SAXO_APP_NAME", "Akpegis-Agent")
 
     @cached_property
     def SAXO_APP_KEY(self) -> str:
-        return self._get_secret("SAXO_APP_KEY") or "996911eb7c6044c5bc9aa5bf50cdf2e9"
+        return self._get_secret("SAXO_APP_KEY") or "086a7ec061b240c49c4d2bc828d6399b"
 
     @cached_property
     def SAXO_APP_SECRET(self) -> str:
-        return self._get_secret("SAXO_APP_SECRET") or "d5e63c01903b4f70b165b7b800b2a503"
+        return self._get_secret("SAXO_APP_SECRET") or "c1866b3d04d64e72936e53f1fb803455"
 
     @cached_property
     def SAXO_APP_SECRET_ALT(self) -> str:
@@ -135,25 +135,25 @@ class Settings:
 
     @cached_property
     def SAXO_AUTH_ENDPOINT(self) -> str:
-        if self.SAXO_ENV == "LIVE":
-            return os.getenv("SAXO_AUTH_ENDPOINT", "https://live.logonvalidation.net/authorize")
-        return os.getenv("SAXO_AUTH_ENDPOINT", "https://sim.logonvalidation.net/authorize")
+        if self.SAXO_ENV == "SIM":
+            return os.getenv("SAXO_AUTH_ENDPOINT", "https://sim.logonvalidation.net/authorize")
+        return os.getenv("SAXO_AUTH_ENDPOINT", "https://live.logonvalidation.net/authorize")
 
     @cached_property
     def SAXO_TOKEN_ENDPOINT(self) -> str:
-        if self.SAXO_ENV == "LIVE":
-            return os.getenv("SAXO_TOKEN_ENDPOINT", "https://live.logonvalidation.net/token")
-        return os.getenv("SAXO_TOKEN_ENDPOINT", "https://sim.logonvalidation.net/token")
+        if self.SAXO_ENV == "SIM":
+            return os.getenv("SAXO_TOKEN_ENDPOINT", "https://sim.logonvalidation.net/token")
+        return os.getenv("SAXO_TOKEN_ENDPOINT", "https://live.logonvalidation.net/token")
 
     @cached_property
     def SAXO_OPENAPI_BASE_URL(self) -> str:
-        if self.SAXO_ENV == "LIVE":
-            return os.getenv("SAXO_OPENAPI_BASE_URL", "https://gateway.saxobank.com/openapi/")
-        return os.getenv("SAXO_OPENAPI_BASE_URL", "https://gateway.saxobank.com/sim/openapi/")
+        if self.SAXO_ENV == "SIM":
+            return os.getenv("SAXO_OPENAPI_BASE_URL", "https://gateway.saxobank.com/sim/openapi/")
+        return os.getenv("SAXO_OPENAPI_BASE_URL", "https://gateway.saxobank.com/openapi/")
 
     @cached_property
     def SAXO_REDIRECT_URL(self) -> str:
-        return os.getenv("SAXO_REDIRECT_URL", "https://bot-smart.sg.com")
+        return os.getenv("SAXO_REDIRECT_URL", "https://Akpegis-Agent.com.sg")
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     @cached_property

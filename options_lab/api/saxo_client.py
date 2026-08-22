@@ -125,26 +125,48 @@ class SaxoClient:
             raise
 
 
+    def set_token(self, access_token: str, refresh_token: Optional[str] = None):
+        """Sets live token manually and updates session state."""
+        self.access_token = access_token.strip() if access_token else None
+        if refresh_token:
+            self.refresh_token = refresh_token.strip()
+        self.needs_reauth = False
+        self.token_acquired_at = datetime.now()
+        self._persist_tokens_to_env()
+
     def _persist_tokens_to_env(self):
         """Persists newly refreshed tokens to .env for seamless restarts."""
         try:
             env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
+            lines = []
             if os.path.exists(env_path):
                 with open(env_path, "r", encoding="utf-8") as f:
                     lines = f.readlines()
-                new_lines = []
-                acc_tok = self.access_token or ""
-                ref_tok = self.refresh_token or ""
-                for line in lines:
-                    if line.startswith("SAXO_ACCESS_TOKEN="):
-                        new_lines.append(f"SAXO_ACCESS_TOKEN={acc_tok}\n")
-                    elif line.startswith("SAXO_REFRESH_TOKEN="):
-                        new_lines.append(f"SAXO_REFRESH_TOKEN={ref_tok}\n")
-                    else:
-                        new_lines.append(line)
-                with open(env_path, "w", encoding="utf-8") as f:
-                    f.writelines(new_lines)
-                logger.info("Persisted refreshed/cleared Saxo tokens to .env successfully.")
+            
+            new_lines = []
+            acc_tok = self.access_token or ""
+            ref_tok = self.refresh_token or ""
+            seen_access = False
+            seen_refresh = False
+
+            for line in lines:
+                if line.startswith("SAXO_ACCESS_TOKEN="):
+                    new_lines.append(f"SAXO_ACCESS_TOKEN={acc_tok}\n")
+                    seen_access = True
+                elif line.startswith("SAXO_REFRESH_TOKEN="):
+                    new_lines.append(f"SAXO_REFRESH_TOKEN={ref_tok}\n")
+                    seen_refresh = True
+                else:
+                    new_lines.append(line)
+
+            if not seen_access:
+                new_lines.append(f"SAXO_ACCESS_TOKEN={acc_tok}\n")
+            if not seen_refresh:
+                new_lines.append(f"SAXO_REFRESH_TOKEN={ref_tok}\n")
+
+            with open(env_path, "w", encoding="utf-8") as f:
+                f.writelines(new_lines)
+            logger.info("Persisted refreshed/cleared Saxo tokens to .env successfully.")
         except Exception as e:
             logger.warning(f"Failed to persist tokens to .env: {e}")
 
