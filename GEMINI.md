@@ -84,7 +84,7 @@ Hierarchical Multi-Agent System (FastAPI) for comprehensive NASDAQ and Multi-Ass
 
 - **OptionsLab Native Windows Desktop Application & Auto-Startup [NEW]**:
   - **Architecture**: Electron wrapper (`options_lab/desktop/main.js`) encapsulating the Next.js UI with child process lifecycle management for the Python FastAPI backend engine (`uvicorn options_lab.api.main:app`).
-  - **Auto-Startup**: Configured with Windows Login Item settings (`openAtLogin: true`, `--hidden`) and automated PowerShell registration (`setup_autostart.ps1`) placing shortcut in Windows Startup (`shell:startup`) and Registry (`HKCU:\Software\Microsoft\Windows\CurrentVersion\Run`).
+(`HKCU:\Software\Microsoft\Windows\CurrentVersion\Run`).
   - **System Tray**: Persistent tray icon (`tray_icon.png`) with context menu for 1-click restore, broker health check, auto-start toggle, and clean process tree termination (`taskkill /T /F`) to eliminate hanging background instances.
   - **1-Click Launcher**: `options_lab/desktop/start_desktop.bat`.
 

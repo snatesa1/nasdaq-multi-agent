@@ -25,7 +25,11 @@ export async function apiRequest(endpoint: string, method: string = 'GET', body?
 
   // Attach Firebase auth token if user is signed in
   try {
-    await auth.authStateReady();
+    const authReady = Promise.race([
+      auth.authStateReady(),
+      new Promise((resolve) => setTimeout(resolve, 800))
+    ]);
+    await authReady;
     const token = await auth.currentUser?.getIdToken();
     if (token) {
       headers['Authorization'] = 'Bearer ' + token;
@@ -184,6 +188,20 @@ export const optionsApi = {
     apiRequest(`/api/history/news?top=${top}`),
   checkOrderSafety: (payload: any) =>
     apiRequest('/api/shield/check-order', 'POST', payload),
+
+  // ── Weekly Intelligence & Trade Approval ─────────────────────────────────
+  getWeeklyBriefing: (weekLabel?: string) =>
+    apiRequest(weekLabel ? `/api/intelligence/weekly-briefing?week_label=${encodeURIComponent(weekLabel)}` : '/api/intelligence/weekly-briefing'),
+  getStagedTrades: (weekLabel?: string, status?: string) => {
+    const params = new URLSearchParams();
+    if (weekLabel) params.append('week_label', weekLabel);
+    if (status) params.append('status', status);
+    const q = params.toString();
+    return apiRequest(q ? `/api/trades/staged?${q}` : '/api/trades/staged');
+  },
+  approveTrade: (tradeId: string) => apiRequest('/api/trades/approve', 'POST', { trade_id: tradeId }),
+  rejectTrade: (tradeId: string, reason?: string) => apiRequest('/api/trades/reject', 'POST', { trade_id: tradeId, reason }),
+  getMarginStatus: () => apiRequest('/api/margin/status'),
 };
 
 

@@ -13,6 +13,8 @@ class BehavioralSafetyShield:
     - Blocks aggressive short call caps on explosive growth stocks.
     - Prevents revenge trading surges following drawdowns.
     - Enforces 21-DTE gamma rules and portfolio concentration caps.
+    - Circuit Breaker #5: Enforces 15% Margin Utilization Hard Cap.
+    - Circuit Breaker #6: Enforces Earnings Proximity Blackout Buffer.
     """
 
     def __init__(self):
@@ -20,6 +22,8 @@ class BehavioralSafetyShield:
         self.min_dte_entry = 21                     # No selling options < 21 DTE
         self.max_delta_high_beta = 0.18             # Max delta on growth/momentum
         self.revenge_cooldown_hours = 24            # Lockout period after major loss
+        self.max_margin_utilization_pct = 15.0      # Hard 10-15% margin utilization cap
+        self.earnings_blackout_days = 7             # Expiry must not fall within ±7 days of earnings
 
     def evaluate_order(
         self,
@@ -33,10 +37,13 @@ class BehavioralSafetyShield:
         portfolio_equity: float = 100000.0,
         current_ticker_exposure: float = 0.0,
         recent_loss_amount: float = 0.0,
-        recent_loss_timestamp: Optional[datetime] = None
+        recent_loss_timestamp: Optional[datetime] = None,
+        projected_margin_util_pct: float = 0.0,
+        earnings_date: Optional[str] = None,
+        expiry_date: Optional[str] = None
     ) -> Dict[str, Any]:
         """
-        Evaluates an order against all behavioral safety rules.
+        Evaluates an order against all behavioral & risk safety rules.
         Returns {'approved': True/False, 'status': 'PASSED'|'BLOCKED', 'infractions': [...], 'warnings': [...]}
         """
         infractions = []
@@ -77,6 +84,25 @@ class BehavioralSafetyShield:
             warnings.append(
                 f"Concentration Warning: {symbol} exposure approaching threshold at {exposure_pct:.1f}%."
             )
+
+        # 5. Margin Utilization Hard Cap (15.0%)
+        if projected_margin_util_pct > self.max_margin_utilization_pct:
+            infractions.append(
+                f"MARGIN UTILIZATION CAP EXCEEDED: Projected utilization of {projected_margin_util_pct:.1f}% exceeds your hard limit of {self.max_margin_utilization_pct:.1f}%."
+            )
+
+        # 6. Earnings Blackout Buffer Guard
+        if earnings_date and expiry_date:
+            try:
+                e_dt = datetime.strptime(earnings_date.split("T")[0], "%Y-%m-%d")
+                exp_dt = datetime.strptime(expiry_date.split("T")[0], "%Y-%m-%d")
+                diff_days = abs((exp_dt - e_dt).days)
+                if diff_days <= self.earnings_blackout_days:
+                    infractions.append(
+                        f"EARNINGS BLACKOUT VIOLATION: Option expiry {expiry_date} is within {diff_days} days of earnings announcement ({earnings_date}). Minimum buffer is {self.earnings_blackout_days} days."
+                    )
+            except Exception as e_parse:
+                logger.debug(f"Earnings blackout date check skipped due to date parsing: {e_parse}")
 
         # Final Decision
         approved = len(infractions) == 0

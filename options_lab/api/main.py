@@ -78,6 +78,9 @@ app.add_middleware(
 )
 
 from .fundamental_index import FundamentalIndexEngine
+from .margin_guardian import MarginGuardian
+from .trade_staging import TradeStagingEngine
+from .weekly_intelligence import WeeklyIntelligenceEngine
 
 tutor_service = SocraticTutor()
 fundamental_engine = FundamentalIndexEngine()
@@ -88,6 +91,10 @@ ingest_engine = TradeHistoryIngestEngine()
 campaign_stitcher = CampaignStitcher(ingest_engine=ingest_engine)
 behavioral_forensics = BehavioralForensicsEngine(campaign_stitcher=campaign_stitcher)
 safety_shield = BehavioralSafetyShield()
+margin_guardian = MarginGuardian(saxo_client=saxo_broker_client)
+trade_staging = TradeStagingEngine(saxo_client=saxo_broker_client, margin_guardian=margin_guardian, safety_shield=safety_shield)
+weekly_intelligence = WeeklyIntelligenceEngine(saxo_client=saxo_broker_client, margin_guardian=margin_guardian, trade_staging=trade_staging)
+
 
 
 
@@ -1057,6 +1064,99 @@ def check_order_behavioral_safety(
         return eval_result
     except Exception as e:
         logger.error(f"Safety check failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Weekly Intelligence & Live Trade Staging / Approval Endpoints ──────────
+
+@app.get("/api/intelligence/weekly-briefing")
+async def get_weekly_intelligence_briefing(
+    week_label: Optional[str] = None,
+    force_refresh: bool = False,
+    user=Depends(verify_firebase_token)
+):
+    """
+    Analyzes Monday-Friday macroeconomic events, news feed, watchlist, and trade history.
+    Identifies edge setups (e.g. COIN Clarity Act spike) and stages trade recommendations.
+    Uses asyncio.to_thread for non-blocking asynchronous execution.
+    """
+    try:
+        res = await asyncio.to_thread(
+            weekly_intelligence.analyze_weekly_macro_and_edges,
+            week_label=week_label,
+            force_refresh=force_refresh
+        )
+        return res
+    except Exception as e:
+        logger.error(f"Failed to generate weekly intelligence briefing: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/trades/staged")
+async def list_staged_trades_endpoint(
+    week_label: Optional[str] = None,
+    status: Optional[str] = None,
+    user=Depends(verify_firebase_token)
+):
+    """Lists staged trade recommendations filtered by optional week_label and status."""
+    try:
+        trades = database.list_staged_trades(week_label=week_label, status=status)
+        return {"trades": trades, "count": len(trades)}
+    except Exception as e:
+        logger.error(f"Failed to list staged trades: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/trades/approve")
+async def approve_staged_trade_endpoint(
+    payload: Dict[str, Any] = Body(...),
+    user=Depends(verify_firebase_token)
+):
+    """
+    Dual-Key User Approval Endpoint:
+    Approves a staged recommendation, performs live margin headroom and safety shield validation,
+    and places the order live on Saxo OpenAPI.
+    """
+    trade_id = payload.get("trade_id")
+    if not trade_id:
+        raise HTTPException(status_code=400, detail="Missing trade_id in request payload.")
+
+    try:
+        result = trade_staging.approve_and_execute_trade(trade_id=trade_id)
+        return result
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Failed to approve trade {trade_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/trades/reject")
+async def reject_staged_trade_endpoint(
+    payload: Dict[str, Any] = Body(...),
+    user=Depends(verify_firebase_token)
+):
+    """Rejects a staged trade recommendation."""
+    trade_id = payload.get("trade_id")
+    reason = payload.get("reason", "User rejected position trade recommendation")
+    if not trade_id:
+        raise HTTPException(status_code=400, detail="Missing trade_id in request payload.")
+
+    try:
+        result = trade_staging.reject_trade(trade_id=trade_id, reason=reason)
+        return result
+    except ValueError as ve:
+        raise HTTPException(status_code=404, detail=str(ve))
+    except Exception as e:
+        logger.error(f"Failed to reject trade {trade_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/margin/status")
+async def get_margin_status_endpoint(user=Depends(verify_firebase_token)):
+    """Fetches real-time margin status and checks compliance against 15.0% limit."""
+    try:
+        status = margin_guardian.get_current_margin_status()
+        return status
+    except Exception as e:
+        logger.error(f"Failed to fetch margin status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ── Client-Side Error Telemetry & Unified Logger ───────────────────────────
 
 @app.post("/api/logs/client-error")
@@ -1111,8 +1211,8 @@ class NoCacheStaticFiles(StaticFiles):
         response.headers["Pragma"] = "no-cache"
         response.headers["Expires"] = "0"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:* https: data: blob:; "
-            "script-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:* https:; "
+            "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:* https: data: blob:; "
+            "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:* https:; "
             "style-src 'self' 'unsafe-inline' https: fonts.googleapis.com; "
             "font-src 'self' data: https: fonts.gstatic.com; "
             "img-src 'self' data: blob: https:; "

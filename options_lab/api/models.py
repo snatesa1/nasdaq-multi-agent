@@ -58,95 +58,89 @@ class StrategyRequest(BaseModel):
 class VolSurfaceRequest(BaseModel):
     spot_price: float = Field(100.0, description="Underlying asset spot price")
     base_sigma: float = Field(0.25, description="ATM baseline volatility")
-    risk_free_rate: float = Field(0.05, description="Annualized risk-free rate")
-    strike_ratios: Optional[List[float]] = Field(None, description="List of strike ratios e.g. [0.8, 0.9, 1.0, 1.1, 1.2]")
-    expirations_days: Optional[List[int]] = Field(None, description="List of expiration periods in days")
-    skew_intensity: float = Field(0.15, description="Put skew slope intensity")
-    smile_convexity: float = Field(0.10, description="OTM wing curvature")
 
-class PositionLeg(BaseModel):
-    type: str = Field("stock", description="'stock', 'call', or 'put'")
-    symbol: str = Field("AAPL", description="Ticker symbol")
-    quantity: float = Field(1.0, description="Quantity of contracts or shares")
-    spot_price: float = Field(100.0, description="Current spot price")
-    strike: Optional[float] = Field(100.0, description="Strike price for option legs")
-    days_to_expiration: Optional[float] = Field(30.0, description="Days to expiration")
-    volatility: Optional[float] = Field(0.25, description="Implied volatility")
+class PortfolioPositionRequest(BaseModel):
+    symbol: str
+    quantity: float
+    entry_price: float
+    asset_type: str = "stock"
 
 class PortfolioGreeksRequest(BaseModel):
-    positions: List[PositionLeg]
-    risk_free_rate: float = Field(0.05, description="Risk-free rate")
-
-class ExplainerRequest(BaseModel):
-    concept: str = Field(..., description="Concept to explain (e.g., 'Covered Call', 'Delta')")
-
-class ScenarioHedgingRequest(BaseModel):
-    ticker: str = Field(..., description="Asset ticker e.g., 'PANW'")
-    shares: int = Field(100, description="Number of shares held")
-    cost_basis: float = Field(..., description="Original purchase price of the shares")
-    current_price: float = Field(..., description="Current price of the asset")
+    positions: List[PortfolioPositionRequest]
+    r: float = 0.05
+    sigma: float = 0.25
 
 class SocraticTutorRequest(BaseModel):
-    message: str = Field(..., description="Message from the user")
-    chat_history: List[Dict[str, str]] = Field(default=[], description="List of past messages")
-    context: Optional[Dict[str, Any]] = Field(None, description="Optional simulation state or positions context")
-    enable_grounding: bool = Field(False, description="Enable Google Search Grounding for live market news")
+    session_id: str
+    question: str
+    context: Optional[str] = None
 
 class TutorHintRequest(BaseModel):
-    chat_history: List[Dict[str, str]] = Field(default=[], description="List of past messages")
-    context: Optional[Dict[str, Any]] = Field(None, description="Optional simulation state context")
+    session_id: str
+    current_topic: str
+
+class ExplainerRequest(BaseModel):
+    metric_name: str
+    value: str
+    context: Optional[str] = None
+
+class ScenarioHedgingRequest(BaseModel):
+    spot_price: float
+    shock_pct: float = -0.20
+    portfolio_delta: float = 100.0
 
 class SaveSessionRequest(BaseModel):
-    title: str = Field(..., description="Human-readable session title")
-    messages: List[Dict[str, str]] = Field(..., description="Full chat transcript")
+    session_id: str
+    title: str
+    messages: List[Dict[str, Any]]
+    key_learnings: Optional[List[str]] = []
 
 class UpdateSessionRequest(BaseModel):
-    messages: List[Dict[str, str]] = Field(..., description="Updated chat transcript")
-    title: Optional[str] = Field(None, description="Optional new title")
-
-# ── Fundamental Index Models ──────────────────────────────────────────────────
-
-class FundamentalIndexRequest(BaseModel):
-    symbols: Optional[List[str]] = Field(None, description="Optional custom list of tickers to index")
-
-class FundamentalIndexResponse(BaseModel):
-    universe_size: int
-    total_market_cap: float
-    tickers: List[Dict[str, Any]]
-
-# ── Portfolio Models ──────────────────────────────────────────────────────────
-
+    messages: Optional[List[Dict[str, Any]]] = None
+    key_learnings: Optional[List[str]] = None
 
 class AnalyzeRequest(BaseModel):
-    tickers: List[str] = Field(..., description="List of stock ticker symbols to analyze")
+    symbol: str = "AAPL"
+    portfolio_equity: float = 100000.0
 
-# ── Earnings Scanner Models ───────────────────────────────────────────────────
+class FundamentalIndexRequest(BaseModel):
+    top_n: int = 20
+    rebalance_freq: str = "annually"
+
+class FundamentalIndexMetric(BaseModel):
+    symbol: str
+    name: str
+    price: float
+    market_cap_weight: float
+    fundamental_weight: float
+    book_value: float
+    cash_flow: float
+    net_dividends: float
+    sales: float
+    arnott_score: float
+
+class FundamentalIndexResponse(BaseModel):
+    timestamp: str
+    metrics: List[FundamentalIndexMetric]
 
 class EarningsScanRequest(BaseModel):
-    low_threshold_pct: float = Field(0.20, description="Max percentage above 52-week low to consider deep value")
-    min_open_interest: int = Field(5000, description="Minimum total front-month option open interest")
-
-# ── Broker Gateway & Execution Models (Type-Safe Live & SIM) ─────────────────
-
-class BrokerEnvironment(str):
-    SIMULATION = "SIMULATION"
-    LIVE = "LIVE"
+    universe: str = Field("sp500", description="'sp500', 'nasdaq100', 'watchlist'")
 
 class BrokerAccountSummary(BaseModel):
-    status: str = Field(..., description="Connection status e.g. LIVE_SAXO_CONNECTED, SIM_SANDBOX_MOCK")
+    status: str = Field(..., description="Connection status string")
     environment: str = Field("SIMULATION", description="'SIMULATION' or 'LIVE'")
-    cash_available: float = Field(0.0, description="Cash available for trading")
-    total_equity: float = Field(0.0, description="Total account equity")
-    margin_available: float = Field(0.0, description="Margin available")
-    margin_used: float = Field(0.0, description="Margin currently utilized")
-    currency: str = Field("USD", description="Base account currency")
-    account_id: Optional[str] = Field(None, description="Masked account identifier")
-    updated_at: str = Field(..., description="ISO timestamp of data fetch")
+    cash_available: float = Field(0.0, description="Available cash balance")
+    total_equity: float = Field(0.0, description="Total account equity / Net Asset Value")
+    margin_available: float = Field(0.0, description="Available margin for trading")
+    margin_used: float = Field(0.0, description="Margin consumed by open positions")
+    currency: str = Field("USD", description="Account base currency")
+    account_id: str = Field("LIVE-ACC-PRIMARY", description="Account identifier")
+    updated_at: str = Field(..., description="ISO timestamp")
 
 class BrokerPosition(BaseModel):
-    position_id: str = Field(..., description="Unique position identifier or UIC")
+    position_id: str = Field(..., description="Position ID from Saxo")
     uic: int = Field(..., description="Universal Instrument Code")
-    symbol: str = Field(..., description="Stock or underlying ticker")
+    symbol: str = Field(..., description="Clean stock ticker e.g. AAPL")
     description: str = Field(..., description="Full contract or asset name")
     asset_type: str = Field("Stock", description="'Stock', 'StockOption', 'Contract', etc.")
     option_type: Optional[str] = Field(None, description="'call' or 'put' if option")
@@ -202,4 +196,21 @@ class SafetyCheckRequest(BaseModel):
     current_ticker_exposure: float = Field(0.0, description="Existing exposure in ticker")
     recent_loss_amount: float = Field(0.0, description="Recent major loss if within 24h")
 
+class TradeApprovalRequest(BaseModel):
+    trade_id: str = Field(..., description="Unique staged trade ID to approve and execute")
 
+class TradeRejectRequest(BaseModel):
+    trade_id: str = Field(..., description="Unique staged trade ID to reject")
+    reason: Optional[str] = Field("User rejected", description="Optional rejection reason")
+
+class MarginStatusResponse(BaseModel):
+    total_equity: float
+    cash_available: float
+    margin_used: float
+    margin_utilization_pct: float
+    max_margin_limit_pct: float = 15.0
+    allowed_margin_dollars: float
+    remaining_margin_headroom: float
+    is_within_limit: bool
+    currency: str = "USD"
+    updated_at: str

@@ -21,6 +21,7 @@ app.commandLine.appendSwitch('disable-http-cache');
 let mainWindow = null;
 let tray = null;
 let backendProcess = null;
+let frontendProcess = null;
 let isQuitting = false;
 
 const BACKEND_PORT = 8000;
@@ -28,7 +29,7 @@ const FRONTEND_PORT = 3000;
 const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
 const FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`;
 
-// ── 1. Backend Process Management & Health Check ────────────────────────────
+// ── 1. Backend & Frontend Process Management & Health Checks ────────────────
 function isBackendReady() {
   return new Promise((resolve) => {
     http.get(`${BACKEND_URL}/health`, (res) => {
@@ -73,20 +74,6 @@ function startBackend() {
 
   backendProcess.on('error', (err) => {
     console.error(`[Backend Spawn Error]: ${err}`);
-    dialog.showErrorBox(
-      'FastAPI Backend Start Failed',
-      `Failed to launch the backend process using path: ${pythonCmd}\nError: ${err.message}`
-    );
-  });
-
-  backendProcess.on('close', (code) => {
-    console.log(`[Backend Process Closed with code ${code}]`);
-    if (code !== 0 && code !== null) {
-      dialog.showErrorBox(
-        'FastAPI Backend Exited',
-        `The backend process exited unexpectedly with code ${code}. Please verify uvicorn dependencies in your virtual environment.`
-      );
-    }
   });
 }
 
@@ -94,9 +81,7 @@ function killBackend() {
   if (backendProcess) {
     console.log('[OptionsLab Desktop] Shutting down backend process...');
     if (process.platform === 'win32') {
-      exec(`taskkill /pid ${backendProcess.pid} /T /F`, (err) => {
-        if (err) console.error('Failed to kill backend process tree:', err);
-      });
+      exec(`taskkill /pid ${backendProcess.pid} /T /F`, () => {});
     } else {
       backendProcess.kill('SIGTERM');
     }
@@ -104,22 +89,75 @@ function killBackend() {
   }
 }
 
+function isFrontendReady() {
+  return new Promise((resolve) => {
+    http.get(FRONTEND_URL, (res) => {
+      resolve(res.statusCode >= 200 && res.statusCode < 400);
+    }).on('error', () => {
+      resolve(false);
+    });
+  });
+}
+
+async function waitForFrontend(maxAttempts = 40) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const ready = await isFrontendReady();
+    if (ready) return true;
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  return false;
+}
+
+function startFrontend() {
+  const frontendDir = path.resolve(__dirname, '..', 'frontend');
+  console.log(`[OptionsLab Desktop] Starting Next.js frontend dev server from ${frontendDir}...`);
+
+  frontendProcess = spawn('npm.cmd', ['run', 'dev'], {
+    cwd: frontendDir,
+    shell: true,
+    stdio: 'pipe'
+  });
+
+  frontendProcess.stdout.on('data', (data) => {
+    console.log(`[Frontend]: ${data}`);
+  });
+
+  frontendProcess.stderr.on('data', (data) => {
+    console.error(`[Frontend ERR]: ${data}`);
+  });
+}
+
+function killFrontend() {
+  if (frontendProcess) {
+    console.log('[OptionsLab Desktop] Shutting down frontend process...');
+    if (process.platform === 'win32') {
+      exec(`taskkill /pid ${frontendProcess.pid} /T /F`, () => {});
+    } else {
+      frontendProcess.kill('SIGTERM');
+    }
+    frontendProcess = null;
+  }
+}
+
+function killAllProcesses() {
+  killBackend();
+  killFrontend();
+}
+
 // ── 2. Create Native Desktop Window ─────────────────────────────────────────
 async function createWindow() {
-  // Clear any cached HTTP/DOM states
   try {
     if (session.defaultSession) {
       await session.defaultSession.clearCache();
-      await session.defaultSession.clearStorageData();
 
-      // Configure hardened Content Security Policy (No unsafe-eval)
+      // Hardened Content Security Policy
       session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
         callback({
           responseHeaders: {
             ...details.responseHeaders,
             'Content-Security-Policy': [
-              "default-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:* https: data: blob:; " +
-              "script-src 'self' 'unsafe-inline' http://127.0.0.1:* http://localhost:* https:; " +
+              "default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:* https: data: blob:; " +
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:* https:; " +
               "style-src 'self' 'unsafe-inline' https: fonts.googleapis.com; " +
               "font-src 'self' data: https: fonts.gstatic.com; " +
               "img-src 'self' data: blob: https:; " +
@@ -149,38 +187,37 @@ async function createWindow() {
     }
   });
 
-
   const isDev = process.argv.includes('--dev');
   const isHidden = process.argv.includes('--hidden');
 
-  // Check if backend is already running or start it
-  const alreadyRunning = await isBackendReady();
-  if (!alreadyRunning) {
+  // 1. Ensure Backend is active
+  const backendUp = await isBackendReady();
+  if (!backendUp) {
     startBackend();
     await waitForBackend();
   }
 
-  // Check if frontend dev server is running on 3000
+  // 2. Resolve target URL (Dev server if --dev, otherwise fast static mount via FastAPI)
   let targetUrl = `${BACKEND_URL}/`;
-  try {
-    const isFrontendUp = await new Promise((resolve) => {
-      http.get(FRONTEND_URL, (res) => resolve(res.statusCode >= 200 && res.statusCode < 400)).on('error', () => resolve(false));
-    });
-    if (isFrontendUp || isDev) {
+  if (isDev) {
+    const frontendUp = await isFrontendReady();
+    if (!frontendUp) {
+      startFrontend();
+      await waitForFrontend(40);
+    }
+    const isNextReady = await isFrontendReady();
+    if (isNextReady) {
       targetUrl = FRONTEND_URL;
     }
-  } catch (e) {
-    targetUrl = `${BACKEND_URL}/`;
   }
 
   console.log(`[OptionsLab Desktop] Loading application at ${targetUrl}...`);
 
   mainWindow.loadURL(targetUrl).catch(() => {
-    // If static mount or dev server is booting, retry
     setTimeout(() => mainWindow.loadURL(targetUrl), 2000);
   });
 
-  // Open external links (Saxo OAuth, etc.) in system default browser (Chrome)
+  // Open external links in default browser
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http') && !url.includes('127.0.0.1') && !url.includes('localhost')) {
       shell.openExternal(url);
@@ -189,7 +226,6 @@ async function createWindow() {
     return { action: 'allow' };
   });
 
-  // Also intercept navigation to external sites
   mainWindow.webContents.on('will-navigate', (event, url) => {
     if (url.startsWith('http') && !url.includes('127.0.0.1') && !url.includes('localhost')) {
       event.preventDefault();
@@ -197,7 +233,7 @@ async function createWindow() {
     }
   });
 
-  // Stream all renderer console logs and errors directly to terminal & logs
+  // Console message streaming
   mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
     const levelLabels = ['LOG', 'INFO', 'WARN', 'ERROR'];
     const label = levelLabels[level] || 'LOG';
@@ -213,7 +249,7 @@ async function createWindow() {
     }
   });
 
-  // Enable F12 and Ctrl+Shift+I for DevTools inspection
+  // F12 and Ctrl+Shift+I DevTools
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {
       mainWindow.webContents.toggleDevTools();
@@ -222,16 +258,13 @@ async function createWindow() {
   });
 
   mainWindow.once('ready-to-show', () => {
-    mainWindow.webContents.reloadIgnoringCache();
     if (!isHidden) {
       mainWindow.show();
       mainWindow.focus();
     }
   });
 
-
   mainWindow.on('close', (event) => {
-
     if (!isQuitting) {
       event.preventDefault();
       mainWindow.hide();
@@ -247,7 +280,6 @@ async function createWindow() {
 
 // ── 3. System Tray Setup ───────────────────────────────────────────────────
 function createTray() {
-  // Use a default icon or generate clean tray menu
   tray = new Tray(path.join(__dirname, 'tray_icon.png'));
   tray.setToolTip('OptionsLab Trading Gateway');
 
@@ -274,22 +306,10 @@ function createTray() {
     },
     { type: 'separator' },
     {
-      label: 'Auto-Start with Windows',
-      type: 'checkbox',
-      checked: app.getLoginItemSettings().openAtLogin,
-      click: (item) => {
-        app.setLoginItemSettings({
-          openAtLogin: item.checked,
-          args: ['--hidden']
-        });
-      }
-    },
-    { type: 'separator' },
-    {
       label: 'Quit OptionsLab',
       click: () => {
         isQuitting = true;
-        killBackend();
+        killAllProcesses();
         app.quit();
       }
     }
@@ -308,46 +328,32 @@ function createTray() {
   });
 }
 
-const gotTheLock = true;
+try {
+  app.requestSingleInstanceLock();
+} catch (e) {}
 
-if (!gotTheLock) {
-  app.quit();
-} else {
-  // Setup second instance callback if lock is acquired (optional)
-  try {
-    app.requestSingleInstanceLock();
-  } catch (e) {}
-  app.on('second-instance', () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) mainWindow.restore();
-      mainWindow.show();
-      mainWindow.setAlwaysOnTop(true);
-      mainWindow.focus();
-      mainWindow.setAlwaysOnTop(false);
-    }
-  });
+app.on('second-instance', () => {
+  if (mainWindow) {
+    if (mainWindow.isMinimized()) mainWindow.restore();
+    mainWindow.show();
+    mainWindow.setAlwaysOnTop(true);
+    mainWindow.focus();
+    mainWindow.setAlwaysOnTop(false);
+  }
+});
 
-  app.whenReady().then(() => {
+app.whenReady().then(() => {
+  createTray();
+  createWindow();
+});
 
-    // Enable auto-launch by default on Windows
-    app.setLoginItemSettings({
-      openAtLogin: true,
-      path: process.execPath,
-      args: ['--hidden']
-    });
+app.on('before-quit', () => {
+  isQuitting = true;
+  killAllProcesses();
+});
 
-    createTray();
-    createWindow();
-  });
-
-  app.on('before-quit', () => {
-    isQuitting = true;
-    killBackend();
-  });
-
-  app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') {
-      // Keep running in tray on Windows unless user explicitly chooses Quit
-    }
-  });
-}
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    // Keep running in tray on Windows
+  }
+});

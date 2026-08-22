@@ -363,6 +363,12 @@ export default function Dashboard() {
           </div>
           <div className="flex items-center gap-3">
             {actionLoading && <RefreshCw className="h-4 w-4 text-indigo-600 animate-spin" />}
+            <button
+              onClick={() => router.push('/weekly-intelligence')}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-sm"
+            >
+              <Sparkles className="h-3.5 w-3.5" /> Weekly Intelligence
+            </button>
             <button 
               onClick={() => fetchBrokerData(true)}
               disabled={actionLoading}

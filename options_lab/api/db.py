@@ -104,6 +104,35 @@ def _init_db():
                 updated_at  TEXT NOT NULL
             )
         """)
+        # ── Staged Trades Lifecycle Table ────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS staged_trades (
+                trade_id              TEXT PRIMARY KEY,
+                symbol                TEXT NOT NULL,
+                strategy              TEXT NOT NULL,
+                direction             TEXT NOT NULL,
+                strike                REAL NOT NULL,
+                delta                 REAL,
+                dte                   INTEGER,
+                premium_estimate      REAL,
+                contracts             INTEGER DEFAULT 1,
+                spot_price            REAL,
+                max_margin_impact_pct REAL,
+                collateral_required   REAL,
+                thesis                TEXT,
+                edge_source           TEXT,
+                risk_rating           INTEGER DEFAULT 3,
+                margin_check_result   TEXT,
+                safety_check_result   TEXT,
+                status                TEXT NOT NULL,
+                saxo_order_id         TEXT,
+                saxo_order_response   TEXT,
+                proposed_at           TEXT NOT NULL,
+                approved_at           TEXT,
+                executed_at           TEXT,
+                week_label            TEXT NOT NULL
+            )
+        """)
         conn.commit()
 
 
@@ -480,5 +509,85 @@ def clear_saxo_cache():
             logger.info("Cleared all Saxo cache records from SQLite.")
     except Exception as e:
         logger.error(f"Failed to clear saxo cache: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  STAGED TRADES LIFECYCLE HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def save_staged_trade(record: Dict[str, Any]):
+    """Inserts or updates a staged trade record in SQLite."""
+    try:
+        with _get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO staged_trades (
+                    trade_id, symbol, strategy, direction, strike, delta, dte,
+                    premium_estimate, contracts, spot_price, max_margin_impact_pct,
+                    collateral_required, thesis, edge_source, risk_rating,
+                    margin_check_result, safety_check_result, status,
+                    saxo_order_id, saxo_order_response, proposed_at,
+                    approved_at, executed_at, week_label
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?,
+                    ?, ?, ?
+                )
+                ON CONFLICT(trade_id) DO UPDATE SET
+                    status = excluded.status,
+                    margin_check_result = excluded.margin_check_result,
+                    safety_check_result = excluded.safety_check_result,
+                    saxo_order_id = excluded.saxo_order_id,
+                    saxo_order_response = excluded.saxo_order_response,
+                    approved_at = excluded.approved_at,
+                    executed_at = excluded.executed_at
+                """,
+                (
+                    record.get("trade_id"), record.get("symbol"), record.get("strategy"), record.get("direction"),
+                    record.get("strike"), record.get("delta"), record.get("dte"), record.get("premium_estimate"),
+                    record.get("contracts", 1), record.get("spot_price"), record.get("max_margin_impact_pct"),
+                    record.get("collateral_required"), record.get("thesis"), record.get("edge_source"), record.get("risk_rating", 3),
+                    record.get("margin_check_result"), record.get("safety_check_result"), record.get("status", "PROPOSED"),
+                    record.get("saxo_order_id"), record.get("saxo_order_response"), record.get("proposed_at"),
+                    record.get("approved_at"), record.get("executed_at"), record.get("week_label")
+                )
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to save staged trade {record.get('trade_id')}: {e}")
+
+def get_staged_trade_by_id(trade_id: str) -> Optional[Dict[str, Any]]:
+    """Retrieves a staged trade record by trade_id."""
+    try:
+        with _get_conn() as conn:
+            row = conn.execute("SELECT * FROM staged_trades WHERE trade_id = ?", (trade_id,)).fetchone()
+            if row:
+                return dict(row)
+    except Exception as e:
+        logger.error(f"Failed to fetch staged trade {trade_id}: {e}")
+    return None
+
+def list_staged_trades(week_label: Optional[str] = None, status: Optional[str] = None) -> List[Dict[str, Any]]:
+    """Lists staged trades filtered by optional week_label and status."""
+    try:
+        with _get_conn() as conn:
+            query = "SELECT * FROM staged_trades WHERE 1=1"
+            params = []
+            if week_label:
+                query += " AND week_label = ?"
+                params.append(week_label)
+            if status:
+                query += " AND status = ?"
+                params.append(status)
+            query += " ORDER BY proposed_at DESC"
+            rows = conn.execute(query, tuple(params)).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to list staged trades: {e}")
+        return []
+
 
 
