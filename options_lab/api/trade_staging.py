@@ -167,8 +167,14 @@ class TradeStagingEngine:
             }
 
         # 3. Resolve UIC for instrument
-        instruments = self.saxo_client.search_instruments(symbol, asset_types=["StockOption", "Stock"])
-        uic = instruments[0]["Uic"] if instruments else 123456
+        uic = SaxoClient.KNOWN_UICS.get(symbol, 0)
+        if not uic:
+            instruments = self.saxo_client.search_instruments(symbol, asset_types=["StockOption", "Stock"])
+            if instruments and isinstance(instruments, list):
+                first_inst = instruments[0]
+                uic = int(first_inst.get("Uic") or first_inst.get("Identifier") or first_inst.get("PrimaryListing") or 123456)
+            else:
+                uic = 123456
 
         # Determine buy/sell action
         buy_sell = "Sell" if ("CSP" in strategy or "CC" in strategy or "SHORT" in strategy) else "Buy"
