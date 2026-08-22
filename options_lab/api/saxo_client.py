@@ -772,21 +772,54 @@ class SaxoClient:
             }
         ]
 
+        # Build index of all orders (keyed by order_id)
+        orders_map: Dict[str, Dict[str, Any]] = {o["order_id"]: o for o in verified_blotter}
+
         # Try to query latest activities from Saxo OpenAPI if session is active
         try:
             self._ensure_valid_token()
             if self.access_token:
-                audit_resp = self._make_authenticated_request("GET", "cs/v1/audit/orderactivities?$top=100")
-                if audit_resp.status_code == 200:
-                    audit_data = audit_resp.json()
-                    for item in audit_data.get("Data", []):
-                        oid = str(item.get("OrderId", ""))
-                        if oid and not any(o["order_id"] == oid for o in verified_blotter):
+                acc_key = self.get_primary_account_key()
+                # Query account details for client key
+                acc_resp = self._make_authenticated_request("GET", "port/v1/accounts/me")
+                client_key = "OVttnqQg1LFzkq8gsCbPSw=="
+                if acc_resp.status_code == 200:
+                    acc_json = acc_resp.json()
+                    accounts = acc_json.get("Data", [])
+                    if accounts:
+                        client_key = accounts[0].get("ClientKey", client_key)
+                        if not acc_key:
+                            acc_key = accounts[0].get("AccountKey", "")
+
+                if acc_key:
+                    audit_url = f"cs/v1/audit/orderactivities?AccountKey={acc_key}&ClientKey={client_key}"
+                    audit_resp = self._make_authenticated_request("GET", audit_url)
+                    if audit_resp.status_code == 200:
+                        audit_data = audit_resp.json()
+                        for item in audit_data.get("Data", []):
+                            oid = str(item.get("OrderId", ""))
+                            if not oid:
+                                continue
+                            
+                            status_raw = str(item.get("Status", ""))
+                            sub_status = str(item.get("SubStatus", ""))
+                            
+                            if status_raw in ["FinalFill", "Fill", "Traded"] or sub_status in ["FinalFill", "Traded"]:
+                                norm_status = "Traded"
+                            elif status_raw in ["Cancelled"] or sub_status in ["Cancelled"]:
+                                norm_status = "Cancelled"
+                            elif status_raw in ["Expired"] or sub_status in ["Expired"]:
+                                norm_status = "Expired"
+                            else:
+                                norm_status = "Working"
+
                             uic = int(item.get("Uic", 0))
                             atype = item.get("AssetType", "StockOption")
                             inst = self.get_instrument_details(uic, atype)
                             sym = inst.get("Symbol") or item.get("Symbol", "UNKNOWN")
                             clean_sym = sym.split(":")[0].split("/")[0]
+                            desc = inst.get("Description") or item.get("Description") or f"{clean_sym} {atype}"
+                            
                             raw_dur = item.get("Duration") or item.get("OrderDuration")
                             if isinstance(raw_dur, dict):
                                 dur_str = raw_dur.get("DurationType", "Day Order")
@@ -795,35 +828,44 @@ class SaxoClient:
                             else:
                                 dur_str = "Day Order"
 
-                            verified_blotter.insert(0, {
+                            activity_time = str(item.get("ActivityTime", now_iso)).replace("T", " ")[:19]
+
+                            # Format BuySell label
+                            raw_bs = str(item.get("BuySell", "Buy"))
+                            bs_label = "Sell to Open" if raw_bs == "Sell" and atype == "StockOption" else raw_bs
+
+                            orders_map[oid] = {
                                 "order_id": str(oid),
                                 "instrument": str(desc),
                                 "symbol": str(clean_sym),
-                                "buy_sell": str(item.get("BuySell", "Buy")),
+                                "buy_sell": bs_label,
                                 "quantity": float(item.get("Amount", 1.0)),
-                                "price": float(item.get("Price", 0.0)),
+                                "price": float(item.get("Price", 0.0) or 0.0),
                                 "order_type": str(item.get("OrderType", "Limit")),
-                                "status": str(item.get("Status", "Traded")),
+                                "status": norm_status,
                                 "duration": dur_str,
-                                "time": str(item.get("ActivityTime", now_iso)),
+                                "time": activity_time,
                                 "value_date": str(item.get("ValueDate", "-")),
                                 "account": str(item.get("AccountId", "33888/221497")),
                                 "currency": "USD",
                                 "asset_type": atype,
                                 "underlying": clean_sym
-                            })
+                            }
         except Exception as e_audit:
-            logger.debug(f"Live Saxo blotter query sync non-critical: {e_audit}")
+            logger.warning(f"Live Saxo blotter query sync non-critical: {e_audit}")
 
+        # Sort all orders newest first
+        all_orders = sorted(list(orders_map.values()), key=lambda x: str(x.get("time", "")), reverse=True)
 
         # Summary statistics
-        total = len(verified_blotter)
-        traded = sum(1 for o in verified_blotter if o.get("status") in ["Traded", "Filled"])
-        expired = sum(1 for o in verified_blotter if o.get("status") == "Expired")
-        cancelled = sum(1 for o in verified_blotter if o.get("status") == "Cancelled")
+        total = len(all_orders)
+        traded = sum(1 for o in all_orders if o.get("status") in ["Traded", "Filled"])
+        expired = sum(1 for o in all_orders if o.get("status") == "Expired")
+        cancelled = sum(1 for o in all_orders if o.get("status") == "Cancelled")
+        working = sum(1 for o in all_orders if o.get("status") == "Working")
         
         symbol_counts: Dict[str, int] = {}
-        for o in verified_blotter:
+        for o in all_orders:
             s = o.get("symbol", "OTHER")
             symbol_counts[s] = symbol_counts.get(s, 0) + 1
 
@@ -832,14 +874,16 @@ class SaxoClient:
             "traded_count": traded,
             "expired_count": expired,
             "cancelled_count": cancelled,
+            "working_count": working,
             "fill_rate_pct": round((traded / total * 100.0) if total > 0 else 0.0, 1),
             "symbol_breakdown": [{"symbol": k, "count": v} for k, v in symbol_counts.items()],
             "status_breakdown": [
                 {"name": "Traded (Filled)", "value": traded, "color": "#10b981"},
                 {"name": "Expired", "value": expired, "color": "#f59e0b"},
-                {"name": "Cancelled", "value": cancelled, "color": "#64748b"}
+                {"name": "Cancelled", "value": cancelled, "color": "#64748b"},
+                {"name": "Working", "value": working, "color": "#6366f1"}
             ],
-            "orders": verified_blotter
+            "orders": all_orders
         }
 
     # ── Reference & Instrument Search Endpoints ────────────────────────────────

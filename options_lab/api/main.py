@@ -875,6 +875,23 @@ async def get_broker_closed_positions(user=Depends(verify_firebase_token)):
         logger.error(f"Failed to fetch closed positions: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/api/broker/order-blotter")
+async def get_broker_order_blotter(user=Depends(verify_firebase_token)):
+    """Fetches real-time refreshed order blotter including Cancelled, Traded, Expired, and Working orders."""
+    async with broker_concurrency_lock:
+        try:
+            blotter_data = saxo_broker_client.get_order_blotter()
+            database.set_saxo_cache("order_blotter", blotter_data)
+            return blotter_data
+        except Exception as e:
+            cached = database.get_saxo_cache("order_blotter")
+            if cached:
+                logger.info("Serving cached Saxo order blotter from SQLite.")
+                return cached
+            logger.error(f"Failed to fetch order blotter: {e}")
+            raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/api/scanner/csp")
 async def scan_csp_opportunities(
     source: str = "saxo",

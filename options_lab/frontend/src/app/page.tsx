@@ -485,6 +485,109 @@ export default function Dashboard() {
           </div>
         </div>
 
+        {/* ── 2. Live Saxo Holdings & Positions Table (TOP PRIORITY PORTFOLIO VIEW) ────────────────────────────── */}
+        <div className="velzon-card p-6 bg-white border border-slate-150 rounded-xl shadow-sm space-y-4">
+          <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                <Database className="h-4 w-4 text-indigo-600" /> Live Saxo Holdings &amp; Open Positions
+              </h3>
+              <p className="text-[11px] text-slate-400">Current holdings extracted directly from Saxo live platform, with verified percentage returns.</p>
+            </div>
+            <span className="text-xs font-bold text-slate-500 font-mono">
+              Count: {positions.length}
+            </span>
+          </div>
+
+          <div className="overflow-x-auto">
+            {positions.length > 0 ? (
+              <table className="w-full text-left border-collapse">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="py-2.5 px-3">Symbol</th>
+                    <th className="py-2.5 px-3">Description</th>
+                    <th className="py-2.5 px-3 text-center">Asset Class</th>
+                    <th className="py-2.5 px-3 text-center">Side</th>
+                    <th className="py-2.5 px-3 text-right">Quantity</th>
+                    <th className="py-2.5 px-3 text-right">Cost Price</th>
+                    <th className="py-2.5 px-3 text-right">Mark Price</th>
+                    <th className="py-2.5 px-3 text-right">Market Value</th>
+                    <th className="py-2.5 px-3 text-right">Unrealized P&L</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
+                  {positions.map((p, idx) => {
+                    const unPnl = Number(p.unrealized_pnl) || 0;
+                    const unPnlPct = Number(p.unrealized_pnl_pct) || 0;
+                    const openPrice = Number(p.open_price) || 0;
+                    const curPrice = Number(p.current_price) || 0;
+                    const mktVal = Number(p.market_value) || 0;
+                    const amt = Number(p.amount) || 0;
+                    const isProfit = unPnl >= 0;
+                    const side = amt >= 0 ? 'Long' : 'Short';
+                    const isOption = p.asset_type === 'StockOption' || p.asset_type === 'Option';
+                    const sym = p.symbol || 'UNK';
+                    const desc = p.description || sym;
+                    const curr = p.currency || 'USD';
+
+                    return (
+                      <tr key={p.position_id || `pos-${idx}`} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="py-3 px-3 font-bold text-slate-900">{sym}</td>
+                        <td className="py-3 px-3 text-slate-500 max-w-xs truncate" title={desc}>
+                          {desc}
+                          {isOption && p.expiry_date && (
+                            <span className="block text-[9px] text-slate-400 font-mono mt-0.5">
+                              Expiry: {p.expiry_date} | Strike: ${p.strike_price || '-'} {p.option_type?.toUpperCase() || ''}
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold uppercase">
+                            {p.asset_type === 'StockOption' ? 'Option' : (p.asset_type || 'Stock')}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-center">
+                          <span className={`inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded ${
+                            side === 'Long' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                          }`}>
+                            {side}
+                          </span>
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-800">
+                          {amt.toLocaleString()}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-slate-600">
+                          ${openPrice.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-slate-600">
+                          ${curPrice.toFixed(2)}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono text-slate-800">
+                          ${mktVal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+                        </td>
+                        <td className="py-3 px-3 text-right font-mono">
+                          <span className={`font-bold block ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
+                            {isProfit ? '+' : ''}{unPnl.toFixed(2)} {curr}
+                          </span>
+                          <span className={`text-[10px] block font-semibold ${isProfit ? 'text-emerald-500' : 'text-rose-500'}`}>
+                            {isProfit ? '+' : ''}{unPnlPct.toFixed(2)}%
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <div className="flex flex-col items-center justify-center p-8 bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-2">
+                <Database className="h-6 w-6 text-slate-400" />
+                <p className="text-xs font-semibold text-slate-500">No active positions found in your Saxo Account.</p>
+                <p className="text-[10px] text-slate-400">If you hold assets, click Refresh Data or verify your credentials.</p>
+              </div>
+            )}
+          </div>
+        </div>
+
         {/* ── 1.5 Executive Portfolio Execution & Performance Chart ──────────── */}
         <div className="velzon-card p-6 bg-white border border-slate-150 rounded-xl shadow-sm space-y-4">
           {(() => {
@@ -519,7 +622,6 @@ export default function Dashboard() {
             const avgPortReturn = totalVal > 0 ? (totalPnl / totalVal) * 100 : 0;
             const alphaVsSpy = avgPortReturn - spyBenchmarkPct;
             const alphaVsQqq = avgPortReturn - qqqBenchmarkPct;
-
 
             return (
               <>
@@ -640,6 +742,7 @@ export default function Dashboard() {
                 ];
 
             const totalOrders = blotterOrders.length;
+            const workingOrders = blotterOrders.filter(o => o.status === 'Working' || o.status === 'Placed');
             const tradedOrders = blotterOrders.filter(o => o.status === 'Traded' || o.status === 'Filled');
             const expiredOrders = blotterOrders.filter(o => o.status === 'Expired');
             const cancelledOrders = blotterOrders.filter(o => o.status === 'Cancelled');
@@ -647,6 +750,7 @@ export default function Dashboard() {
 
             // Status Pie Chart Data
             const statusPieData = [
+              { name: 'Working', value: workingOrders.length, color: '#6366f1' },
               { name: 'Traded (Filled)', value: tradedOrders.length, color: '#10b981' },
               { name: 'Expired', value: expiredOrders.length, color: '#f59e0b' },
               { name: 'Cancelled', value: cancelledOrders.length, color: '#64748b' },
@@ -667,6 +771,7 @@ export default function Dashboard() {
             const filteredOrders = blotterOrders.filter(o => {
               const matchesTab = 
                 blotterTab === 'ALL' ? true :
+                blotterTab === 'WORKING' ? (o.status === 'Working' || o.status === 'Placed') :
                 blotterTab === 'TRADED' ? (o.status === 'Traded' || o.status === 'Filled') :
                 blotterTab === 'EXPIRED' ? o.status === 'Expired' :
                 blotterTab === 'CANCELLED' ? o.status === 'Cancelled' : true;
@@ -688,7 +793,7 @@ export default function Dashboard() {
                       <Target className="h-4 w-4 text-indigo-600" /> Saxo Live Order Blotter &amp; Execution Intelligence
                     </h3>
                     <p className="text-[11px] text-slate-400">
-                      Live audit trail of all executed, expired, and cancelled orders from your Saxo account.
+                      Live audit trail of all executed, working, expired, and cancelled orders directly from your Saxo account.
                     </p>
                   </div>
                   <div className="flex items-center gap-2">
@@ -696,17 +801,23 @@ export default function Dashboard() {
                       Account: 33888/221497 (USD)
                     </span>
                     <span className="px-2.5 py-1 rounded-md bg-indigo-50 text-indigo-700 text-[11px] font-bold border border-indigo-100">
-                      Last 28 Days
+                      Live Audit Refreshed
                     </span>
                   </div>
                 </div>
 
                 {/* KPI Metric Ribbon */}
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
                   <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-lg">
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Total Orders</span>
                     <span className="text-base font-bold text-slate-800 font-mono">
                       {totalOrders} <span className="text-xs text-slate-400 font-normal">Activities</span>
+                    </span>
+                  </div>
+                  <div className="p-3 bg-indigo-50/50 border border-indigo-200/60 rounded-lg">
+                    <span className="text-[10px] text-indigo-700 font-bold uppercase tracking-wider block">Working Orders</span>
+                    <span className="text-base font-bold text-indigo-600 font-mono">
+                      {workingOrders.length} <span className="text-xs text-indigo-500 font-normal">Open</span>
                     </span>
                   </div>
                   <div className="p-3 bg-emerald-50/50 border border-emerald-200/60 rounded-lg">
@@ -724,7 +835,7 @@ export default function Dashboard() {
                   <div className="p-3 bg-slate-50 border border-slate-200/80 rounded-lg">
                     <span className="text-[10px] text-slate-500 font-bold uppercase tracking-wider block">Cancelled Orders</span>
                     <span className="text-base font-bold text-slate-600 font-mono">
-                      {cancelledOrders.length} <span className="text-xs text-slate-400 font-normal">G.T.C. &amp; Day</span>
+                      {cancelledOrders.length} <span className="text-xs text-slate-400 font-normal">Cancelled</span>
                     </span>
                   </div>
                 </div>
@@ -760,6 +871,7 @@ export default function Dashboard() {
                         </PieChart>
                       </ResponsiveContainer>
                       <div className="flex flex-col gap-1.5 pl-2 text-xs font-semibold">
+                        <span className="flex items-center gap-1.5 text-indigo-600"><span className="w-2.5 h-2.5 rounded-full bg-indigo-500 inline-block"></span> Working ({workingOrders.length})</span>
                         <span className="flex items-center gap-1.5 text-emerald-600"><span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span> Traded ({tradedOrders.length})</span>
                         <span className="flex items-center gap-1.5 text-amber-600"><span className="w-2.5 h-2.5 rounded-full bg-amber-500 inline-block"></span> Expired ({expiredOrders.length})</span>
                         <span className="flex items-center gap-1.5 text-slate-500"><span className="w-2.5 h-2.5 rounded-full bg-slate-400 inline-block"></span> Cancelled ({cancelledOrders.length})</span>
@@ -801,12 +913,18 @@ export default function Dashboard() {
                 <div className="space-y-3 pt-2">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2">
                     {/* Filter Tabs */}
-                    <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-lg text-xs font-bold">
+                    <div className="flex flex-wrap items-center gap-1.5 p-1 bg-slate-100 rounded-lg text-xs font-bold">
                       <button
                         onClick={() => setBlotterTab('ALL')}
                         className={`px-3 py-1 rounded-md transition ${blotterTab === 'ALL' ? 'bg-white text-indigo-600 shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}
                       >
                         All ({totalOrders})
+                      </button>
+                      <button
+                        onClick={() => setBlotterTab('WORKING')}
+                        className={`px-3 py-1 rounded-md transition ${blotterTab === 'WORKING' ? 'bg-indigo-600 text-white shadow-sm' : 'text-slate-500 hover:text-indigo-600'}`}
+                      >
+                        Working ({workingOrders.length})
                       </button>
                       <button
                         onClick={() => setBlotterTab('TRADED')}
@@ -860,6 +978,7 @@ export default function Dashboard() {
                           const isTraded = statusStr === 'Traded' || statusStr === 'Filled';
                           const isExpired = statusStr === 'Expired';
                           const isCancelled = statusStr === 'Cancelled';
+                          const isWorking = statusStr === 'Working' || statusStr === 'Placed';
                           
                           const instStr = typeof ord.instrument === 'object' ? (ord.instrument?.Description || ord.symbol || 'Instrument') : String(ord.instrument || ord.symbol || 'Instrument');
                           const orderIdStr = String(ord.order_id || `ORD-${idx}`);
@@ -874,7 +993,11 @@ export default function Dashboard() {
                           return (
                             <tr key={orderIdStr} className="hover:bg-slate-50/80 transition-colors">
                               <td className="py-2.5 px-3 font-bold text-slate-900 flex items-center gap-1.5">
-                                <span className="w-1.5 h-1.5 rounded-full bg-indigo-500 inline-block"></span>
+                                <span className={`w-1.5 h-1.5 rounded-full inline-block ${
+                                  isWorking ? 'bg-indigo-500 animate-pulse' :
+                                  isTraded ? 'bg-emerald-500' :
+                                  isExpired ? 'bg-amber-500' : 'bg-slate-400'
+                                }`}></span>
                                 {instStr}
                               </td>
                               <td className="py-2.5 px-3 font-mono text-[11px] text-slate-400">{orderIdStr}</td>
@@ -893,6 +1016,7 @@ export default function Dashboard() {
                               </td>
                               <td className="py-2.5 px-3 text-center">
                                 <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                                  isWorking ? 'bg-indigo-100 text-indigo-700' :
                                   isTraded ? 'bg-emerald-100 text-emerald-700' :
                                   isExpired ? 'bg-amber-100 text-amber-700' :
                                   'bg-slate-200 text-slate-600'
@@ -914,110 +1038,6 @@ export default function Dashboard() {
               </>
             );
           })()}
-        </div>
-
-        {/* ── 2. Live Saxo Holdings & Positions Table ────────────────────────────── */}
-        <div className="velzon-card p-6 bg-white border border-slate-150 rounded-xl shadow-sm space-y-4">
-          <div className="flex justify-between items-center border-b border-slate-100 pb-3">
-            <div>
-              <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                <Database className="h-4 w-4 text-indigo-600" /> Live Saxo Holdings &amp; Open Positions
-              </h3>
-              <p className="text-[11px] text-slate-400">Current holdings extracted directly from Saxo live platform, with verified percentage returns.</p>
-            </div>
-            <span className="text-xs font-bold text-slate-500 font-mono">
-              Count: {positions.length}
-            </span>
-          </div>
-
-          <div className="overflow-x-auto">
-            {positions.length > 0 ? (
-              <table className="w-full text-left border-collapse">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-[10px] font-bold text-slate-500 uppercase tracking-wider">
-                    <th className="py-2.5 px-3">Symbol</th>
-                    <th className="py-2.5 px-3">Description</th>
-                    <th className="py-2.5 px-3 text-center">Asset Class</th>
-                    <th className="py-2.5 px-3 text-center">Side</th>
-                    <th className="py-2.5 px-3 text-right">Quantity</th>
-                    <th className="py-2.5 px-3 text-right">Cost Price</th>
-                    <th className="py-2.5 px-3 text-right">Mark Price</th>
-                    <th className="py-2.5 px-3 text-right">Market Value</th>
-                    <th className="py-2.5 px-3 text-right">Unrealized P&L</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-xs font-medium text-slate-700">
-                  {positions.map((p, idx) => {
-                    const unPnl = Number(p.unrealized_pnl) || 0;
-                    const unPnlPct = Number(p.unrealized_pnl_pct) || 0;
-                    const openPrice = Number(p.open_price) || 0;
-                    const curPrice = Number(p.current_price) || 0;
-                    const mktVal = Number(p.market_value) || 0;
-                    const amt = Number(p.amount) || 0;
-                    const isProfit = unPnl >= 0;
-                    const side = amt >= 0 ? 'Long' : 'Short';
-                    const isOption = p.asset_type === 'StockOption' || p.asset_type === 'Option';
-                    const sym = p.symbol || 'UNK';
-                    const desc = p.description || sym;
-                    const curr = p.currency || 'USD';
-
-                    return (
-                      <tr key={p.position_id || `pos-${idx}`} className="hover:bg-slate-50/50 transition-colors">
-                        <td className="py-3 px-3 font-bold text-slate-900">{sym}</td>
-                        <td className="py-3 px-3 text-slate-500 max-w-xs truncate" title={desc}>
-                          {desc}
-                          {isOption && p.expiry_date && (
-                            <span className="block text-[9px] text-slate-400 font-mono mt-0.5">
-                              Expiry: {p.expiry_date} | Strike: ${p.strike_price || '-'} {p.option_type?.toUpperCase() || ''}
-                            </span>
-                          )}
-                        </td>
-                        <td className="py-3 px-3 text-center">
-                          <span className="text-[10px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-semibold uppercase">
-                            {p.asset_type === 'StockOption' ? 'Option' : (p.asset_type || 'Stock')}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-center">
-                          <span className={`inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded ${
-                            side === 'Long' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
-                          }`}>
-                            {side}
-                          </span>
-                        </td>
-                        <td className="py-3 px-3 text-right font-mono font-bold text-slate-800">
-                          {amt.toLocaleString()}
-                        </td>
-                        <td className="py-3 px-3 text-right font-mono text-slate-600">
-                          ${openPrice.toFixed(2)}
-                        </td>
-                        <td className="py-3 px-3 text-right font-mono text-slate-600">
-                          ${curPrice.toFixed(2)}
-                        </td>
-                        <td className="py-3 px-3 text-right font-mono text-slate-800">
-                          ${mktVal.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
-                        </td>
-                        <td className="py-3 px-3 text-right font-mono">
-                          <span className={`font-bold block ${isProfit ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {isProfit ? '+' : ''}{unPnl.toFixed(2)} {curr}
-                          </span>
-                          <span className={`text-[10px] block font-semibold ${isProfit ? 'text-emerald-500' : 'text-rose-500'}`}>
-                            {isProfit ? '+' : ''}{unPnlPct.toFixed(2)}%
-                          </span>
-                        </td>
-                      </tr>
-                    );
-                  })}
-
-                </tbody>
-              </table>
-            ) : (
-              <div className="flex flex-col items-center justify-center p-8 bg-slate-50 border border-dashed border-slate-200 rounded-xl space-y-2">
-                <Database className="h-6 w-6 text-slate-400" />
-                <p className="text-xs font-semibold text-slate-500">No active positions found in your Saxo Account.</p>
-                <p className="text-[10px] text-slate-400">If you hold assets, click Refresh Data or verify your credentials.</p>
-              </div>
-            )}
-          </div>
         </div>
 
         {/* ── 3. CSP & CC strategy layouts (Split Side-by-Side Panel) ───────────── */}
