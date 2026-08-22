@@ -973,53 +973,74 @@ class SaxoClient:
 
     def resolve_option_contract_uic(
         self,
-        underlying_uic: int,
         symbol: str,
         strike: float,
         option_type: str = "Put",
         dte: int = 35
     ) -> Optional[int]:
         """
-        Resolves the specific Saxo Option Contract UIC from the option space / chain.
+        Resolves the authentic Saxo Option Contract UIC from the option space / chain.
         """
-        if not self.access_token or underlying_uic <= 0:
+        if not self.access_token or not symbol:
             return None
         
         try:
-            # 1. Query Saxo OpenAPI contractoptionspaces for the underlying
-            url = f"{self.base_url}ref/v1/instruments/contractoptionspaces/{underlying_uic}?OptionSpaceSegment=All"
-            resp = self._make_authenticated_request("GET", url)
-            if resp.status_code == 200:
-                data = resp.json()
-                spaces = data.get("OptionSpaces", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
-                best_uic = None
-                min_diff = float("inf")
-                target_put_call = option_type.capitalize()
+            # 1. Search StockOption root for symbol
+            resp = self.session.get(
+                self.base_url + "ref/v1/instruments",
+                headers=self._get_headers(),
+                params={"Keywords": symbol.strip().upper(), "AssetTypes": "StockOption"},
+                timeout=self.timeout
+            )
+            if resp.status_code != 200:
+                return None
+            
+            items = resp.json().get("Data", [])
+            root_id = None
+            for it in items:
+                if it.get("AssetType") == "StockOption":
+                    root_id = it.get("Identifier") or it.get("GroupOptionRootId")
+                    break
+            
+            if not root_id:
+                return None
+            
+            # 2. Query contractoptionspaces for the OptionRootId
+            resp2 = self.session.get(
+                f"{self.base_url}ref/v1/instruments/contractoptionspaces/{root_id}",
+                headers=self._get_headers(),
+                timeout=self.timeout
+            )
+            if resp2.status_code != 200:
+                return None
+            
+            option_spaces = resp2.json().get("OptionSpace", [])
+            if not option_spaces:
+                return None
+            
+            # Sort spaces by closeness to target dte
+            target_pc = option_type.lower()
+            sorted_spaces = sorted(option_spaces, key=lambda sp: abs(sp.get("DisplayDaysToExpiry", 35) - dte))
+            
+            best_uic = None
+            min_diff = float("inf")
 
-                for space in spaces:
-                    specific_opts = space.get("SpecificOptions", [])
-                    for opt in specific_opts:
+            for sp in sorted_spaces:
+                for opt in sp.get("SpecificOptions", []):
+                    if opt.get("PutCall", "").lower() == target_pc:
                         opt_strike = float(opt.get("StrikePrice", opt.get("Strike", 0.0)))
-                        opt_pc = opt.get("PutCall", "")
-                        opt_uic = int(opt.get("Uic", opt.get("Identifier", 0)))
-                        if opt_pc.lower() == target_put_call.lower() and opt_uic > 0:
+                        opt_uic = int(opt.get("Uic", 0))
+                        if opt_uic > 0:
                             diff = abs(opt_strike - strike)
                             if diff < min_diff:
                                 min_diff = diff
                                 best_uic = opt_uic
-                                if diff == 0:
+                                if diff < 0.01:
                                     return best_uic
-                if best_uic:
-                    return best_uic
-
-            # 2. Keyword fallback search
-            search_query = f"{symbol} {int(strike)} {option_type.upper()}"
-            instruments = self.search_instruments(search_query, asset_types=["StockOption"])
-            if instruments and len(instruments) > 0:
-                first = instruments[0]
-                return int(first.get("Uic") or first.get("Identifier") or 0)
+            if best_uic:
+                return best_uic
         except Exception as e:
-            logger.debug(f"Option UIC resolution fallback to underlying for {symbol}: {e}")
+            logger.warning(f"Option UIC resolution for {symbol} failed: {e}")
 
         return None
 

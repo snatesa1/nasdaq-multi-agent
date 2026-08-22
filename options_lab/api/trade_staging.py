@@ -119,12 +119,14 @@ class TradeStagingEngine:
             return {"status": record["status"], "message": "Trade already approved/executed.", "record": record}
 
         now_iso = datetime.now().isoformat()
-        symbol = record["symbol"]
-        strategy = record["strategy"]
-        strike = record["strike"]
-        contracts = record["contracts"]
-        premium_est = record["premium_estimate"]
-        spot_price = record["spot_price"]
+        symbol = str(record.get("symbol", "AAPL")).strip().upper()
+        strategy = str(record.get("strategy", "CSP")).strip().upper()
+        strike = float(record.get("strike", 0.0))
+        contracts = int(record.get("contracts", 1))
+        premium_est = float(record.get("premium_estimate", 0.0))
+        spot_price = float(record.get("spot_price", 0.0))
+        delta = float(record.get("delta", 0.20))
+        dte = int(record.get("dte", 35))
 
         # 1. Final Live Margin Headroom Audit
         margin_eval = self.margin_guardian.validate_trade_margin(
@@ -151,8 +153,8 @@ class TradeStagingEngine:
             asset_type="StockOption",
             buy_sell="Sell" if "CSP" in strategy or "CC" in strategy else "Buy",
             strike=strike,
-            delta=record["delta"],
-            dte=record["dte"],
+            delta=delta,
+            dte=dte,
             projected_margin_util_pct=margin_eval.get("projected_margin_util_pct", 0.0)
         )
         if not safety_eval["approved"]:
@@ -166,32 +168,29 @@ class TradeStagingEngine:
                 "record": record
             }
 
-        # 3. Resolve UIC for instrument
-        uic = SaxoClient.KNOWN_UICS.get(symbol, 0)
-        if not uic:
-            instruments = self.saxo_client.search_instruments(symbol, asset_types=["StockOption", "Stock"])
-            if instruments and isinstance(instruments, list):
-                first_inst = instruments[0]
-                uic = int(first_inst.get("Uic") or first_inst.get("Identifier") or first_inst.get("PrimaryListing") or 123456)
-            else:
-                uic = 123456
-
         # Determine buy/sell action and derivative type
         buy_sell = "Sell" if ("CSP" in strategy or "CC" in strategy or "SHORT" in strategy) else "Buy"
         asset_type = "StockOption" if ("CSP" in strategy or "CC" in strategy or "OPTION" in strategy) else "Stock"
         opt_type = "Put" if "CSP" in strategy else ("Call" if "CC" in strategy else "Put")
 
-        # Resolve exact Option Contract UIC from Saxo Option Space if derivative
+        # 3. Resolve UIC for instrument
+        uic = None
         if asset_type == "StockOption":
-            opt_uic = self.saxo_client.resolve_option_contract_uic(
-                underlying_uic=uic,
+            uic = self.saxo_client.resolve_option_contract_uic(
                 symbol=symbol,
                 strike=strike,
                 option_type=opt_type,
                 dte=dte
             )
-            if opt_uic:
-                uic = opt_uic
+
+        if not uic:
+            instruments = self.saxo_client.search_instruments(symbol, asset_types=[asset_type, "Stock"])
+            if instruments and isinstance(instruments, list):
+                first_inst = instruments[0]
+                uic = int(first_inst.get("Uic") or first_inst.get("Identifier") or first_inst.get("PrimaryListing") or 0)
+
+        if not uic:
+            uic = SaxoClient.KNOWN_UICS.get(symbol, 123456)
 
         # 4. Place Order on Saxo
         record["approved_at"] = now_iso
