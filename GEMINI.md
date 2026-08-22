@@ -147,8 +147,6 @@ Hierarchical Multi-Agent System (FastAPI) for comprehensive NASDAQ and Multi-Ass
      - *Revenge Cooldown*: 24-hour execution lockout following a loss $> \$1,000$.
      - *Concentration Risk Cap*: Hard $15\%$ maximum single-ticker capital exposure.
   5. **Next.js Behavioral Lab Cockpit (`frontend/src/app/behavioral-lab/page.tsx`)**: Velzon Galaxy Light institutional UI featuring a 4-KPI forensic ribbon, bias diagnostic cards, quarterly P&L evolution, interactive stitched campaign table, pre-flight safety shield simulator, and live Saxo news wire feed (`/api/history/news`).
-
-
-
-
-
+  6. **Verified Saxo Live Order Execution & Testing Safety Directive (2026-08-22) [NEW]**:
+     - 1. **100% Live Order Placement Verified**: Authenticated orders (`Sell to Open` Limit Orders with dynamic `AccountKey`, `OptionSpace` contract UIC lookup, and `ToOpenClose="ToOpen"`) successfully executed on Saxo Live exchange with real working status.
+     - 2. **Strict Testing Safety Rule**: All automated/diagnostic backend tests MUST strictly use `POST /trade/v2/orders/precheck` to validate parameters and cash requirements without sending real live orders to production. Real live orders on `POST /trade/v2/orders` are ONLY dispatched when the user explicitly clicks the "Approve Trade" UI button.
