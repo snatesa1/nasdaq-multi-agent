@@ -285,10 +285,10 @@ Hierarchical Multi-Agent System (FastAPI) for comprehensive NASDAQ and Multi-Ass
   2. **Campaign Lifecycle Stitcher (`campaign_stitcher.py`)**: Reconstructs complete multi-leg option and stock strategy campaigns (Wheel lifecycles, covered call series, bag-holds) from raw transaction records.
   3. **Behavioral Bias Forensics (`behavioral_forensics.py`)**: Quantifies psychological and discipline flaws—such as the Option Volatility Drag (e.g. losing -$5,089 on short PANW calls against a +$5,962 stock surge), unhedged bag-holding (-82.7% on PLUG), and systematic consistency (+100% win rate on Visa & IBM options). Computes composite Discipline Score (0-100) and letter grades.
   4. **Behavioral Safety Shield (`safety_shield.py`)**: Hard real-time circuit breakers that evaluate pre-flight orders against behavioral rules:
-     - *Momentum Call Delta Guard*: Restricts call selling to Delta $\le 0.18$ on high-beta growth stocks to prevent upside destruction.
-     - *Gamma Expiration Guard*: Blocks selling options $< 21$ DTE.
-     - *Revenge Cooldown*: 24-hour execution lockout following a loss $> \$1,000$.
-     - *Concentration Risk Cap*: Hard $15\%$ maximum single-ticker capital exposure.
+      - *Momentum Call Delta Guard*: Restricts call selling to Delta $\le 0.18$ on high-beta growth stocks to prevent upside destruction.
+      - *Gamma Expiration Guard*: Blocks selling options $< 21$ DTE.
+      - *Revenge Cooldown*: 24-hour execution lockout following a loss $> \$1,000$.
+      - *Concentration Risk Cap*: Hard $15\%$ maximum single-ticker capital exposure.
   5. **Next.js Behavioral Lab Cockpit (`frontend/src/app/behavioral-lab/page.tsx`)**: Velzon Galaxy Light institutional UI featuring a 4-KPI forensic ribbon, bias diagnostic cards, quarterly P&L evolution, interactive stitched campaign table, pre-flight safety shield simulator, and live Saxo news wire feed (`/api/history/news`).
   6. **Verified Saxo Live Order Execution & Testing Safety Directive (2026-08-22) [NEW]**:
      - 1. **100% Live Order Placement Verified**: Authenticated orders (`Sell to Open` Limit Orders with dynamic `AccountKey`, `OptionSpace` contract UIC lookup, and `ToOpenClose="ToOpen"`) successfully executed on Saxo Live exchange with real working status.
@@ -298,3 +298,18 @@ Hierarchical Multi-Agent System (FastAPI) for comprehensive NASDAQ and Multi-Ass
      - 2. **Complete Live Audit Sync**: Aggregates all 37+ historical and live order activities across all lifecycle states (`Cancelled`, `Working`, `Traded`, `Expired`). Real-time cancellations (e.g. IBM `5436410532` & INTC `5436410527`) instantly reflect at the top of the blotter upon clicking "Refresh Data".
      - 3. **5-Status Filter Tabs & KPI Ribbon**: Added dedicated `Working` tab alongside `All`, `Traded`, `Expired`, and `Cancelled`.
      - 4. **Top Priority Holdings Layout**: Re-positioned **Live Saxo Holdings & Open Positions** directly to the TOP of the dashboard immediately following the Executive Metrics Grid.
+  8. **Dynamic Macro Catalyst Events & Multi-Ticker News Extraction Engine (2026-08-26) [NEW]**:
+     - 1. **Dynamic Macro Catalyst Synthesizer (`_extract_dynamic_macro_events`)**: Eliminated all static cards. Groups live RSS and Saxo news into 4–6 dynamic catalyst cards with impact stars, dynamic summaries, and strategy biases.
+     - 2. **Multi-Ticker News Candidate Extractor (`_extract_tickers_from_text` & `_generate_dynamic_trade_candidates`)**: Eliminated the 3-stock limit. Extracts symbols directly from breaking news (`NVDA`, `PLTR`, `META`, `MRNA`, `AAPL`, `MSFT`, `TSLA`, `AMD`, `BAC`, `CVX`, `KO`, `GE`, `GS`), constructs 6 diverse, high-conviction trade setups with live spot resolution, 10% OTM Black-Scholes pricing, and Margin Guardian validation.
+     - 3. **Margin Clamping & Force Refresh Propagation**: Clamped margin metrics non-negative and added `force_refresh=true` propagation to invalidate cached briefing snapshots and trigger fresh Gemini AI synthesis.
+  9. **Earnings Volatility Scanner Pydantic Alignment & Schema Standardization (2026-08-26) [NEW]**:
+     - 1. **Model Alignment (`models.py`)**: Added `low_threshold_pct: float = 0.20` and `min_open_interest: int = 5000` to `EarningsScanRequest`, fixing HTTP 500 attribute errors when scanning next-week earnings.
+     - 2. **Uniform Return Schema (`earnings_scanner.py`)**: Standardized all filter exits to return the standard dictionary schema with `plays: []` and populated counter metrics, preventing frontend undefined errors.
+  10. **Dynamic Trade Blotter Campaign Stitcher & Behavioral Forensics Engine (2026-08-26) [NEW]**:
+     - 1. **Dynamic Multi-Source Campaign Stitcher (`campaign_stitcher.py`)**: Ingests all authentic executed, working, expired, and cancelled option/stock orders from the user's **Saxo Live Trade Blotter** (`saxo_broker_client.get_order_blotter()`), active open holdings, and **Saxo Stocks US Watchlist**.
+     - 2. **Granular Contract Regex Parsing & Strategy Lifecycle Inference**: Parses contract details (expiry, strike, option type, order status, costs, real P&L) for granular contract rows. Automatically infers strategy lifecycles (`Covered Call + Active Long Equity`, `Cash-Secured Put (CSP) Series`, `Wheel Strategy Lifecycle`, `Unhedged Long Equity`).
+     - 3. **Real-Time Behavioral Forensics & Actionable Feedback (`behavioral_forensics.py`)**: Dynamically computes call drag alpha losses, unhedged drawdown penalties, and systematic theta yield scores directly from stitched live campaigns.
+  11. **Permanent Process Guardian & Zero-Stale Hot-Reload Protocol (2026-08-26) [NEW]**:
+     - 1. **100% Windows Native PowerShell Standard**: Exclusively established Windows Native PowerShell (`pwsh`) as the sole execution environment, banning WSL commands.
+     - 2. **Automated Clean Restart (`restart_backend.ps1`)**: Scavenges port 8000, terminates lingering/orphan PIDs, purges stale `__pycache__`, and boots Uvicorn with `--reload --reload-dir options_lab`.
+     - 3. **Native Desktop Launcher Guard (`start_options_lab.bat` & `main.js`)**: Auto-cleans port 8000 on launch and boots Uvicorn with hot-reloading enabled. All 17 API tests verified passing with 100% success rate.
