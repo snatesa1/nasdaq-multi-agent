@@ -1,6 +1,6 @@
 from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks, Body, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 import logging
 import os
 from typing import Dict, Any, Optional
@@ -97,6 +97,20 @@ weekly_intelligence = WeeklyIntelligenceEngine(saxo_client=saxo_broker_client, m
 
 
 
+
+@app.on_event("startup")
+async def start_token_heartbeat():
+    """Background heartbeat that continuously rolls the Saxo OAuth access & refresh tokens."""
+    async def _heartbeat():
+        while True:
+            try:
+                await asyncio.sleep(600)  # Check & refresh every 10 minutes
+                if saxo_broker_client.refresh_token:
+                    logger.info("⚡ [Token Heartbeat] Auto-rolling Saxo OAuth session...")
+                    saxo_broker_client.refresh_access_token()
+            except Exception as e:
+                logger.warning(f"⚠️ [Token Heartbeat] Auto-refresh non-critical: {e}")
+    asyncio.create_task(_heartbeat())
 
 # ── Health Check ───────────────────────────────────────────────────────────
 @app.get("/health")
@@ -663,6 +677,77 @@ def get_broker_auth_url(user=Depends(verify_firebase_token)):
     url = saxo_broker_client.get_authorization_url()
     return {"auth_url": url, "app_name": settings.SAXO_APP_NAME, "redirect_url": settings.SAXO_REDIRECT_URL}
 
+@app.get("/api/broker/oauth/callback")
+def broker_oauth_callback(code: Optional[str] = None, state: Optional[str] = None, error: Optional[str] = None):
+    """
+    Automated OAuth 2.0 Callback Receiver.
+    Saxo redirects directly here upon successful MFA login:
+    1. Extracts authorization code automatically.
+    2. Exchanges it with Saxo Live for access + refresh tokens.
+    3. Auto-notifies parent window and closes popup cleanly.
+    """
+    if error:
+        logger.error(f"Saxo OAuth returned error: {error}")
+        return HTMLResponse(
+            content=f"""
+            <html>
+            <body style="font-family:system-ui;padding:40px;text-align:center;background:#f8fafc;">
+                <h2 style="color:#ef4444;">❌ Saxo Authentication Cancelled or Failed</h2>
+                <p style="color:#64748b;">Error: {error}</p>
+                <button onclick="window.close()" style="padding:10px 20px;border-radius:8px;background:#4f46e5;color:white;border:none;cursor:pointer;">Close Window</button>
+            </body>
+            </html>
+            """,
+            status_code=400
+        )
+    
+    if not code:
+        raise HTTPException(status_code=400, detail="Missing authorization code parameter.")
+
+    try:
+        data = saxo_broker_client.exchange_code_for_token(code)
+        log_progress("OAuth Automated Callback", "SUCCESS", "Live Saxo authorization code automatically exchanged for tokens.")
+        return HTMLResponse(
+            content="""
+            <html>
+            <head><title>Saxo Authentication Successful</title></head>
+            <body style="font-family:system-ui;padding:40px;text-align:center;background:#f0fdf4;">
+                <div style="max-width:480px;margin:auto;background:white;padding:30px;border-radius:16px;box-shadow:0 4px 6px -1px rgb(0 0 0 / 0.1);">
+                    <div style="font-size:48px;margin-bottom:12px;">✅</div>
+                    <h2 style="color:#15803d;margin:0 0 8px 0;">Saxo Live MFA Authenticated!</h2>
+                    <p style="color:#64748b;font-size:14px;line-height:1.5;">Your broker session has been successfully established and verified. Returning to OptionsLab...</p>
+                    <div style="margin-top:20px;font-size:12px;color:#94a3b8;">Window will close automatically.</div>
+                </div>
+                <script>
+                    if (window.opener) {
+                        try {
+                            window.opener.postMessage({ type: 'SAXO_AUTH_SUCCESS' }, '*');
+                        } catch(e){}
+                        setTimeout(function(){ window.close(); }, 1200);
+                    } else {
+                        setTimeout(function(){ window.location.href = 'http://localhost:3000/weekly-intelligence'; }, 1500);
+                    }
+                </script>
+            </body>
+            </html>
+            """,
+            status_code=200
+        )
+    except Exception as e:
+        logger.error(f"Automated OAuth code exchange failed: {e}")
+        return HTMLResponse(
+            content=f"""
+            <html>
+            <body style="font-family:system-ui;padding:40px;text-align:center;background:#fff1f2;">
+                <h2 style="color:#e11d48;">❌ Token Exchange Failed</h2>
+                <p style="color:#475569;">{str(e)}</p>
+                <button onclick="window.close()" style="padding:10px 20px;border-radius:8px;background:#4f46e5;color:white;border:none;cursor:pointer;">Close</button>
+            </body>
+            </html>
+            """,
+            status_code=500
+        )
+
 @app.post("/api/broker/oauth/set-token")
 def set_broker_token(payload: Dict[str, Any] = Body(...), user=Depends(verify_firebase_token)):
     """
@@ -687,12 +772,14 @@ def set_broker_token(payload: Dict[str, Any] = Body(...), user=Depends(verify_fi
 
     if code:
         data = saxo_broker_client.exchange_code_for_token(code)
+        database.clear_saxo_cache()
         log_progress("OAuth Code Exchange", "SUCCESS", "Saxo code exchanged for tokens successfully.")
         return {"status": "SUCCESS", "message": "Live Saxo OAuth token successfully exchanged!", "data": data}
 
     if token:
         saxo_broker_client.set_token(token, refresh_token)
         saxo_broker_client._persist_tokens_to_env()
+        database.clear_saxo_cache()
         log_progress("Token Configuration", "SUCCESS", f"Developer token applied manually (Length: {len(token)})")
         return {"status": "SUCCESS", "message": "Live Saxo token successfully registered!", "environment": settings.SAXO_ENV}
 
@@ -786,8 +873,54 @@ def get_broker_cached_snapshot(user=Depends(verify_firebase_token)):
     return {
         "account": database.get_saxo_cache("account_summary"),
         "positions": database.get_saxo_cache("positions"),
-        "orders": database.get_saxo_cache("orders")
+        "orders": database.get_saxo_cache("orders"),
+        "order_blotter": database.get_saxo_cache("order_blotter")
     }
+
+@app.post("/api/broker/refresh")
+async def force_refresh_broker(user=Depends(verify_firebase_token)):
+    """
+    Purges stale SQLite caches, ensures session token validity, and pulls
+    fresh account balance, positions, open orders, and blotter directly from Saxo OpenAPI.
+    """
+    async with broker_concurrency_lock:
+        database.clear_saxo_cache()
+        results: Dict[str, Any] = {"status": "REFRESHED", "errors": []}
+        
+        # 1. Fetch account
+        try:
+            acc = saxo_broker_client.get_account_balances()
+            database.set_saxo_cache("account_summary", acc)
+            results["account"] = acc
+        except Exception as e:
+            results["errors"].append(f"Account: {e}")
+            
+        # 2. Fetch positions
+        try:
+            pos = saxo_broker_client.get_positions()
+            database.set_saxo_cache("positions", pos)
+            results["positions"] = pos
+        except Exception as e:
+            results["errors"].append(f"Positions: {e}")
+
+        # 3. Fetch order blotter
+        try:
+            blotter = saxo_broker_client.get_order_blotter()
+            database.set_saxo_cache("order_blotter", blotter)
+            results["order_blotter"] = blotter
+        except Exception as e:
+            results["errors"].append(f"Order Blotter: {e}")
+
+        # 4. Fetch orders
+        try:
+            ords = saxo_broker_client.get_orders()
+            database.set_saxo_cache("orders", ords)
+            results["orders"] = ords
+        except Exception as e:
+            results["errors"].append(f"Orders: {e}")
+
+        log_progress("Force Broker Refresh", "SUCCESS", "Purged cache and synchronized fresh broker telemetry.")
+        return results
 
 @app.post("/api/broker/orders")
 async def place_broker_order(
@@ -937,7 +1070,7 @@ async def scan_csp_opportunities(
             else:
                 target_strike = round(price * 0.92, 1)
 
-            dte = 35
+            dte = 30
             # Premium estimation: 2.2% - 2.8% of underlying price
             est_premium = round(price * 0.024, 2)
             ret_on_cap = (est_premium / target_strike) * 100.0 if target_strike > 0 else 0.0

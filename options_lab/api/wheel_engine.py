@@ -2,13 +2,13 @@
 Wheel State Machine Engine for the Saxo Options Yield Protocol.
 
 Implements a deterministic 2-state state machine:
-- STATE_0_CASH_CSP: Cash heavy -> Write Cash-Secured Puts (Delta -0.20 to -0.30, 30-45 DTE)
-- STATE_1_EQUITY_CC: Shares assigned -> Write Covered Calls (Delta +0.25 to +0.30, Strike >= Cost Basis)
+- STATE_0_CASH_CSP: Cash heavy -> Write Cash-Secured Puts (Delta -0.20 to -0.30, strict 30-32 DTE)
+- STATE_1_EQUITY_CC: Shares assigned -> Write Covered Calls (Delta +0.25 to +0.30, Strike >= Cost Basis, strict 30-32 DTE)
 
 Enforces institutional quantitative management rules:
 1. 50% Profit Target Rule: Capture 50% max profit early to free collateral.
 2. 21-DTE Gamma Avoidance Rule: Roll/Close at 21 DTE to eliminate tail risk.
-3. Pre-Trade Risk Guards: Max 5% capital allocation per position, earnings buffer.
+3. Pre-Trade Risk Guards: Max 5% capital allocation per position, strict 30-32 DTE cap, earnings buffer.
 """
 
 import logging
@@ -51,6 +51,8 @@ class WheelEngine:
     MAX_PORTFOLIO_ALLOCATION_PCT = 0.05   # 5% max capital per underlying
     PROFIT_TARGET_PCT = 0.50             # 50% profit-taking target
     GAMMA_DTE_THRESHOLD = 21             # 21 DTE roll threshold
+    TARGET_ENTRY_DTE = 30                # Strict 30 DTE baseline target
+    MAX_ENTRY_DTE = 32                   # Strict 32 DTE hard maximum ceiling
     EARNINGS_BUFFER_DAYS = 7             # Exclude expiries +-7 days from earnings
 
     def __init__(self):
@@ -113,8 +115,8 @@ class WheelEngine:
                 "trigger": True,
                 "action": "ROLL_21_DTE_GAMMA_AVOIDANCE",
                 "current_dte": current_dte,
-                "target_roll_dte": 35,
-                "rationale": f"Remaining DTE ({current_dte}d) is <= 21d threshold. Roll to 35 DTE cycle."
+                "target_roll_dte": self.TARGET_ENTRY_DTE,
+                "rationale": f"Remaining DTE ({current_dte}d) is <= 21d threshold. Roll to {self.TARGET_ENTRY_DTE} DTE cycle."
             }
 
         return {
@@ -134,6 +136,7 @@ class WheelEngine:
         signal_score: float,
         proposed_strike: float,
         cost_basis: float = 0.0,
+        proposed_dte: Optional[int] = None,
         earnings_date: Optional[str] = None,
         expiry_date: Optional[str] = None
     ) -> Dict[str, Any]:
@@ -142,8 +145,9 @@ class WheelEngine:
         1. Max 5% capital per trade
         2. Minimum conviction score >= 0.60
         3. Minimum signal score >= 0.55
-        4. For Covered Calls: Strike >= cost basis
-        5. Earnings buffer +-7 days
+        4. Strict 30-32 DTE maximum limit
+        5. For Covered Calls: Strike >= cost basis
+        6. Earnings buffer +-7 days
         """
         violations = []
 
@@ -163,13 +167,24 @@ class WheelEngine:
         if signal_score < 0.55:
             violations.append(f"Signal score ({signal_score:.2f}) is below minimum threshold (0.55).")
 
-        # 4. Covered Call strike safety
+        # 4. Strict 30-32 DTE check (No 35+ DTE allowed)
+        if proposed_dte is not None:
+            if proposed_dte > self.MAX_ENTRY_DTE:
+                violations.append(
+                    f"Proposed DTE ({proposed_dte}d) exceeds strict maximum {self.MAX_ENTRY_DTE} DTE threshold (allowed 30-32 DTE)."
+                )
+            elif proposed_dte < self.GAMMA_DTE_THRESHOLD:
+                violations.append(
+                    f"Proposed DTE ({proposed_dte}d) violates minimum {self.GAMMA_DTE_THRESHOLD} DTE Gamma threshold."
+                )
+
+        # 5. Covered Call strike safety
         if state == WheelState.HOLDING_SHARES and cost_basis > 0 and proposed_strike < cost_basis:
             violations.append(
                 f"Proposed CC strike (${proposed_strike:.2f}) is below adjusted cost basis (${cost_basis:.2f})."
             )
 
-        # 5. Earnings proximity check
+        # 6. Earnings proximity check
         if earnings_date and expiry_date:
             try:
                 dt_earn = datetime.strptime(earnings_date, "%Y-%m-%d")
@@ -191,6 +206,7 @@ class WheelEngine:
             "allocation_pct": round(allocation_pct * 100, 2),
             "conviction_score": conviction_score,
             "signal_score": signal_score,
+            "proposed_dte": proposed_dte,
             "violations": violations,
             "decision": "APPROVED_FOR_EXECUTION" if approved else "REJECTED_BY_RISK_GUARDS"
         }

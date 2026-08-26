@@ -150,6 +150,7 @@ export const optionsApi = {
   getBrokerOrders: (): Promise<BrokerOrdersResponse> => apiRequest('/api/broker/orders'),
   getBrokerClosedPositions: (): Promise<{ trades: any[]; count: number }> => apiRequest('/api/broker/closed-positions'),
   getBrokerOrderBlotter: (): Promise<any> => apiRequest('/api/broker/order-blotter'),
+  refreshBrokerData: (): Promise<any> => apiRequest('/api/broker/refresh', 'POST'),
   getBrokerWatchlists: (): Promise<{ watchlists: any[] }> => apiRequest('/api/broker/watchlists'),
   getBrokerWatchlistInstruments: (watchlistId: string): Promise<{ watchlist_id: string; instruments: any[] }> =>
     apiRequest(`/api/broker/watchlist/${encodeURIComponent(watchlistId)}`),
@@ -190,8 +191,13 @@ export const optionsApi = {
     apiRequest('/api/shield/check-order', 'POST', payload),
 
   // ── Weekly Intelligence & Trade Approval ─────────────────────────────────
-  getWeeklyBriefing: (weekLabel?: string) =>
-    apiRequest(weekLabel ? `/api/intelligence/weekly-briefing?week_label=${encodeURIComponent(weekLabel)}` : '/api/intelligence/weekly-briefing'),
+  getWeeklyBriefing: (weekLabel?: string, forceRefresh?: boolean) => {
+    const params = new URLSearchParams();
+    if (weekLabel) params.append('week_label', weekLabel);
+    if (forceRefresh) params.append('force_refresh', 'true');
+    const q = params.toString();
+    return apiRequest(q ? `/api/intelligence/weekly-briefing?${q}` : '/api/intelligence/weekly-briefing');
+  },
   getStagedTrades: (weekLabel?: string, status?: string) => {
     const params = new URLSearchParams();
     if (weekLabel) params.append('week_label', weekLabel);

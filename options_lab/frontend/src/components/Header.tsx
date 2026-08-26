@@ -3,7 +3,6 @@
 import React, { useState } from 'react';
 import { 
   Search, 
-  Bell, 
   Maximize, 
   Minimize, 
   Menu, 
@@ -90,15 +89,10 @@ export default function Header() {
       {/* Right Section: Badges, Actions, User Pill */}
       <div className="flex items-center gap-2 sm:gap-4">
         {/* Environment Badge */}
-        <span className={`hidden md:inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border ${
-          brokerEnv === 'LIVE'
-            ? 'bg-amber-50 text-amber-800 border-amber-200'
-            : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-        }`}>
-          <span className={`h-1.5 w-1.5 rounded-full ${brokerEnv === 'LIVE' ? 'bg-amber-500' : 'bg-emerald-500'} animate-pulse`} />
-          {brokerEnv === 'LIVE' ? 'Saxo LIVE (Read-Only Shield)' : 'Saxo SIM Connected'}
+        <span className="hidden md:inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold border bg-emerald-50 text-emerald-700 border-emerald-200 shadow-2xs">
+          <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+          {brokerEnv === 'LIVE' ? 'Saxo LIVE (Trading Active)' : 'Saxo SIM Connected'}
         </span>
-
 
         {/* Fullscreen Button */}
         <button
@@ -108,16 +102,6 @@ export default function Header() {
         >
           {isFullscreen ? <Minimize className="h-4 w-4" /> : <Maximize className="h-4 w-4" />}
         </button>
-
-        {/* Notification Bell */}
-        <div className="relative">
-          <button className="p-2 rounded-lg text-slate-500 hover:bg-slate-100 hover:text-slate-700 transition relative">
-            <Bell className="h-4 w-4" />
-            <span className="absolute top-1.5 right-1.5 h-4 w-4 rounded-full bg-rose-500 text-white text-[10px] font-bold flex items-center justify-center">
-              5
-            </span>
-          </button>
-        </div>
 
         {/* User Profile Pill ("Sathish - Online") */}
         <div className="relative">

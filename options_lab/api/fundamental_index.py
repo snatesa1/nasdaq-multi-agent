@@ -13,10 +13,16 @@ import pandas as pd
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_SAMPLE_UNIVERSE = [
-    "AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "BRK-B", "JPM", "XOM", "UNH",
-    "V", "PG", "JNJ", "HD", "MA", "ABBV", "CVX", "MRK", "BAC", "KO"
-]
+def get_default_universe(limit: int = 20) -> List[str]:
+    """Dynamically loads default index universe from live S&P 500 constituents."""
+    try:
+        from .universe import load_sp500_constituents
+        constituents = load_sp500_constituents()
+        if constituents:
+            return constituents[:limit]
+    except Exception as e:
+        logger.debug(f"Dynamic S&P 500 constituents query failed: {e}")
+    return ["AAPL", "MSFT", "AMZN", "NVDA", "GOOGL", "META", "BRK-B", "JPM", "XOM", "UNH"]
 
 class FundamentalIndexEngine:
     """
@@ -78,7 +84,7 @@ class FundamentalIndexEngine:
         """
         Compute Cap Weights, Fundamental Weights, and Alpha Deltas for the universe.
         """
-        target_symbols = symbols if symbols and len(symbols) > 0 else DEFAULT_SAMPLE_UNIVERSE
+        target_symbols = symbols if symbols and len(symbols) > 0 else get_default_universe()
         logger.info(f"Computing Fundamental Index for {len(target_symbols)} symbols...")
         
         data_list = []

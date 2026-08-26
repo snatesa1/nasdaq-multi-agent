@@ -249,6 +249,67 @@ async function createWindow() {
     }
   });
 
+  // Automated Saxo OAuth 2.0 Interceptor (Zero Copy-Paste)
+  ipcMain.handle('open-saxo-oauth', async (event, authUrl) => {
+    return new Promise((resolve, reject) => {
+      const authWin = new BrowserWindow({
+        width: 600,
+        height: 750,
+        title: 'Saxo Bank MFA Authorization',
+        parent: mainWindow,
+        modal: true,
+        webPreferences: { nodeIntegration: false, contextIsolation: true }
+      });
+
+      let handled = false;
+      const handleRedirect = async (targetUrl) => {
+        if (handled) return;
+        if (targetUrl.includes('code=') || targetUrl.includes('Akpegis-Agent.com.sg') || targetUrl.includes('callback')) {
+          try {
+            const urlObj = new URL(targetUrl);
+            const code = urlObj.searchParams.get('code');
+            if (code) {
+              handled = true;
+              console.log('[Electron OAuth] Captured Saxo code automatically:', code);
+              const postData = JSON.stringify({ code: code });
+              const req = http.request({
+                hostname: '127.0.0.1',
+                port: BACKEND_PORT,
+                path: '/api/broker/oauth/set-token',
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Content-Length': Buffer.byteLength(postData)
+                }
+              }, (res) => {
+                authWin.close();
+                if (mainWindow) {
+                  mainWindow.webContents.send('saxo-auth-success');
+                }
+                resolve({ success: true, code });
+              });
+              req.on('error', (err) => {
+                console.error('[Electron OAuth] Error posting token:', err);
+                authWin.close();
+                reject(err);
+              });
+              req.write(postData);
+              req.end();
+            }
+          } catch (e) {
+            console.error('[Electron OAuth] Parse error:', e);
+          }
+        }
+      };
+
+      authWin.webContents.on('will-navigate', (event, url) => handleRedirect(url));
+      authWin.webContents.on('will-redirect', (event, url) => handleRedirect(url));
+      authWin.webContents.on('did-navigate', (event, url) => handleRedirect(url));
+
+      authWin.loadURL(authUrl);
+    });
+  });
+
   // F12 and Ctrl+Shift+I DevTools
   mainWindow.webContents.on('before-input-event', (event, input) => {
     if (input.key === 'F12' || (input.control && input.shift && input.key.toLowerCase() === 'i')) {

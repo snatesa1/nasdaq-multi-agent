@@ -452,6 +452,18 @@ class SaxoClient:
                             clean_sym = sym.split(":")[0].split("/")[0]
                             desc = inst.get("Description") or item.get("Description", clean_sym)
                             
+                            status_raw = str(item.get("Status", ""))
+                            sub_status = str(item.get("SubStatus", ""))
+                            activity_type = str(item.get("ActivityType", "")).lower()
+                            if status_raw in ["FinalFill", "Fill", "Traded"] or sub_status in ["FinalFill", "Traded"] or "fill" in activity_type:
+                                norm_st = "Filled"
+                            elif status_raw in ["Cancelled"] or sub_status in ["Cancelled"] or "cancel" in activity_type:
+                                norm_st = "Cancelled"
+                            elif status_raw in ["Expired"] or sub_status in ["Expired"] or "expire" in activity_type:
+                                norm_st = "Expired"
+                            else:
+                                norm_st = "Expired"
+
                             normalized_orders.append({
                                 "order_id": audit_id,
                                 "uic": uic,
@@ -463,7 +475,7 @@ class SaxoClient:
                                 "amount": float(item.get("Amount", 1.0)),
                                 "order_price": float(item.get("Price", 0.0)),
                                 "filled_price": float(item.get("AverageExecutionPrice", item.get("Price", 0.0))),
-                                "status": item.get("Status", "Filled"),
+                                "status": norm_st,
                                 "placed_at": item.get("ActivityTime", now_iso),
                                 "executed_at": item.get("ActivityTime", now_iso)
                             })
@@ -775,12 +787,62 @@ class SaxoClient:
         # Build index of all orders (keyed by order_id)
         orders_map: Dict[str, Dict[str, Any]] = {o["order_id"]: o for o in verified_blotter}
 
-        # Try to query latest activities from Saxo OpenAPI if session is active
+        # Try to query latest activities and real-time open orders from Saxo OpenAPI if session is active
+        active_working_orders: Dict[str, Dict[str, Any]] = {}
         try:
             self._ensure_valid_token()
             if self.access_token:
+                # 1. Fetch real-time active open orders from Saxo port/v1/orders/me
+                try:
+                    open_resp = self._make_authenticated_request("GET", "port/v1/orders/me")
+                    if open_resp.status_code == 200:
+                        open_data = open_resp.json()
+                        open_items = open_data.get("Data", []) if isinstance(open_data, dict) else (open_data if isinstance(open_data, list) else [])
+                        for ord_item in open_items:
+                            o_id = str(ord_item.get("OrderId", ""))
+                            if not o_id:
+                                continue
+                            uic = int(ord_item.get("Uic", 0))
+                            atype = ord_item.get("AssetType", "StockOption")
+                            inst = self.get_instrument_details(uic, atype)
+                            sym = inst.get("Symbol") or ord_item.get("DisplayAndFormat", {}).get("Symbol", "UNKNOWN")
+                            clean_sym = sym.split(":")[0].split("/")[0]
+                            desc = inst.get("Description") or ord_item.get("DisplayAndFormat", {}).get("Description", clean_sym)
+                            
+                            raw_dur = ord_item.get("Duration") or ord_item.get("OrderDuration")
+                            if isinstance(raw_dur, dict):
+                                dur_str = raw_dur.get("DurationType", "Day Order")
+                            elif isinstance(raw_dur, str):
+                                dur_str = raw_dur
+                            else:
+                                dur_str = "Day Order"
+                                
+                            placed_time = str(ord_item.get("OrderTime", now_iso)).replace("T", " ")[:19]
+                            raw_bs = str(ord_item.get("BuySell", "Buy"))
+                            bs_label = "Sell to Open" if raw_bs == "Sell" and atype == "StockOption" else raw_bs
+
+                            active_working_orders[o_id] = {
+                                "order_id": o_id,
+                                "instrument": str(desc),
+                                "symbol": str(clean_sym),
+                                "buy_sell": bs_label,
+                                "quantity": float(ord_item.get("Amount", 1.0)),
+                                "price": float(ord_item.get("Price", ord_item.get("OrderPrice", 0.0)) or 0.0),
+                                "order_type": str(ord_item.get("OrderType", "Limit")),
+                                "status": "Working",
+                                "duration": dur_str,
+                                "time": placed_time,
+                                "value_date": "-",
+                                "account": str(ord_item.get("AccountId", "33888/221497")),
+                                "currency": "USD",
+                                "asset_type": atype,
+                                "underlying": clean_sym
+                            }
+                except Exception as e_open:
+                    logger.debug(f"Live Saxo open orders query non-critical: {e_open}")
+
+                # 2. Fetch full historical audit trail from Saxo cs/v1/audit/orderactivities
                 acc_key = self.get_primary_account_key()
-                # Query account details for client key
                 acc_resp = self._make_authenticated_request("GET", "port/v1/accounts/me")
                 client_key = "OVttnqQg1LFzkq8gsCbPSw=="
                 if acc_resp.status_code == 200:
@@ -803,15 +865,20 @@ class SaxoClient:
                             
                             status_raw = str(item.get("Status", ""))
                             sub_status = str(item.get("SubStatus", ""))
+                            activity_type = str(item.get("ActivityType", "")).lower()
                             
-                            if status_raw in ["FinalFill", "Fill", "Traded"] or sub_status in ["FinalFill", "Traded"]:
+                            # Determine authentic status
+                            if oid in active_working_orders:
+                                norm_status = "Working"
+                            elif status_raw in ["FinalFill", "Fill", "Traded"] or sub_status in ["FinalFill", "Traded"] or "fill" in activity_type or "trade" in activity_type:
                                 norm_status = "Traded"
-                            elif status_raw in ["Cancelled"] or sub_status in ["Cancelled"]:
+                            elif status_raw in ["Cancelled"] or sub_status in ["Cancelled"] or "cancel" in activity_type or "reject" in activity_type:
                                 norm_status = "Cancelled"
-                            elif status_raw in ["Expired"] or sub_status in ["Expired"]:
+                            elif status_raw in ["Expired"] or sub_status in ["Expired"] or "expire" in activity_type:
                                 norm_status = "Expired"
                             else:
-                                norm_status = "Working"
+                                # Historical order not currently in open orders is Expired
+                                norm_status = "Expired"
 
                             uic = int(item.get("Uic", 0))
                             atype = item.get("AssetType", "StockOption")
@@ -853,6 +920,15 @@ class SaxoClient:
                             }
         except Exception as e_audit:
             logger.warning(f"Live Saxo blotter query sync non-critical: {e_audit}")
+
+        # Inject real-time active working orders from port/v1/orders/me
+        for oid, working_order in active_working_orders.items():
+            orders_map[oid] = working_order
+
+        # Final audit: ensure any order not in active_working_orders does NOT retain a Working status
+        for oid, o in list(orders_map.items()):
+            if o.get("status") == "Working" and oid not in active_working_orders:
+                orders_map[oid]["status"] = "Expired"
 
         # Sort all orders newest first
         all_orders = sorted(list(orders_map.values()), key=lambda x: str(x.get("time", "")), reverse=True)
@@ -1020,7 +1096,7 @@ class SaxoClient:
         symbol: str,
         strike: float,
         option_type: str = "Put",
-        dte: int = 35
+        dte: int = 30
     ) -> Optional[int]:
         """
         Resolves the authentic Saxo Option Contract UIC from the option space / chain.
@@ -1064,7 +1140,7 @@ class SaxoClient:
             
             # Sort spaces by closeness to target dte
             target_pc = option_type.lower()
-            sorted_spaces = sorted(option_spaces, key=lambda sp: abs(sp.get("DisplayDaysToExpiry", 35) - dte))
+            sorted_spaces = sorted(option_spaces, key=lambda sp: abs(sp.get("DisplayDaysToExpiry", 30) - dte))
             
             best_uic = None
             min_diff = float("inf")

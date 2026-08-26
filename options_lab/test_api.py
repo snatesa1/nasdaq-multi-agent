@@ -1,7 +1,12 @@
 import sys
 import os
-# Add root path to PYTHONPATH so we can import properly
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+# Add root and parent path to PYTHONPATH so we can import properly
+_this_dir = os.path.dirname(os.path.abspath(__file__))
+_parent_dir = os.path.dirname(_this_dir)
+if _this_dir not in sys.path:
+    sys.path.insert(0, _this_dir)
+if _parent_dir not in sys.path:
+    sys.path.insert(0, _parent_dir)
 
 from fastapi.testclient import TestClient
 from api.main import app
@@ -164,6 +169,26 @@ def test_routes():
     assert len(data["Technology"]) == 10
     assert "symbol" in data["Technology"][0]
     assert "name" in data["Technology"][0]
+
+    # 13. Margin Status (clamped & compliant)
+    print("13. Testing /api/margin/status...")
+    resp = client.get("/api/margin/status")
+    assert resp.status_code == 200
+    margin_data = resp.json()
+    assert "margin_utilization_pct" in margin_data
+    assert margin_data["margin_utilization_pct"] >= 0.0
+    assert "max_margin_limit_pct" in margin_data
+
+    # 14. Weekly Intelligence Briefing with force_refresh
+    print("14. Testing /api/intelligence/weekly-briefing?force_refresh=true...")
+    resp = client.get("/api/intelligence/weekly-briefing?force_refresh=true")
+    assert resp.status_code == 200
+    briefing_data = resp.json()
+    assert "week_label" in briefing_data
+    assert "generated_at" in briefing_data
+    assert "margin_status" in briefing_data
+    assert briefing_data["margin_status"]["margin_utilization_pct"] >= 0.0
+    assert "potential_trades" in briefing_data
     
     print("[SUCCESS] All OptionsLab API Route Tests Passed successfully!")
 

@@ -88,25 +88,7 @@ export default function Dashboard() {
   const [saxoWatchlists, setSaxoWatchlists] = useState<any[]>([]);
   const [selectedWatchlistId, setSelectedWatchlistId] = useState<string>('WL_STOCKS_US');
   const [scannerLoading, setScannerLoading] = useState(false);
-
-  // Verified Saxo "Stocks US" Watchlist for Cash-Secured Puts (CSP) & CC scanner
-  const defaultCspList = [
-    { ticker: 'ABT', name: 'Abbott Laboratories', price: 112.33, strike: 103.00, delta: -0.24, dte: 35, premium: 2.70, yield: 2.62, annualized: 27.3, earnings: '2026-10-16' },
-    { ticker: 'T', name: 'AT&T Inc.', price: 24.97, strike: 23.00, delta: -0.23, dte: 35, premium: 0.60, yield: 2.61, annualized: 27.2, earnings: '2026-10-22' },
-    { ticker: 'AAPL', name: 'Apple Inc.', price: 307.28, strike: 282.50, delta: -0.25, dte: 35, premium: 7.37, yield: 2.61, annualized: 27.2, earnings: '2026-10-29' },
-    { ticker: 'BAC', name: 'Bank of America Corp.', price: 63.89, strike: 59.00, delta: -0.24, dte: 35, premium: 1.53, yield: 2.59, annualized: 27.0, earnings: '2026-10-15' },
-    { ticker: 'BRK.B', name: 'Berkshire Hathaway Inc. B', price: 498.23, strike: 460.00, delta: -0.22, dte: 35, premium: 11.95, yield: 2.60, annualized: 27.1, earnings: '2026-11-06' },
-    { ticker: 'CVX', name: 'Chevron Corp.', price: 205.03, strike: 189.00, delta: -0.24, dte: 35, premium: 4.92, yield: 2.60, annualized: 27.1, earnings: '2026-10-30' },
-    { ticker: 'CSCO', name: 'Cisco Systems Inc.', price: 112.23, strike: 103.00, delta: -0.24, dte: 35, premium: 2.69, yield: 2.61, annualized: 27.2, earnings: '2026-11-12' },
-    { ticker: 'C', name: 'Citigroup Inc.', price: 137.30, strike: 126.00, delta: -0.25, dte: 35, premium: 3.30, yield: 2.62, annualized: 27.3, earnings: '2026-10-13' },
-    { ticker: 'KO', name: 'Coca-Cola Co.', price: 88.12, strike: 81.00, delta: -0.22, dte: 35, premium: 2.11, yield: 2.60, annualized: 27.1, earnings: '2026-10-20' },
-    { ticker: 'COP', name: 'ConocoPhillips', price: 129.08, strike: 119.00, delta: -0.24, dte: 35, premium: 3.10, yield: 2.61, annualized: 27.2, earnings: '2026-10-29' },
-    { ticker: 'GE', name: 'GE Aerospace', price: 366.21, strike: 337.00, delta: -0.25, dte: 35, premium: 8.79, yield: 2.61, annualized: 27.2, earnings: '2026-10-21' },
-    { ticker: 'GS', name: 'Goldman Sachs Group Inc.', price: 1042.00, strike: 960.00, delta: -0.23, dte: 35, premium: 25.00, yield: 2.60, annualized: 27.1, earnings: '2026-10-14' },
-    { ticker: 'HPQ', name: 'HP Inc.', price: 29.62, strike: 27.20, delta: -0.24, dte: 35, premium: 0.71, yield: 2.61, annualized: 27.2, earnings: '2026-11-24' }
-  ];
-
-  const [dynamicCspWatchlist, setDynamicCspWatchlist] = useState(defaultCspList);
+  const [dynamicCspWatchlist, setDynamicCspWatchlist] = useState<any[]>([]);
 
   // Fetch all live data from Saxo Bank API
   // Fetch all live data from Saxo Bank API
@@ -137,7 +119,18 @@ export default function Dashboard() {
 
       setIsAuthenticated(true);
 
-      // 2. Fetch account, positions, blotter and watchlists in parallel
+      // 2. Fetch account, positions, blotter and watchlists
+      if (forceSpinner) {
+        try {
+          const refRes = await optionsApi.refreshBrokerData();
+          if (refRes?.account) setBrokerAccount(refRes.account);
+          if (refRes?.positions?.positions) setPositions(refRes.positions.positions);
+          if (refRes?.order_blotter?.orders) setOrderBlotterData(refRes.order_blotter);
+        } catch (e) {
+          console.warn('Force refresh fallback to parallel query:', e);
+        }
+      }
+
       const [accountRes, positionsRes, blotterRes, wlRes] = await Promise.allSettled([
         optionsApi.getBrokerAccount(),
         optionsApi.getBrokerPositions(),
@@ -201,8 +194,36 @@ export default function Dashboard() {
     }
   };
 
+  const handleStartOAuth = (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    if (!authUrl) return;
+    
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.openSaxoOauth) {
+      setActionLoading(true);
+      (window as any).electronAPI.openSaxoOauth(authUrl)
+        .then(() => fetchBrokerData(false))
+        .catch((err: any) => console.error('Electron OAuth error:', err))
+        .finally(() => setActionLoading(false));
+      return;
+    }
+
+    const width = 600;
+    const height = 750;
+    const left = window.screen.width / 2 - width / 2;
+    const top = window.screen.height / 2 - height / 2;
+    window.open(authUrl, 'SaxoMFA', `width=${width},height=${height},left=${left},top=${top}`);
+  };
+
   useEffect(() => {
     fetchBrokerData();
+
+    const handleAuthMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'SAXO_AUTH_SUCCESS') {
+        fetchBrokerData(false);
+      }
+    };
+    window.addEventListener('message', handleAuthMessage);
+    return () => window.removeEventListener('message', handleAuthMessage);
   }, []);
 
   // Handle Developer Token manual configuration
@@ -295,14 +316,14 @@ export default function Dashboard() {
 
           <div className="flex flex-col sm:flex-row justify-center gap-4 pt-4">
             {authUrl ? (
-              <a 
-                href={authUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-md transition-colors"
+              <button 
+                onClick={handleStartOAuth}
+                disabled={actionLoading}
+                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-md transition-colors cursor-pointer"
               >
+                {actionLoading && <RefreshCw className="h-4 w-4 animate-spin" />}
                 Sign In with Saxo OpenAPI <ExternalLink className="h-4 w-4" />
-              </a>
+              </button>
             ) : (
               <button 
                 onClick={() => fetchBrokerData(true)} 
@@ -1097,22 +1118,45 @@ export default function Dashboard() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 text-xs text-slate-600 font-medium">
-                  {dynamicCspWatchlist.map((c) => (
-                    <tr key={c.ticker} className="hover:bg-slate-50/50 transition-colors">
-                      <td className="py-2.5 px-3 font-bold text-slate-900">
-                        <div className="flex flex-col">
-                          <span>{c.ticker}</span>
-                          {c.name && <span className="text-[10px] font-normal text-slate-400 truncate max-w-[140px]">{c.name}</span>}
+                  {scannerLoading ? (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400">
+                        <div className="flex items-center justify-center gap-2">
+                          <RefreshCw className="h-4 w-4 animate-spin text-indigo-600" />
+                          <span>Scanning live Saxo option chains &amp; market quotes...</span>
                         </div>
                       </td>
-                      <td className="py-2.5 px-3 text-right font-mono">${c.price.toFixed(2)}</td>
-                      <td className="py-2.5 px-3 text-right font-mono font-bold text-indigo-600">${c.strike.toFixed(2)}</td>
-                      <td className="py-2.5 px-3 text-center font-mono text-rose-600 font-bold">{c.delta.toFixed(2)}</td>
-                      <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-800">${c.premium.toFixed(2)}</td>
-                      <td className="py-2.5 px-3 text-right font-mono text-emerald-600 font-bold">+{c.annualized}%</td>
-                      <td className="py-2.5 px-3 text-center font-mono text-slate-400 text-[10px]">{c.earnings}</td>
                     </tr>
-                  ))}
+                  ) : dynamicCspWatchlist.length > 0 ? (
+                    dynamicCspWatchlist.map((c) => (
+                      <tr key={c.ticker} className="hover:bg-slate-50/50 transition-colors">
+                        <td className="py-2.5 px-3 font-bold text-slate-900">
+                          <div className="flex flex-col">
+                            <span>{c.ticker}</span>
+                            {c.name && <span className="text-[10px] font-normal text-slate-400 truncate max-w-[140px]">{c.name}</span>}
+                          </div>
+                        </td>
+                        <td className="py-2.5 px-3 text-right font-mono">${(Number(c.price) || 0).toFixed(2)}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-indigo-600">${(Number(c.strike) || 0).toFixed(2)}</td>
+                        <td className="py-2.5 px-3 text-center font-mono text-rose-600 font-bold">{(Number(c.delta) || 0).toFixed(2)}</td>
+                        <td className="py-2.5 px-3 text-right font-mono font-bold text-slate-800">${(Number(c.premium) || 0).toFixed(2)}</td>
+                        <td className="py-2.5 px-3 text-right font-mono text-emerald-600 font-bold">+{c.annualized || 0}%</td>
+                        <td className="py-2.5 px-3 text-center font-mono text-slate-400 text-[10px]">{c.earnings || '-'}</td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={7} className="py-8 text-center text-slate-400">
+                        <p>No active scan results loaded yet.</p>
+                        <button 
+                          onClick={() => handleWatchlistChange(selectedWatchlistId || 'WL_STOCKS_US')}
+                          className="mt-2 px-3 py-1.5 bg-indigo-50 text-indigo-600 rounded-lg font-bold hover:bg-indigo-100 transition inline-flex items-center gap-1"
+                        >
+                          <RefreshCw className="h-3.5 w-3.5" /> Scan Live Watchlist
+                        </button>
+                      </td>
+                    </tr>
+                  )}
                 </tbody>
               </table>
             </div>

@@ -28,12 +28,13 @@ class MarginGuardian:
         """
         try:
             balances = self.saxo_client.get_account_balances()
-            total_equity = float(balances.get("total_equity", 100000.0))
+            total_equity = max(0.0, float(balances.get("total_equity", 100000.0)))
             cash_avail = float(balances.get("cash_available", 100000.0))
-            margin_used = float(balances.get("margin_used", 0.0))
-            margin_avail = float(balances.get("margin_available", total_equity * 0.85))
+            margin_used = max(0.0, float(balances.get("margin_used", 0.0)))
+            margin_avail = max(0.0, float(balances.get("margin_available", total_equity * 0.85)))
 
             margin_util_pct = (margin_used / total_equity * 100.0) if total_equity > 0 else 0.0
+            margin_util_pct = max(0.0, margin_util_pct)
             allowed_margin_dollars = total_equity * (self.max_margin_util_pct / 100.0)
             remaining_margin_headroom = max(0.0, allowed_margin_dollars - margin_used)
 

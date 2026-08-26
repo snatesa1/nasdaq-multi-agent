@@ -20,7 +20,11 @@ import {
   FileText,
   Activity,
   Award,
-  ChevronRight
+  ChevronRight,
+  Key,
+  Copy,
+  Check,
+  BookOpen
 } from 'lucide-react';
 import { optionsApi } from '@/lib/api';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -94,20 +98,88 @@ export default function WeeklyIntelligencePage() {
   const [briefing, setBriefing] = useState<BriefingData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
-  const [actionLog, setActionLog] = useState<{ id: string; msg: string; time: string; type: 'success' | 'danger' | 'info' }[]>([]);
+  const [copied, setCopied] = useState<boolean>(false);
+  const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
+  const [actionLog, setActionLog] = useState<{ id: string; msg: string; time: string; type: 'success' | 'danger' | 'info'; actionUrl?: string }[]>([]);
+
+  const handleCopyBriefing = () => {
+    if (!briefing?.ai_summary) return;
+    navigator.clipboard.writeText(briefing.ai_summary);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2500);
+  };
 
   useEffect(() => {
-    fetchBriefing();
+    fetchBriefing(false);
+    optionsApi.getBrokerAuthUrl().then(res => {
+      if (res?.auth_url) setAuthUrl(res.auth_url);
+    }).catch(() => null);
+
+    const handleAuthMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'SAXO_AUTH_SUCCESS') {
+        setActionLog(prev => [
+          { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authentication Successful! Broker session is now active.', time: new Date().toLocaleTimeString(), type: 'success' },
+          ...prev
+        ]);
+        fetchBriefing(true);
+      }
+    };
+    window.addEventListener('message', handleAuthMessage);
+    return () => window.removeEventListener('message', handleAuthMessage);
   }, []);
 
-  const fetchBriefing = async () => {
+  const handleStartOAuth = (e?: React.MouseEvent) => {
+    if (e) e.preventDefault();
+    if (!authUrl) return;
+    
+    if (typeof window !== 'undefined' && (window as any).electronAPI?.openSaxoOauth) {
+      (window as any).electronAPI.openSaxoOauth(authUrl)
+        .then(() => {
+          setActionLog(prev => [
+            { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authenticated via Desktop Interceptor!', time: new Date().toLocaleTimeString(), type: 'success' },
+            ...prev
+          ]);
+          fetchBriefing(true);
+        })
+        .catch((err: any) => console.error('Electron OAuth error:', err));
+      return;
+    }
+
+    const width = 600;
+    const height = 750;
+    const left = window.screen.width / 2 - width / 2;
+    const top = window.screen.height / 2 - height / 2;
+    window.open(authUrl, 'SaxoMFA', `width=${width},height=${height},left=${left},top=${top}`);
+  };
+
+  const fetchBriefing = async (forceRefresh: boolean = false) => {
     setLoading(true);
     setError(null);
     try {
-      const data = await optionsApi.getWeeklyBriefing();
+      if (forceRefresh) {
+        // Step 1: Force refresh broker cache so Saxo equity/cash/margin are 100% current
+        try {
+          await optionsApi.refreshBrokerData();
+        } catch (e) {
+          console.warn('Broker refresh during briefing update non-critical:', e);
+        }
+      }
+
+      // Step 2: Fetch weekly briefing (with force_refresh=true if requested)
+      const data = await optionsApi.getWeeklyBriefing(undefined, forceRefresh);
       setBriefing(data);
+      const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      setLastRefreshedAt(nowStr);
+
+      if (forceRefresh) {
+        setActionLog(prev => [
+          { id: `SYNC-${Date.now()}`, msg: `⚡ Fresh Macro Intelligence & Market Data Synchronized (${nowStr})`, time: nowStr, type: 'success' },
+          ...prev
+        ]);
+      }
     } catch (err: any) {
       console.error('Failed to load weekly briefing:', err);
       setError(err.message || 'Failed to generate weekly macro intelligence briefing.');
@@ -191,14 +263,25 @@ export default function WeeklyIntelligencePage() {
               </p>
             </div>
 
-            <div className="flex items-center gap-3">
+            <div className="flex flex-wrap items-center gap-3">
+              {authUrl && (
+                <button
+                  onClick={handleStartOAuth}
+                  className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-sm transition cursor-pointer"
+                  title="Authenticate Saxo Live via 1-Click MFA Popup"
+                >
+                  <Key className="h-4 w-4" />
+                  Authorize Saxo (MFA)
+                </button>
+              )}
               <button
-                onClick={fetchBriefing}
+                onClick={() => fetchBriefing(true)}
                 disabled={loading}
-                className="flex items-center gap-2 px-4 py-2.5 bg-[#4051B5] hover:bg-[#34449a] text-white rounded-xl text-xs font-semibold shadow-sm transition disabled:opacity-50"
+                className="flex items-center gap-2 px-4 py-2.5 bg-[#4051B5] hover:bg-[#34449a] text-white rounded-xl text-xs font-semibold shadow-sm transition disabled:opacity-50 cursor-pointer"
+                title="Force refresh weekly macro news, live prices, quant strikes, and AI briefing"
               >
                 <RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />
-                {loading ? 'Analyzing Events...' : 'Refresh Intelligence'}
+                {loading ? 'Refreshing Intelligence...' : 'Refresh Intelligence'}
               </button>
             </div>
           </div>
@@ -267,14 +350,60 @@ export default function WeeklyIntelligencePage() {
         </div>
 
         {/* Gemini Multi-Model AI Macro Digest Card */}
-        <div className="p-6 bg-gradient-to-br from-indigo-50/60 via-white to-emerald-50/40 border border-indigo-100 rounded-xl shadow-sm space-y-3">
-          <div className="flex items-center gap-2 text-[#4051B5] font-bold text-sm">
-            <Cpu className="h-5 w-5" />
-            <span>Gemini Multi-Model Macro Synthesis &amp; Edge Digest</span>
+        <div className="p-6 bg-gradient-to-br from-indigo-50/50 via-white to-slate-50/50 border border-indigo-100 rounded-xl shadow-sm space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-indigo-100 pb-3">
+            <div className="flex items-center gap-2">
+              <div className="p-2 rounded-lg bg-[#4051B5]/10 text-[#4051B5]">
+                <Cpu className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                  Gemini Macroeconomic &amp; Cross-Asset Research Desk Briefing
+                </h3>
+                <p className="text-[11px] text-slate-400">
+                  Daily &amp; weekly institutional synthesis over top 10 market news, calendar catalysts, and options yield posture.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="px-2.5 py-1 rounded-md bg-indigo-50 text-[#4051B5] text-[11px] font-mono font-bold border border-indigo-100">
+                Gemini Multi-Model Pool (Active)
+              </span>
+              {briefing?.generated_at && (
+                <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 text-[11px] font-mono font-medium border border-slate-200" title={`Generated at ${briefing.generated_at}`}>
+                  {new Date(briefing.generated_at).toLocaleDateString([], { month: 'short', day: 'numeric' })} • {new Date(briefing.generated_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              )}
+              {lastRefreshedAt && !briefing?.generated_at && (
+                <span className="px-2.5 py-1 rounded-md bg-slate-100 text-slate-600 text-[11px] font-mono font-medium border border-slate-200">
+                  Synced: {lastRefreshedAt}
+                </span>
+              )}
+              <button
+                onClick={handleCopyBriefing}
+                disabled={!briefing?.ai_summary}
+                className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 transition text-xs font-semibold flex items-center gap-1.5 shadow-2xs"
+                title="Copy formatted markdown report to clipboard"
+              >
+                {copied ? (
+                  <>
+                    <Check className="h-3.5 w-3.5 text-emerald-600" />
+                    <span className="text-emerald-700 font-bold">Copied</span>
+                  </>
+                ) : (
+                  <>
+                    <Copy className="h-3.5 w-3.5 text-slate-500" />
+                    <span>Copy Report</span>
+                  </>
+                )}
+              </button>
+            </div>
           </div>
-          <p className="text-slate-700 leading-relaxed text-xs sm:text-sm whitespace-pre-line">
-            {briefing?.ai_summary || 'Analyzing macroeconomic events, interest rate decisions, and legislative catalysts for the active portfolio watchlist...'}
-          </p>
+
+          <div className="pt-1">
+            <MacroBriefingView content={briefing?.ai_summary || ''} />
+          </div>
         </div>
 
         {/* Key Macro Events Section */}
@@ -449,8 +578,18 @@ export default function WeeklyIntelligencePage() {
             </h3>
             <div className="space-y-1.5 font-mono text-xs max-h-40 overflow-y-auto">
               {actionLog.map((log, idx) => (
-                <div key={idx} className="flex items-center justify-between text-slate-700 border-b border-slate-100 pb-1">
-                  <span>{log.msg}</span>
+                <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between text-slate-700 border-b border-slate-100 pb-1.5 gap-1">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={log.type === 'danger' ? 'text-rose-600 font-bold' : log.type === 'success' ? 'text-emerald-600 font-bold' : 'text-slate-700'}>{log.msg}</span>
+                    {log.type === 'danger' && authUrl && (
+                      <button
+                        onClick={handleStartOAuth}
+                        className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[11px] font-bold hover:bg-emerald-100 transition inline-flex items-center gap-1 cursor-pointer"
+                      >
+                        <Key className="h-3 w-3" /> Authenticate Saxo MFA
+                      </button>
+                    )}
+                  </div>
                   <span className="text-slate-400 text-[10px]">{log.time}</span>
                 </div>
               ))}
@@ -460,5 +599,123 @@ export default function WeeklyIntelligencePage() {
 
       </div>
     </ProtectedRoute>
+  );
+}
+
+// ────────────────────────────────────────────────────────────
+// INSTITUTIONAL RESEARCH DESK BRIEFING FORMATTER
+// ────────────────────────────────────────────────────────────
+
+function MacroBriefingView({ content }: { content: string }) {
+  if (!content) {
+    return (
+      <div className="flex items-center justify-center py-6 text-slate-400 text-xs gap-2">
+        <RefreshCw className="h-4 w-4 animate-spin text-[#4051B5]" />
+        <span>Synthesizing institutional research desk macro briefing...</span>
+      </div>
+    );
+  }
+
+  const lines = content.split('\n');
+
+  return (
+    <div className="space-y-3 text-xs sm:text-sm text-slate-700 leading-relaxed font-normal">
+      {lines.map((line, idx) => {
+        const trimmed = line.trim();
+        if (!trimmed) return <div key={idx} className="h-1" />;
+
+        // ## Level 2 Section Heading
+        if (trimmed.startsWith('## ')) {
+          const title = trimmed.replace(/^##\s+/, '');
+          return (
+            <div key={idx} className="pt-4 pb-1.5 border-b border-indigo-100 flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-[#4051B5] inline-block"></span>
+              <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
+                {title}
+              </h3>
+            </div>
+          );
+        }
+
+        // ### Level 3 Priority Headers or Story Headlines
+        if (trimmed.startsWith('### ')) {
+          const subTitle = trimmed.replace(/^###\s+/, '');
+          const isPriorityTier = subTitle.includes('High Priority') || subTitle.includes('Medium Priority') || subTitle.includes('Low Priority');
+          
+          if (isPriorityTier) {
+            const isHigh = subTitle.includes('High');
+            const isMed = subTitle.includes('Medium');
+            return (
+              <div key={idx} className="pt-3 pb-1">
+                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-extrabold uppercase tracking-wider border ${
+                  isHigh ? 'bg-rose-50 text-rose-700 border-rose-200' :
+                  isMed ? 'bg-amber-50 text-amber-700 border-amber-200' :
+                  'bg-slate-100 text-slate-700 border-slate-200'
+                }`}>
+                  <span className={`w-2 h-2 rounded-full ${isHigh ? 'bg-rose-500' : isMed ? 'bg-amber-500' : 'bg-slate-400'}`}></span>
+                  {subTitle}
+                </span>
+              </div>
+            );
+          }
+
+          return (
+            <h4 key={idx} className="text-xs sm:text-sm font-bold text-slate-800 pt-2 flex items-center gap-1.5">
+              <ChevronRight className="h-3.5 w-3.5 text-[#4051B5] shrink-0" />
+              <span>{subTitle}</span>
+            </h4>
+          );
+        }
+
+        // Bullet Point
+        if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+          const bulletText = trimmed.replace(/^[\*\-]\s+/, '');
+          return (
+            <div key={idx} className="flex items-start gap-2 pl-3 py-0.5">
+              <span className="text-[#4051B5] font-bold text-sm leading-none mt-1">•</span>
+              <div className="text-slate-700 flex-1 leading-relaxed">
+                <FormattedText text={bulletText} />
+              </div>
+            </div>
+          );
+        }
+
+        // Standard Paragraph
+        return (
+          <p key={idx} className="text-slate-700 leading-relaxed">
+            <FormattedText text={trimmed} />
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
+function FormattedText({ text }: { text: string }) {
+  if (!text) return null;
+  if (!text.includes('**')) return <>{text}</>;
+
+  const parts = text.split(/(\*\*.*?\*\*)/g);
+  return (
+    <>
+      {parts.map((part, i) => {
+        if (part.startsWith('**') && part.endsWith('**')) {
+          const inner = part.slice(2, -2);
+          
+          if (inner.includes('High') && inner.toLowerCase().includes('priority')) {
+            return <span key={i} className="px-2 py-0.5 rounded bg-rose-50 text-rose-700 font-bold border border-rose-200 text-xs inline-block mx-0.5">{inner}</span>;
+          }
+          if (inner.includes('Medium') && inner.toLowerCase().includes('priority')) {
+            return <span key={i} className="px-2 py-0.5 rounded bg-amber-50 text-amber-700 font-bold border border-amber-200 text-xs inline-block mx-0.5">{inner}</span>;
+          }
+          if (inner.includes('Low') && inner.toLowerCase().includes('priority')) {
+            return <span key={i} className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold border border-slate-200 text-xs inline-block mx-0.5">{inner}</span>;
+          }
+
+          return <strong key={i} className="font-bold text-slate-900">{inner}</strong>;
+        }
+        return <span key={i}>{part}</span>;
+      })}
+    </>
   );
 }

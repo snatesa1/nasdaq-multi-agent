@@ -58,26 +58,42 @@ class StrategyRequest(BaseModel):
 class VolSurfaceRequest(BaseModel):
     spot_price: float = Field(100.0, description="Underlying asset spot price")
     base_sigma: float = Field(0.25, description="ATM baseline volatility")
+    risk_free_rate: float = Field(0.05, description="Annualized risk-free interest rate")
+    strike_ratios: Optional[List[float]] = Field(None, description="Strike price ratios")
+    expirations_days: Optional[List[int]] = Field(None, description="Expirations in days")
+    skew_intensity: float = Field(0.15, description="Put-skew slope intensity")
+    smile_convexity: float = Field(0.10, description="OTM wings curvature")
 
 class PortfolioPositionRequest(BaseModel):
     symbol: str
-    quantity: float
-    entry_price: float
-    asset_type: str = "stock"
+    quantity: float = 1.0
+    type: Optional[str] = Field("stock", description="'stock', 'call', 'put'")
+    asset_type: Optional[str] = Field("stock", description="'stock' or 'option'")
+    spot_price: Optional[float] = None
+    entry_price: Optional[float] = 0.0
+    strike: Optional[float] = None
+    days_to_expiration: Optional[float] = None
+    volatility: Optional[float] = None
 
 class PortfolioGreeksRequest(BaseModel):
     positions: List[PortfolioPositionRequest]
-    r: float = 0.05
-    sigma: float = 0.25
+    risk_free_rate: float = Field(0.05, description="Risk-free rate")
+    r: Optional[float] = None
+    sigma: Optional[float] = 0.25
 
 class SocraticTutorRequest(BaseModel):
-    session_id: str
-    question: str
+    session_id: Optional[str] = None
+    message: Optional[str] = None
+    question: Optional[str] = None
+    chat_history: Optional[List[Dict[str, Any]]] = None
     context: Optional[str] = None
+    enable_grounding: bool = False
 
 class TutorHintRequest(BaseModel):
-    session_id: str
-    current_topic: str
+    session_id: Optional[str] = None
+    current_topic: Optional[str] = None
+    chat_history: Optional[List[Dict[str, Any]]] = None
+    context: Optional[str] = None
 
 class ExplainerRequest(BaseModel):
     metric_name: str

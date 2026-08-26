@@ -570,6 +570,20 @@ def get_staged_trade_by_id(trade_id: str) -> Optional[Dict[str, Any]]:
         logger.error(f"Failed to fetch staged trade {trade_id}: {e}")
     return None
 
+def find_proposed_trade(symbol: str, week_label: str) -> Optional[Dict[str, Any]]:
+    """Finds an existing proposed trade for a specific symbol and week."""
+    try:
+        with _get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM staged_trades WHERE symbol = ? AND week_label = ? AND status = 'PROPOSED' LIMIT 1",
+                (symbol.upper(), week_label)
+            ).fetchone()
+            if row:
+                return dict(row)
+    except Exception as e:
+        logger.error(f"Failed to find proposed trade for {symbol}: {e}")
+    return None
+
 def list_staged_trades(week_label: Optional[str] = None, status: Optional[str] = None) -> List[Dict[str, Any]]:
     """Lists staged trades filtered by optional week_label and status."""
     try:
