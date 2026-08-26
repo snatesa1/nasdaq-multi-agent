@@ -58,7 +58,7 @@ function startBackend() {
   const pythonCmd = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
   console.log(`[OptionsLab Desktop] Using Python interpreter: ${pythonCmd}`);
 
-  backendProcess = spawn(pythonCmd, ['-m', 'uvicorn', 'options_lab.api.main:app', '--host', '127.0.0.1', '--port', String(BACKEND_PORT)], {
+  backendProcess = spawn(pythonCmd, ['-m', 'uvicorn', 'options_lab.api.main:app', '--host', '127.0.0.1', '--port', String(BACKEND_PORT), '--reload', '--reload-dir', 'options_lab'], {
     cwd: rootDir,
     shell: true,
     stdio: 'pipe'
