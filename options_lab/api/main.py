@@ -88,7 +88,7 @@ saxo_broker_client = SaxoClient()
 broker_concurrency_lock = asyncio.Lock()
 
 ingest_engine = TradeHistoryIngestEngine()
-campaign_stitcher = CampaignStitcher(ingest_engine=ingest_engine)
+campaign_stitcher = CampaignStitcher(ingest_engine=ingest_engine, saxo_client=saxo_broker_client)
 behavioral_forensics = BehavioralForensicsEngine(campaign_stitcher=campaign_stitcher)
 safety_shield = BehavioralSafetyShield()
 margin_guardian = MarginGuardian(saxo_client=saxo_broker_client)

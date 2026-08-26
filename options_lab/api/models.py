@@ -140,7 +140,9 @@ class FundamentalIndexResponse(BaseModel):
     metrics: List[FundamentalIndexMetric]
 
 class EarningsScanRequest(BaseModel):
-    universe: str = Field("sp500", description="'sp500', 'nasdaq100', 'watchlist'")
+    universe: Optional[str] = Field("sp500", description="'sp500', 'nasdaq100', 'watchlist'")
+    low_threshold_pct: float = Field(0.20, description="Max Proximity to 52-Week Low")
+    min_open_interest: int = Field(5000, description="Min Option Open Interest")
 
 class BrokerAccountSummary(BaseModel):
     status: str = Field(..., description="Connection status string")

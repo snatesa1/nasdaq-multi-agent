@@ -30,7 +30,15 @@ async def run_earnings_scan(
     raw_calendar = get_upcoming_earnings_calendar()
     if not raw_calendar:
         logger.warning("No upcoming earnings calendar entries found.")
-        return {"candidates": []}
+        return {
+            "scan_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_earners_scraped": 0,
+            "universe_earners": 0,
+            "passed_52w_low": 0,
+            "passed_fundamentals": 0,
+            "passed_liquidity": 0,
+            "plays": []
+        }
         
     combined_universe = get_combined_universe()
     logger.info(f"Loaded combined universe with {len(combined_universe)} symbols.")
@@ -44,7 +52,15 @@ async def run_earnings_scan(
             
     logger.info(f"Filtered upcoming earners to universe: {len(universe_earners)} / {len(raw_calendar)} symbols.")
     if not universe_earners:
-        return {"candidates": []}
+        return {
+            "scan_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_earners_scraped": len(raw_calendar),
+            "universe_earners": 0,
+            "passed_52w_low": 0,
+            "passed_fundamentals": 0,
+            "passed_liquidity": 0,
+            "plays": []
+        }
 
     # --- Step 2: 52-Week Low Screen (Concurrent) ---
     value_candidates = []
@@ -75,7 +91,15 @@ async def run_earnings_scan(
             
     logger.info(f"Screened for 52W low: {len(value_candidates)} candidates.")
     if not value_candidates:
-        return {"candidates": []}
+        return {
+            "scan_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_earners_scraped": len(raw_calendar),
+            "universe_earners": len(universe_earners),
+            "passed_52w_low": 0,
+            "passed_fundamentals": 0,
+            "passed_liquidity": 0,
+            "plays": []
+        }
 
     # --- Step 3: Exhaustive Fundamental Filter (Concurrent) ---
     quality_candidates = []
@@ -103,7 +127,15 @@ async def run_earnings_scan(
             
     logger.info(f"Screened for fundamental quality: {len(quality_candidates)} candidates.")
     if not quality_candidates:
-        return {"candidates": []}
+        return {
+            "scan_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_earners_scraped": len(raw_calendar),
+            "universe_earners": len(universe_earners),
+            "passed_52w_low": len(value_candidates),
+            "passed_fundamentals": 0,
+            "passed_liquidity": 0,
+            "plays": []
+        }
 
     # --- Step 4: Options Open Interest (Liquidity) (Concurrent) ---
     liquid_candidates = []
@@ -130,7 +162,15 @@ async def run_earnings_scan(
             
     logger.info(f"Screened for option liquidity: {len(liquid_candidates)} candidates.")
     if not liquid_candidates:
-        return {"candidates": []}
+        return {
+            "scan_timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "total_earners_scraped": len(raw_calendar),
+            "universe_earners": len(universe_earners),
+            "passed_52w_low": len(value_candidates),
+            "passed_fundamentals": len(quality_candidates),
+            "passed_liquidity": 0,
+            "plays": []
+        }
 
     # --- Step 5: Volatility Agent Matrix Calculation ---
     vol_agent = EarningsVolAgent()

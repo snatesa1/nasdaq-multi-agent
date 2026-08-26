@@ -189,6 +189,43 @@ def test_routes():
     assert "margin_status" in briefing_data
     assert briefing_data["margin_status"]["margin_utilization_pct"] >= 0.0
     assert "potential_trades" in briefing_data
+
+    # 15. Earnings Scanner with Custom Proximity and Open Interest
+    print("15. Testing /api/earnings/scan with low_threshold_pct=0.20 & min_open_interest=5000...")
+    resp = client.post("/api/earnings/scan", json={
+        "low_threshold_pct": 0.20,
+        "min_open_interest": 5000,
+        "universe": "sp500"
+    })
+    assert resp.status_code == 200
+    scan_data = resp.json()
+    assert "plays" in scan_data
+    assert "total_earners_scraped" in scan_data
+
+    # 16. Dynamic Stitched Strategy Campaigns
+    print("16. Testing /api/history/campaigns (Dynamic Blotter & Positions Stitching)...")
+    resp = client.get("/api/history/campaigns")
+    assert resp.status_code == 200
+    camp_data = resp.json()
+    assert "campaigns" in camp_data
+    assert "count" in camp_data
+    assert camp_data["count"] > 0
+    # Verify campaigns contain dynamic fields
+    sample_c = camp_data["campaigns"][0]
+    assert "ticker" in sample_c
+    assert "strategy" in sample_c
+    assert "stock_pnl" in sample_c
+    assert "option_pnl" in sample_c
+    assert "options_legs" in sample_c
+
+    # 17. Behavioral Audit
+    print("17. Testing /api/history/behavioral-audit...")
+    resp = client.get("/api/history/behavioral-audit")
+    assert resp.status_code == 200
+    audit_res = resp.json()
+    assert "discipline_score" in audit_res
+    assert "diagnoses" in audit_res
+    assert len(audit_res["diagnoses"]) > 0
     
     print("[SUCCESS] All OptionsLab API Route Tests Passed successfully!")
 

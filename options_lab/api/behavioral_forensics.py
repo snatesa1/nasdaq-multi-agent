@@ -40,42 +40,45 @@ class BehavioralForensicsEngine:
 
         # Calculate specific behavioral metrics
         # 1. Option Volatility Drag (Losses on calls of winning stocks)
-        high_drag_losses = abs(sum(o.get("pnl", 0) for o in opt_losses if o.get("ticker") in ["PANW", "AMZN", "CVX", "RBLX"]))
+        high_drag_losses = abs(sum(c["option_pnl"] for c in campaigns if c["stock_pnl"] > 500 and c["option_pnl"] < 0))
+        drag_tickers = [c["ticker"] for c in campaigns if c["stock_pnl"] > 500 and c["option_pnl"] < 0]
         
         # 2. Bag-Holding Score (Unrealized stock losses held without options hedge)
-        baghold_amount = 2150.0  # PLUG -$2,150.00
+        baghold_amount = abs(sum(c["stock_pnl"] for c in campaigns if c["stock_pnl"] < -200 and c["option_pnl"] <= 0))
+        baghold_tickers = [c["ticker"] for c in campaigns if c["stock_pnl"] < -200 and c["option_pnl"] <= 0]
         
-        # 3. Systematic Discipline Score (Visa + IBM consistent income)
-        systematic_gains = sum(o.get("pnl", 0) for o in opt_wins if o.get("ticker") in ["V", "IBM", "COIN"])
+        # 3. Systematic Discipline Score (Consistent option income harvesting)
+        systematic_gains = sum(c["option_pnl"] for c in campaigns if c["option_pnl"] > 0)
+        systematic_tickers = [c["ticker"] for c in campaigns if c["option_pnl"] > 0]
 
         # Composite Discipline Score (0 to 100)
-        # Base: 70. Bonus for systematic wins (+15), Penalty for call drag (-12), Penalty for bagholds (-8)
-        discipline_score = max(10, min(95, round(70 + (systematic_gains / 300.0) - (high_drag_losses / 500.0) - (baghold_amount / 300.0))))
+        # Base: 75. Bonus for systematic win rate (+15), Penalty for call drag (-12), Penalty for bagholds (-8)
+        discipline_score = max(20, min(95, round(70 + (opt_win_rate * 0.15) + (systematic_gains / 300.0) - (high_drag_losses / 400.0) - (baghold_amount / 300.0))))
 
         # Behavioral Diagnoses
         diagnoses = [
             {
                 "id": "BIAS_CALL_DRAG",
                 "name": "Aggressive Short Call Drag on Momentum Stocks",
-                "severity": "CRITICAL",
-                "impact": "-$6,500.92 Lost Alpha",
-                "description": "Selling tight OTM/ITM calls on explosive growth stocks (PANW & AMZN) severely capped upside, turning +33% stock surges into -$5.1k options drag.",
+                "severity": "CRITICAL" if high_drag_losses > 1000 else "MEDIUM",
+                "impact": f"-${high_drag_losses:,.2f} Lost Alpha",
+                "description": f"Selling tight OTM/ITM calls on explosive growth stocks ({', '.join(drag_tickers) if drag_tickers else 'High-Beta'}) caps upside during bullish surges.",
                 "remedy": "Enforce Delta ≤ 0.15 on high-beta growth stocks or switch to ratio collars."
             },
             {
                 "id": "BIAS_BAGHOLDING",
                 "name": "Unhedged Bag-Holding on Distressed Equities",
-                "severity": "HIGH",
-                "impact": "-$2,150.00 (-82.7% on PLUG)",
-                "description": "Holding declining non-earning stocks indefinitely without executing mechanical stop-losses or selling low-delta covered calls.",
+                "severity": "HIGH" if baghold_amount > 1000 else "LOW",
+                "impact": f"-${baghold_amount:,.2f} Unrealized Loss",
+                "description": f"Holding declining non-earning stocks ({', '.join(baghold_tickers) if baghold_tickers else 'Equities'}) indefinitely without executing mechanical stop-losses or selling low-delta covered calls.",
                 "remedy": "Automate 15% stop-loss threshold or mandate 5-Pillar Conviction screening prior to equity entry."
             },
             {
                 "id": "STRENGTH_SYSTEMATIC_INCOME",
                 "name": "Flawless Systematic Covered Calls & Cash-Secured Puts",
                 "severity": "STRENGTH",
-                "impact": "+$1,894.68 (+100% Win Rate on Visa & IBM)",
-                "description": "Disciplined OTM strike selection and high-probability decay on blue-chip staples (Visa 8-for-8 and IBM 195P at +95.2% decay).",
+                "impact": f"+${systematic_gains:,.2f} Realized Theta Yield",
+                "description": f"Disciplined OTM strike selection and high-probability decay on blue-chip staples ({', '.join(systematic_tickers[:4]) if systematic_tickers else 'Watchlist'}).",
                 "remedy": "Replicate this exact systematic Wheel blueprint into the automated Saxo engine."
             }
         ]
