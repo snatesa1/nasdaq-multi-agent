@@ -1563,8 +1563,8 @@ class SaxoClient:
                 import urllib.request
                 import xml.etree.ElementTree as ET
 
-                # Target portfolio symbols
-                tickers = "COIN,AAPL,NVDA,INTC,PLTR,IBM,BAC,CVX,CSCO,KO,GE,GS"
+                # Target portfolio symbols & major market drivers
+                tickers = "COIN,NVDA,AAPL,INTC,PLTR,IBM,BAC,CVX,CSCO,KO,GE,GS,TSLA,AMD,MSFT,AMZN,GOOGL,META,MRNA,TGT"
                 rss_url = f"https://news.google.com/rss/search?q=when:24h+({tickers.replace(',', '+OR+')})&hl=en-US&gl=US&ceid=US:en"
                 req = urllib.request.Request(rss_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
                 

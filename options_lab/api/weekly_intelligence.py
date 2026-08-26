@@ -18,6 +18,41 @@ from .config import settings
 
 logger = logging.getLogger("weekly-intelligence")
 
+COMPANY_TICKER_MAP = {
+    "NVIDIA": "NVDA", "NVDA": "NVDA",
+    "APPLE": "AAPL", "AAPL": "AAPL",
+    "MICROSOFT": "MSFT", "MSFT": "MSFT",
+    "TESLA": "TSLA", "TSLA": "TSLA",
+    "COINBASE": "COIN", "COIN": "COIN",
+    "INTEL": "INTC", "INTC": "INTC",
+    "PALANTIR": "PLTR", "PLTR": "PLTR",
+    "IBM": "IBM",
+    "AMAZON": "AMZN", "AMZN": "AMZN",
+    "ALPHABET": "GOOGL", "GOOGLE": "GOOGL", "GOOGL": "GOOGL", "GOOG": "GOOGL",
+    "META": "META", "FACEBOOK": "META",
+    "AMD": "AMD",
+    "BANK OF AMERICA": "BAC", "BAC": "BAC",
+    "GOLDMAN SACHS": "GS", "GOLDMAN": "GS", "GS": "GS",
+    "CHEVRON": "CVX", "CVX": "CVX",
+    "CISCO": "CSCO", "CSCO": "CSCO",
+    "COCA-COLA": "KO", "COCA COLA": "KO", "KO": "KO",
+    "NEWMONT": "NEM", "NEM": "NEM",
+    "MODERNA": "MRNA", "MRNA": "MRNA",
+    "TARGET": "TGT", "TGT": "TGT",
+    "CONOCOPHILLIPS": "COP", "COP": "COP",
+    "GENERAL ELECTRIC": "GE", "GE": "GE",
+    "PLUG POWER": "PLUG", "PLUG": "PLUG",
+    "JPMORGAN": "JPM", "JPM": "JPM", "JP MORGAN": "JPM",
+    "QUALCOMM": "QCOM", "QCOM": "QCOM",
+    "BROADCOM": "AVGO", "AVGO": "AVGO",
+    "MICRON": "MU", "MU": "MU",
+    "ABBOTT": "ABT", "ABT": "ABT",
+    "AT&T": "T",
+    "CITIGROUP": "C", "CITI": "C",
+    "HP": "HPQ", "HPQ": "HPQ",
+    "BERKSHIRE": "BRK.B", "BRK": "BRK.B"
+}
+
 
 class WeeklyIntelligenceEngine:
     """
@@ -135,8 +170,8 @@ class WeeklyIntelligenceEngine:
                 edge_source = f"{symbol} Support Floor & Volatility Harvest"
 
         mkt = fetch_market_data(symbol)
-        if not mkt or mkt.get("current_price", 0.0) <= 0.0:
-            logger.warning(f"Could not fetch live market data for {symbol}")
+        if not mkt or mkt.get("current_price", 0.0) <= 0.0 or mkt.get("is_simulated"):
+            logger.warning(f"Could not fetch authentic live market data for {symbol}")
             return None
 
         spot_price = float(mkt["current_price"])
@@ -267,6 +302,245 @@ class WeeklyIntelligenceEngine:
         """Collects raw news items for the scoped ticker universe from Saxo and RSS aggregator."""
         return self.saxo_client.get_portfolio_news(top=30)
 
+    def _extract_tickers_from_text(self, text: str) -> List[str]:
+        """Extracts ticker symbols and company name mentions from raw headline or summary text."""
+        import re
+        found = set()
+        text_upper = text.upper()
+
+        # Check explicit company name & symbol matches
+        for comp_name, tick in COMPANY_TICKER_MAP.items():
+            pattern = rf"\b{re.escape(comp_name)}\b"
+            if re.search(pattern, text_upper):
+                found.add(tick)
+
+        # Check all tickers in current scoped universe
+        for sym in self.scoped_universe:
+            pattern = rf"\b{re.escape(sym)}\b"
+            if re.search(pattern, text_upper):
+                found.add(sym)
+
+        return sorted(list(found))
+
+    def _extract_dynamic_macro_events(self, news_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Dynamically extracts and groups live market news into 4-6 high-impact Macro Catalyst Cards.
+        """
+        events = []
+        seen_titles = set()
+
+        for item in news_items:
+            headline = item.get("Headline") or item.get("headline") or item.get("title", "")
+            if not headline:
+                continue
+            clean_title = headline.strip()
+            if clean_title in seen_titles:
+                continue
+
+            summary = item.get("Summary") or item.get("summary") or clean_title
+            source = item.get("Source") or item.get("source", "Saxo Wire")
+            raw_cat = item.get("Category") or item.get("category", "")
+            
+            # Extract mentioned tickers
+            affected = self._extract_tickers_from_text(f"{clean_title} {summary}")
+
+            # Categorize dynamically
+            h_lower = f"{clean_title} {summary}".lower()
+            if any(k in h_lower for k in ["fed", "rate", "treasury", "inflation", "cpi", "powell", "fomc", "yield"]):
+                cat = "Macro / Fed Policy"
+                bias = "NEUTRAL_ACCUMULATION"
+                impact = 5
+                if not affected:
+                    affected = [s for s in ["BAC", "GS", "IBM"] if s in self.scoped_universe] or ["BAC"]
+            elif any(k in h_lower for k in ["ai", "compute", "nvidia", "gpu", "palantir", "cloud", "semiconductor", "chip", "intel", "amd"]):
+                cat = "Tech / AI & Semiconductors"
+                bias = "BULLISH_CSP"
+                impact = 5 if ("nvidia" in h_lower or "ai" in h_lower) else 4
+                if not affected:
+                    affected = [s for s in ["NVDA", "INTC", "AAPL", "PLTR"] if s in self.scoped_universe] or ["NVDA"]
+            elif any(k in h_lower for k in ["crypto", "coinbase", "bitcoin", "stablecoin", "sec", "clarity", "etf"]):
+                cat = "Digital Assets / Regulatory"
+                bias = "BULLISH_IV_SPIKE"
+                impact = 5
+                if not affected:
+                    affected = ["COIN"]
+            elif any(k in h_lower for k in ["earn", "revenue", "guidance", "profit", "q3", "q4", "quarter", "report"]):
+                cat = "Earnings / Guidance"
+                bias = "EARNINGS_VOL_HARVEST"
+                impact = 5
+            elif any(k in h_lower for k in ["oil", "crude", "energy", "chevron", "petroleum", "opec"]):
+                cat = "Commodities / Energy"
+                bias = "NEUTRAL_YIELD"
+                impact = 3
+                if not affected:
+                    affected = [s for s in ["CVX", "COP"] if s in self.scoped_universe] or ["CVX"]
+            else:
+                cat = raw_cat or "Market Catalysts / Equities"
+                bias = "NEUTRAL_YIELD"
+                impact = 3
+
+            seen_titles.add(clean_title)
+            events.append({
+                "event_id": f"EVT-{len(events)+1:02d}",
+                "title": clean_title,
+                "category": cat,
+                "impact_score": impact,
+                "affected_tickers": affected[:4],
+                "summary": summary if len(summary) > 20 else f"Real-time market catalyst reported via {source} influencing sector volatility and options skew.",
+                "bias": bias,
+                "date": datetime.now().strftime("%Y-%m-%d")
+            })
+
+            if len(events) >= 6:
+                break
+
+        # Fallback if no events extracted
+        if not events:
+            today_str = datetime.now().strftime("%Y-%m-%d")
+            events = [
+                {
+                    "event_id": "EVT-01",
+                    "title": "Cross-Asset Market Structure & Options Skew Harvesting",
+                    "category": "Tech / AI & Derivatives",
+                    "impact_score": 5,
+                    "affected_tickers": ["NVDA", "AAPL", "COIN"],
+                    "summary": "Elevated implied volatility percentiles across technology and digital asset leaders offer favorable risk-adjusted theta decay for Cash-Secured Puts.",
+                    "bias": "BULLISH_CSP",
+                    "date": today_str
+                },
+                {
+                    "event_id": "EVT-02",
+                    "title": "Federal Reserve Monetary Policy & Treasury Yield Balance",
+                    "category": "Macro / Fed Policy",
+                    "impact_score": 4,
+                    "affected_tickers": ["BAC", "GS", "IBM"],
+                    "summary": "Benchmark interest rate stability and treasury duration consolidation support defensive equity positioning.",
+                    "bias": "NEUTRAL_ACCUMULATION",
+                    "date": today_str
+                },
+                {
+                    "event_id": "EVT-03",
+                    "title": "Semiconductor & Datacenter Infrastructure Demand",
+                    "category": "Tech / Semiconductors",
+                    "impact_score": 4,
+                    "affected_tickers": ["INTC", "PLTR", "AMD"],
+                    "summary": "Datacenter compute demand and domestic foundry separation initiatives support structural valuation floors for option writing.",
+                    "bias": "BULLISH_REBOUND_CSP",
+                    "date": today_str
+                },
+                {
+                    "event_id": "EVT-04",
+                    "title": "Energy Sector Cash Flow & Shareholder Capital Returns",
+                    "category": "Commodities / Energy",
+                    "impact_score": 3,
+                    "affected_tickers": ["CVX", "COP"],
+                    "summary": "Steady dividend yields and disciplined energy capital allocation create resilient anchor for conservative yield harvesting.",
+                    "bias": "NEUTRAL_YIELD",
+                    "date": today_str
+                }
+            ]
+
+        return events
+
+    def _generate_dynamic_trade_candidates(self, news_items: List[Dict[str, Any]], week_label: str) -> List[Dict[str, Any]]:
+        """
+        Dynamically extracts candidate tickers from live market news, portfolio holdings,
+        and watchlists. Calculates live spot prices, strikes, and Black-Scholes pricing
+        for 5 to 7 high-conviction trades across diverse sectors.
+        """
+        news_extracted_tickers = []
+        news_ticker_contexts = {}
+
+        for item in news_items:
+            h = item.get("Headline") or item.get("headline") or item.get("title", "")
+            s = item.get("Summary") or item.get("summary") or h
+            ticks = self._extract_tickers_from_text(f"{h} {s}")
+            for t in ticks:
+                if t not in news_extracted_tickers:
+                    news_extracted_tickers.append(t)
+                    news_ticker_contexts[t] = h
+
+        # Build prioritized candidate ticker pool:
+        # 1. News-driven tickers (e.g. NVDA, COIN, PLTR, INTC, AAPL, etc.)
+        # 2. Active portfolio holdings (COIN, INTC, IBM, NEM, PLUG)
+        # 3. Saxo Watchlist stocks (AAPL, BAC, CVX, CSCO, KO, GE, GS, HPQ, ABT, T, C, COP)
+        candidate_pool = []
+        for t in news_extracted_tickers:
+            if t not in candidate_pool:
+                candidate_pool.append(t)
+        for t in self.active_position_tickers:
+            if t not in candidate_pool:
+                candidate_pool.append(t)
+        for t in self.watchlist_tickers:
+            if t not in candidate_pool:
+                candidate_pool.append(t)
+
+        # Ensure high-priority liquid tickers are included in pool
+        priority_anchors = ["NVDA", "COIN", "INTC", "IBM", "PLTR", "AAPL", "BAC", "CVX", "MSFT", "AMD"]
+        for t in priority_anchors:
+            if t not in candidate_pool:
+                candidate_pool.append(t)
+
+        potential_trades = []
+        target_count = 6  # Present 6 distinct high-conviction opportunities
+
+        for symbol in candidate_pool:
+            if len(potential_trades) >= target_count:
+                break
+
+            # Formulate dynamic thesis and edge source
+            news_headline = news_ticker_contexts.get(symbol)
+            if news_headline:
+                clean_h = news_headline[:75]
+                thesis = f"Catalyst driven by live market news: '{clean_h}...'. Selling conservative ~10% OTM Cash-Secured Put captures elevated options implied volatility above technical support."
+                edge_source = f"Live Market Catalyst ({clean_h[:35]}...)"
+            elif symbol in ["NVDA", "AMD"]:
+                thesis = f"{symbol} AI compute demand and datacenter revenue expansion create strong structural valuation support. Selling conservative ~10% OTM Cash-Secured Put monetizes elevated implied volatility."
+                edge_source = f"{symbol} AI Datacenter Demand & Elevated Skew"
+            elif symbol in ["COIN"]:
+                thesis = "Digital asset legislative clarity catalysts and crypto options volume surge elevate IV percentile. Selling far OTM Cash-Secured Put captures inflated premium above key structural support."
+                edge_source = "Digital Asset Legislative Momentum & High IV Percentile"
+            elif symbol in ["INTC"]:
+                thesis = "Semiconductor manufacturing reorganization and valuation consolidation provide durable floor. Selling conservative OTM Put offers attractive cash yield with margin safety."
+                edge_source = "Foundry Separation Floor & Realized Volatility Harvesting"
+            elif symbol in ["IBM"]:
+                thesis = "Enterprise hybrid cloud bookings and consulting cash flows provide resilient downside support. Selling conservative OTM Put yields steady annualized cash flow."
+                edge_source = "Enterprise AI Consulting Cash Flow & Conservative CSP Yield"
+            elif symbol in ["PLTR"]:
+                thesis = "Defense and enterprise AI contract momentum support structural growth trend. Selling conservative OTM Cash-Secured Put monetizes elevated options demand."
+                edge_source = "Enterprise AI & Defense Analytics Growth Trend"
+            elif symbol in ["BAC", "GS", "JPM", "C"]:
+                thesis = f"{symbol} solid net interest income and capital return programs establish strong book value support. Selling conservative OTM Put generates steady premium."
+                edge_source = f"{symbol} Financial Fortress & High Dividend Yield Support"
+            elif symbol in ["CVX", "COP"]:
+                thesis = f"{symbol} resilient free cash flows and disciplined capital allocation provide reliable floor. Selling conservative OTM Put monetizes steady energy yield."
+                edge_source = f"{symbol} Energy Cash Flow & Structural Commodity Support"
+            elif symbol in ["AAPL", "MSFT", "GOOGL"]:
+                thesis = f"{symbol} robust corporate balance sheet and ecosystem moat provide defensive ballast. Selling conservative OTM Cash-Secured Put captures theta decay."
+                edge_source = f"{symbol} Mega-Cap Ecosystem Moat & Conservative Yield"
+            else:
+                thesis = f"{symbol} solid balance sheet and multi-week price consolidation support valuation floor. Selling conservative ~10% OTM Cash-Secured Put generates annualized yield."
+                edge_source = f"{symbol} Systematic 30-DTE Options Yield"
+
+            cand = self._build_dynamic_trade_candidate(
+                symbol=symbol,
+                strategy="CSP",
+                thesis=thesis,
+                edge_source=edge_source,
+                dte=30,
+                risk_rating=4
+            )
+            if cand:
+                potential_trades.append(cand)
+
+        # Stage all proposed trades into DB for user approval
+        staged_trades = []
+        for trade in potential_trades:
+            staged = self.trade_staging.stage_recommendation(trade, week_label=week_label)
+            staged_trades.append(staged)
+
+        return staged_trades
+
     def analyze_weekly_macro_and_edges(self, week_label: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:
         """
         Runs complete Monday-Friday weekly intelligence cycle:
@@ -289,106 +563,11 @@ class WeeklyIntelligenceEngine:
         news_items = self.collect_weekly_news_events()
         margin_status = self.margin_guardian.get_current_margin_status()
 
-        # Macro Events Dynamic Baseline
-        macro_events = [
-            {
-                "event_id": "EVT-01",
-                "title": "US Financial Clarity Act & Regulatory Advancement",
-                "category": "Legislative / Regulatory",
-                "impact_score": 5,
-                "affected_tickers": ["COIN"],
-                "summary": "US House Committee advanced bipartisan Clarity for Payment Stablecoins and Digital Asset Market Structure Acts. Elevated implied volatility on crypto derivatives.",
-                "bias": "BULLISH_IV_SPIKE",
-                "date": datetime.now().strftime("%Y-%m-%d")
-            },
-            {
-                "event_id": "EVT-02",
-                "title": "Federal Reserve FOMC Minutes & Inflation Baseline",
-                "category": "Macro / Fed",
-                "impact_score": 4,
-                "affected_tickers": ["BAC", "GS", "C", "IBM"],
-                "summary": "FOMC minutes confirmed dovish pause holding benchmark rates at 4.25%-4.50%. Financials and blue-chip enterprise technology consolidating.",
-                "bias": "NEUTRAL_ACCUMULATION",
-                "date": datetime.now().strftime("%Y-%m-%d")
-            },
-            {
-                "event_id": "EVT-03",
-                "title": "Semiconductor & Technology Sector Capital Reallocation",
-                "category": "Tech / Sector Rotation",
-                "impact_score": 4,
-                "affected_tickers": ["INTC", "AAPL"],
-                "summary": "Semiconductor restructuring and foundry separation initiatives support structural valuation floors for Cash-Secured Put premium selling.",
-                "bias": "BULLISH_REBOUND_CSP",
-                "date": datetime.now().strftime("%Y-%m-%d")
-            },
-            {
-                "event_id": "EVT-04",
-                "title": "Energy Sector Production & Crude Oil Inventory Build",
-                "category": "Commodities / Energy",
-                "impact_score": 3,
-                "affected_tickers": ["CVX", "COP"],
-                "summary": "Energy leaders reporting steady cash flow and dividend yields, ideal for systematic Covered Call and CSP harvesting.",
-                "bias": "NEUTRAL_YIELD",
-                "date": datetime.now().strftime("%Y-%m-%d")
-            }
-        ]
+        # 1. Dynamic Macro Catalyst Events from live news
+        macro_events = self._extract_dynamic_macro_events(news_items)
 
-        # ── 100% Dynamic Trade Candidates (Live Spot Prices & Live Quant Strikes) ──
-        potential_trades = []
-
-        # Candidate 1: Coinbase (COIN) — Dynamic CSP
-        coin_cand = self._build_dynamic_trade_candidate(
-            symbol="COIN",
-            strategy="CSP",
-            thesis="Bipartisan Clarity Act advancement elevated IV percentile. Selling far OTM Cash-Secured Puts captures inflated premium above key structural support.",
-            edge_source="US Clarity Act Legislative Momentum & IV Expansion",
-            dte=30,
-            risk_rating=4
-        )
-        if coin_cand:
-            potential_trades.append(coin_cand)
-
-        # Candidate 2: Intel (INTC) — Dynamic CSP with LIVE Spot Price
-        intc_cand = self._build_dynamic_trade_candidate(
-            symbol="INTC",
-            strategy="CSP",
-            thesis="INTC trading near multi-month support post-foundry updates. Selling conservative OTM Put offers attractive cash yield with margin safety.",
-            edge_source="Foundry Restructuring Support & Realized Volatility Harvesting",
-            dte=30,
-            risk_rating=4
-        )
-        if intc_cand:
-            potential_trades.append(intc_cand)
-
-        # Candidate 3: IBM — Dynamic Cash-Secured Put with LIVE Spot Price
-        ibm_cand = self._build_dynamic_trade_candidate(
-            symbol="IBM",
-            strategy="CSP",
-            thesis="IBM trading steadily with strong enterprise AI consulting revenue and robust cash flow. Selling conservative OTM Cash-Secured Put generates cash yield while securing an attractive entry valuation.",
-            edge_source="Enterprise AI Consulting Cash Flow & Conservative CSP Yield",
-            dte=30,
-            risk_rating=4
-        )
-        if ibm_cand:
-            potential_trades.append(ibm_cand)
-
-        # Candidate 4 (Conditional Covered Call): PLUG — Only generated if user holds >= 100 shares of PLUG
-        plug_cand = self._build_dynamic_trade_candidate(
-            symbol="PLUG",
-            strategy="CC",
-            thesis="Holding PLUG shares in portfolio. Selling conservative OTM Covered Call generates cash yield while maintaining upside participation.",
-            edge_source="Clean Energy Momentum & Systematic Covered Call Yield",
-            dte=30,
-            risk_rating=4
-        )
-        if plug_cand and plug_cand.get("strategy") == "CC":
-            potential_trades.append(plug_cand)
-
-        # Automatically stage these proposed trades into DB for user approval
-        staged_trades = []
-        for trade in potential_trades:
-            staged = self.trade_staging.stage_recommendation(trade, week_label=week_label)
-            staged_trades.append(staged)
+        # 2. Dynamic Trade Candidates across news, holdings, and watchlists
+        staged_trades = self._generate_dynamic_trade_candidates(news_items, week_label=week_label)
 
         # ────────────────────────────────────────────────────────────
         # TOP 10 NEWS FEED AGGREGATION & INSTITUTIONAL RESEARCH PROMPT
