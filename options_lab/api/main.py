@@ -1,8 +1,9 @@
-from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks, Body, File, UploadFile
+from fastapi import FastAPI, HTTPException, Request, Depends, BackgroundTasks, Body, File, UploadFile, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, HTMLResponse
 import logging
 import os
+import json
 from typing import Dict, Any, Optional
 from datetime import datetime
 
@@ -31,7 +32,9 @@ from .models import (
     BrokerOrdersResponse,
     BrokerPosition,
     BrokerOrder,
-    SafetyCheckRequest
+    SafetyCheckRequest,
+    WheelBacktestRequest,
+    WheelBacktestResponse
 )
 import asyncio
 from .saxo_client import SaxoClient
@@ -81,6 +84,10 @@ from .fundamental_index import FundamentalIndexEngine
 from .margin_guardian import MarginGuardian
 from .trade_staging import TradeStagingEngine
 from .weekly_intelligence import WeeklyIntelligenceEngine
+from .quantstats_engine import QuantStatsEngine
+from .universe import InstitutionalUniverseEngine
+from .options_adk_workflow import OptionsADKWorkflowEngine
+from engine.wheel_backtester import WheelBacktester
 
 tutor_service = SocraticTutor()
 fundamental_engine = FundamentalIndexEngine()
@@ -94,6 +101,11 @@ safety_shield = BehavioralSafetyShield()
 margin_guardian = MarginGuardian(saxo_client=saxo_broker_client)
 trade_staging = TradeStagingEngine(saxo_client=saxo_broker_client, margin_guardian=margin_guardian, safety_shield=safety_shield)
 weekly_intelligence = WeeklyIntelligenceEngine(saxo_client=saxo_broker_client, margin_guardian=margin_guardian, trade_staging=trade_staging)
+universe_engine = weekly_intelligence.universe_engine
+adk_workflow_engine = OptionsADKWorkflowEngine(saxo_client=saxo_broker_client)
+quantstats_engine = QuantStatsEngine()
+wheel_backtester = WheelBacktester()
+
 
 
 
@@ -112,10 +124,17 @@ async def start_token_heartbeat():
                 logger.warning(f"⚠️ [Token Heartbeat] Auto-refresh non-critical: {e}")
     asyncio.create_task(_heartbeat())
 
-# ── Health Check ───────────────────────────────────────────────────────────
+# ── Health Check & Frontend-Backend Handshake ─────────────────────────────
 @app.get("/health")
+@app.get("/api/health")
 def health():
-    return {"status": "healthy", "service": "options-lab", "version": "2.0.0"}
+    return {
+        "status": "healthy",
+        "service": "options-lab",
+        "version": "2.8.0",
+        "handshake": "OK",
+        "timestamp": datetime.now().isoformat()
+    }
 
 # ── Fundamental Indexation Scan (Arnott 80/20 Replication) ───────────
 @app.post("/fundamental-index/scan")
@@ -1183,11 +1202,20 @@ def get_behavioral_audit(report_id: Optional[str] = None, user=Depends(verify_fi
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/history/news")
-def get_portfolio_news_feed(top: int = 25, user=Depends(verify_firebase_token)):
-    """Fetches real-time portfolio news wire and financial headline feed from Saxo."""
+def get_portfolio_news_feed(
+    top: int = 25,
+    force_refresh: bool = False,
+    _t: Optional[str] = None,
+    user=Depends(verify_firebase_token)
+):
+    """Fetches real-time portfolio news wire and financial headline feed with zero browser caching."""
     try:
-        news = saxo_broker_client.get_portfolio_news(top=top)
-        return {"news": news, "count": len(news)}
+        news = saxo_broker_client.get_portfolio_news(top=top, force_refresh=force_refresh)
+        return Response(
+            content=json.dumps({"news": news, "count": len(news)}),
+            media_type="application/json",
+            headers={"Cache-Control": "no-cache, no-store, must-revalidate, max-age=0"}
+        )
     except Exception as e:
         logger.error(f"Failed to fetch portfolio news: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -1227,17 +1255,30 @@ async def get_weekly_intelligence_briefing(
     """
     Analyzes Monday-Friday macroeconomic events, news feed, watchlist, and trade history.
     Identifies edge setups (e.g. COIN Clarity Act spike) and stages trade recommendations.
-    Uses asyncio.to_thread for non-blocking asynchronous execution.
+    Uses asyncio.wait_for with a 40-second timeout guard to prevent connection hanging.
     """
     try:
-        res = await asyncio.to_thread(
-            weekly_intelligence.analyze_weekly_macro_and_edges,
-            week_label=week_label,
-            force_refresh=force_refresh
+        res = await asyncio.wait_for(
+            asyncio.to_thread(
+                adk_workflow_engine.run_pipeline,
+                week_label=week_label,
+                force_refresh=force_refresh
+            ),
+            timeout=40.0
         )
         return res
+    except asyncio.TimeoutError:
+        logger.warning(f"ADK pipeline synthesis timed out after 40s for {week_label}. Attempting cached fallback.")
+        cached = database.get_saxo_cache(f"adk_workflow_briefing_{week_label or 'current'}")
+        if cached and isinstance(cached, dict):
+            cached["warning"] = "Live pipeline synthesis took longer than 40s; serving last synchronized briefing."
+            return cached
+        raise HTTPException(
+            status_code=504, 
+            detail="ADK Macro Intelligence synthesis timed out after 40s. Background workers are continuing; please retry."
+        )
     except Exception as e:
-        logger.error(f"Failed to generate weekly intelligence briefing: {e}")
+        logger.error(f"Failed to generate weekly intelligence briefing via ADK: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/trades/staged")
@@ -1305,6 +1346,74 @@ async def get_margin_status_endpoint(user=Depends(verify_firebase_token)):
         return status
     except Exception as e:
         logger.error(f"Failed to fetch margin status: {e}")
+
+# ── Institutional Universe & GICS Sector Stratification Endpoints ───────────
+
+@app.get("/api/universe/focus-pool")
+async def get_universe_focus_pool():
+    """
+    Returns the active 30-50 institutional options focus pool:
+    Stratified across 11 GICS sectors with Black-Scholes 30-DTE pricing and Greeks.
+    """
+    try:
+        pool = universe_engine.build_stratified_focus_pool()
+        return {
+            "status": "SUCCESS",
+            "total_count": len(pool),
+            "generated_at": datetime.now().isoformat(),
+            "focus_pool": pool
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch universe focus pool: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/universe/sectors")
+async def get_universe_sectors():
+    """Returns sector counts, constituent symbols, and GICS distribution."""
+    try:
+        dist = universe_engine.get_sector_distribution()
+        return {
+            "status": "SUCCESS",
+            **dist
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch sector distribution: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/universe/refresh")
+async def refresh_universe_focus_pool():
+    """Forces an on-demand re-scan and refresh of the institutional focus pool."""
+    try:
+        pool = universe_engine.build_stratified_focus_pool(force_refresh=True)
+        return {
+            "status": "REFRESHED",
+            "total_count": len(pool),
+            "message": f"Successfully rescanned universe and generated {len(pool)} institutional candidates across 11 GICS sectors.",
+            "focus_pool": pool
+        }
+    except Exception as e:
+        logger.error(f"Failed to refresh universe focus pool: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# ── Google ADK 2.0 Graph Workflow Endpoints ─────────────────────────────────
+
+@app.post("/api/adk/weekly-pipeline")
+async def run_adk_weekly_pipeline(force_refresh: bool = False, week_label: Optional[str] = None):
+    """Triggers the institutional ADK 2.0 Graph Workflow with deterministic risk gates and HITL staging."""
+    try:
+        result = adk_workflow_engine.run_pipeline(week_label=week_label, force_refresh=force_refresh)
+        return result
+    except Exception as e:
+        logger.error(f"Failed to execute ADK weekly pipeline: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/adk/status")
+async def get_adk_workflow_status():
+    """Returns ADK 2.0 graph workflow topology, active nodes, routes, and metadata."""
+    try:
+        return adk_workflow_engine.get_workflow_metadata()
+    except Exception as e:
+        logger.error(f"Failed to fetch ADK status: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # ── Client-Side Error Telemetry & Unified Logger ───────────────────────────
@@ -1347,6 +1456,70 @@ async def log_client_error(payload: Dict[str, Any] = Body(...)):
 
     return {"status": "LOGGED", "timestamp": ts}
 
+
+# ── QuantStats & Wheel Analytics Endpoints ─────────────────────────────────
+@app.post("/api/analytics/wheel-backtest", response_model=WheelBacktestResponse)
+def run_wheel_backtest(req: WheelBacktestRequest):
+    """
+    Executes a multi-year systematic 30-DTE Wheel backtest and computes comprehensive QuantStats analytics.
+    """
+    try:
+        res = wheel_backtester.run_backtest(
+            symbol=req.symbol.strip().upper(),
+            benchmark=req.benchmark.strip().upper(),
+            lookback_years=req.lookback_years,
+            initial_capital=req.initial_capital,
+            target_dte=req.target_dte,
+            otm_pct=req.otm_pct,
+            profit_target_pct=req.profit_target_pct,
+            gamma_roll_dte=req.gamma_roll_dte,
+            hold_to_expiration=req.hold_to_expiration
+        )
+
+        strat_metrics = quantstats_engine.compute_metrics(res["strategy_returns"], res["benchmark_returns"])
+        underlying_metrics = quantstats_engine.compute_metrics(res["underlying_returns"], res["benchmark_returns"])
+        bench_metrics = quantstats_engine.compute_metrics(res["benchmark_returns"])
+        monthly_matrix = quantstats_engine.compute_monthly_matrix(res["strategy_returns"])
+
+        report_id = quantstats_engine.generate_html_report(
+            strategy_returns=res["strategy_returns"],
+            benchmark_returns=res["benchmark_returns"],
+            title=f"{req.symbol.upper()} 30-DTE Wheel vs {req.benchmark.upper()}",
+            strategy_name=f"{req.symbol.upper()} Systematic Wheel"
+        )
+
+        return WheelBacktestResponse(
+            symbol=res["symbol"],
+            benchmark=res["benchmark"],
+            lookback_years=req.lookback_years,
+            initial_capital=res["initial_capital"],
+            final_equity=res["final_equity"],
+            summary_metrics=strat_metrics,
+            underlying_metrics=underlying_metrics,
+            benchmark_metrics=bench_metrics,
+            equity_curves=res["equity_curves"],
+            monthly_matrix=monthly_matrix,
+            trade_log=res["trade_log"],
+            report_id=report_id,
+            generated_at=datetime.utcnow().isoformat()
+        )
+    except Exception as e:
+        logger.error(f"Failed to execute Wheel backtest: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+from fastapi.responses import FileResponse
+
+@app.get("/api/analytics/tearsheet/{report_id}")
+def get_tearsheet_html(report_id: str):
+    """
+    Serves the standalone QuantStats HTML tear sheet report.
+    """
+    safe_filename = os.path.basename(report_id)
+    report_path = os.path.join(quantstats_engine.reports_dir, safe_filename)
+    if not os.path.exists(report_path):
+        raise HTTPException(status_code=404, detail="Tear sheet report not found or expired.")
+    return FileResponse(report_path, media_type="text/html")
 
 
 from fastapi.staticfiles import StaticFiles

@@ -9,6 +9,8 @@ numpy
 pandas
 yfinance
 requests
+quantstats-lumi
+
 
 # ── Google Cloud ──────────────────────────────────────────────────────────────
 google-cloud-aiplatform

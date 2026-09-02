@@ -232,3 +232,70 @@ class MarginStatusResponse(BaseModel):
     is_within_limit: bool
     currency: str = "USD"
     updated_at: str
+
+# ── QuantStats & Wheel Analytics Models ──────────────────────────────────
+class WheelBacktestRequest(BaseModel):
+    symbol: str = Field("AAPL", description="Underlying equity symbol (e.g. AAPL, NVDA, COIN)")
+    benchmark: str = Field("SPY", description="Benchmark index (e.g. SPY, QQQ, DIA, URTH)")
+    lookback_years: float = Field(2.0, description="Backtesting horizon in years (e.g. 1.0, 2.0, 3.0)")
+    initial_capital: float = Field(100000.0, description="Starting portfolio cash allocation")
+    target_dte: int = Field(30, description="Target DTE for option writing (strict 30-32 DTE sweet spot)")
+    otm_pct: float = Field(0.08, description="Target OTM strike distance (e.g. 0.08 = 8% OTM, Delta ~ -0.22)")
+    profit_target_pct: float = Field(0.50, description="Early profit taking threshold (e.g. 0.50 = 50% max profit)")
+    gamma_roll_dte: int = Field(21, description="DTE threshold to roll/close to avoid gamma acceleration")
+    hold_to_expiration: bool = Field(True, description="Hold 30-DTE option to expiration (10-12 monthly cycles/year)")
+
+class WheelTradeLogItem(BaseModel):
+    id: str
+    strategy: str
+    symbol: str
+    entry_date: str
+    exit_date: str
+    strike: float
+    entry_premium: float
+    exit_premium: float
+    contracts: int
+    net_pnl: float
+    return_pct: float
+    outcome: str
+    days_held: int
+
+class EquityCurvePoint(BaseModel):
+    date: str
+    strategy: float
+    underlying: float
+    benchmark: float
+    strategy_drawdown: float
+    benchmark_drawdown: float
+
+class MonthlyReturnMatrixRow(BaseModel):
+    year: str
+    Jan: Optional[float] = 0.0
+    Feb: Optional[float] = 0.0
+    Mar: Optional[float] = 0.0
+    Apr: Optional[float] = 0.0
+    May: Optional[float] = 0.0
+    Jun: Optional[float] = 0.0
+    Jul: Optional[float] = 0.0
+    Aug: Optional[float] = 0.0
+    Sep: Optional[float] = 0.0
+    Oct: Optional[float] = 0.0
+    Nov: Optional[float] = 0.0
+    Dec: Optional[float] = 0.0
+    YTD: Optional[float] = 0.0
+
+class WheelBacktestResponse(BaseModel):
+    symbol: str
+    benchmark: str
+    lookback_years: float
+    initial_capital: float
+    final_equity: float
+    summary_metrics: Dict[str, Any]
+    underlying_metrics: Dict[str, Any]
+    benchmark_metrics: Dict[str, Any]
+    equity_curves: List[EquityCurvePoint]
+    monthly_matrix: List[MonthlyReturnMatrixRow]
+    trade_log: List[WheelTradeLogItem]
+    report_id: str
+    generated_at: str
+

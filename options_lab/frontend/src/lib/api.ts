@@ -17,7 +17,28 @@ const getApiBase = () => {
 
 const API_BASE_URL = getApiBase();
 
-export async function apiRequest(endpoint: string, method: string = 'GET', body?: any) {
+export async function checkBackendHandshake(timeoutMs: number = 3000): Promise<{ ok: boolean; error?: string }> {
+  const url = `${API_BASE_URL}/api/health`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, { method: 'GET', signal: controller.signal });
+    clearTimeout(timer);
+    if (res.ok) {
+      return { ok: true };
+    }
+    return { ok: false, error: `Backend responded with HTTP ${res.status}` };
+  } catch (err: any) {
+    clearTimeout(timer);
+    if (err.name === 'AbortError') {
+      return { ok: false, error: `Handshake timed out after ${timeoutMs / 1000}s (server on port 8000 non-responsive).` };
+    }
+    return { ok: false, error: 'Cannot connect to OptionsLab backend on http://localhost:8000. Server is offline.' };
+  }
+}
+
+export async function apiRequest(endpoint: string, method: string = 'GET', body?: any, timeoutMs: number = 30000) {
   const url = `${API_BASE_URL}${endpoint}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -38,9 +59,13 @@ export async function apiRequest(endpoint: string, method: string = 'GET', body?
     // Auth not initialized yet or no user — continue without token
   }
 
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
   const options: RequestInit = {
     method,
     headers,
+    signal: controller.signal
   };
 
   if (body) {
@@ -49,12 +74,24 @@ export async function apiRequest(endpoint: string, method: string = 'GET', body?
 
   try {
     const response = await fetch(url, options);
+    clearTimeout(timer);
     if (!response.ok) {
       const errorText = await response.text();
       throw new Error(`API Error: ${response.status} - ${errorText || response.statusText}`);
     }
     return await response.json();
-  } catch (error) {
+  } catch (error: any) {
+    clearTimeout(timer);
+    if (error.name === 'AbortError') {
+      const timeoutErr = new Error(`Backend Handshake Timeout: Request to ${endpoint} timed out after ${timeoutMs / 1000}s. Operation short-circuited.`);
+      console.error(timeoutErr.message);
+      throw timeoutErr;
+    }
+    if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
+      const netErr = new Error(`Backend Handshake Disconnected: Unable to reach OptionsLab API server (http://localhost:8000). Please verify the server is running natively.`);
+      console.error(netErr.message);
+      throw netErr;
+    }
     console.error(`Request to ${endpoint} failed:`, error);
     throw error;
   }
@@ -185,18 +222,21 @@ export const optionsApi = {
     apiRequest(reportId ? `/api/history/campaigns?report_id=${encodeURIComponent(reportId)}` : '/api/history/campaigns'),
   getBehavioralAudit: (reportId?: string) =>
     apiRequest(reportId ? `/api/history/behavioral-audit?report_id=${encodeURIComponent(reportId)}` : '/api/history/behavioral-audit'),
-  getPortfolioNews: (top: number = 25) =>
-    apiRequest(`/api/history/news?top=${top}`),
+  getPortfolioNews: (top: number = 25, forceRefresh: boolean = false) =>
+    apiRequest(`/api/history/news?top=${top}&force_refresh=${forceRefresh}&_t=${Date.now()}`),
   checkOrderSafety: (payload: any) =>
     apiRequest('/api/shield/check-order', 'POST', payload),
 
+  // ── Frontend-Backend Handshake & Connectivity ────────────────────────────
+  checkHandshake: (timeoutMs: number = 3000) => checkBackendHandshake(timeoutMs),
+
   // ── Weekly Intelligence & Trade Approval ─────────────────────────────────
-  getWeeklyBriefing: (weekLabel?: string, forceRefresh?: boolean) => {
+  getWeeklyBriefing: (weekLabel?: string, forceRefresh?: boolean, timeoutMs: number = 40000) => {
     const params = new URLSearchParams();
     if (weekLabel) params.append('week_label', weekLabel);
     if (forceRefresh) params.append('force_refresh', 'true');
     const q = params.toString();
-    return apiRequest(q ? `/api/intelligence/weekly-briefing?${q}` : '/api/intelligence/weekly-briefing');
+    return apiRequest(q ? `/api/intelligence/weekly-briefing?${q}` : '/api/intelligence/weekly-briefing', 'GET', undefined, timeoutMs);
   },
   getStagedTrades: (weekLabel?: string, status?: string) => {
     const params = new URLSearchParams();

@@ -74,13 +74,14 @@ class MarginGuardian:
         strike: float,
         contracts: int = 1,
         spot_price: float = 0.0,
-        option_premium: float = 0.0
+        option_premium: float = 0.0,
+        current_status: Optional[Dict[str, Any]] = None
     ) -> Dict[str, Any]:
         """
         Validates if a proposed trade complies with the 15.0% margin limit
         and cash collateral requirements.
         """
-        status = self.get_current_margin_status()
+        status = current_status or self.get_current_margin_status()
         total_equity = status["total_equity"]
         margin_used = status["margin_used"]
         cash_avail = status["cash_available"]

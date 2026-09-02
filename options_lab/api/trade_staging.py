@@ -45,6 +45,7 @@ class TradeStagingEngine:
         delta = float(rec.get("delta", 0.0))
         dte = int(rec.get("dte", 30))
         premium_est = float(rec.get("premium_estimate", 0.0))
+        premium_est = self.saxo_client.quantize_order_price(premium_est, asset_type="StockOption")
         contracts = int(rec.get("contracts", 1))
         spot_price = float(rec.get("spot_price", 0.0))
         thesis = rec.get("thesis", "Market structure signal")
@@ -96,12 +97,18 @@ class TradeStagingEngine:
             "trade_id": trade_id,
             "symbol": symbol,
             "name": rec.get("name", symbol),
+            "sector": rec.get("sector", "Information Technology"),
             "strategy": strategy,
             "direction": direction,
             "strike": strike,
             "delta": delta,
             "dte": dte,
             "premium_estimate": premium_est,
+            "bid_price": float(rec.get("bid_price", 0.0) or 0.0),
+            "ask_price": float(rec.get("ask_price", 0.0) or 0.0),
+            "spread": float(rec.get("spread", 0.0) or 0.0),
+            "pricing_source": rec.get("pricing_source", "OPRA_LIVE"),
+            "uic": rec.get("uic"),
             "contracts": contracts,
             "spot_price": spot_price,
             "annualized_roc_pct": float(rec.get("annualized_roc_pct", 0.0)),
@@ -222,13 +229,18 @@ class TradeStagingEngine:
         database.save_staged_trade(record)
 
         try:
+            clean_price = self.saxo_client.quantize_order_price(
+                price=premium_est if asset_type == "StockOption" else spot_price,
+                uic=uic,
+                asset_type=asset_type
+            )
             saxo_res = self.saxo_client.place_order(
                 uic=uic,
                 asset_type=asset_type,
                 amount=contracts,
                 buy_sell=buy_sell,
                 order_type="Limit",
-                order_price=premium_est if asset_type == "StockOption" else spot_price,
+                order_price=clean_price,
                 to_open_close="ToOpen"
             )
 

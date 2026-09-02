@@ -55,6 +55,7 @@ const navGroups = [
     title: 'SAXO QUANT LAB',
     items: [
       { name: 'Weekly Intelligence', path: '/weekly-intelligence', icon: Sparkles, badge: 'Live', badgeColor: 'bg-emerald-100 text-emerald-700' },
+      { name: 'QuantStats Analytics', path: '/analytics', icon: TrendingUp, badge: 'New', badgeColor: 'bg-emerald-100 text-emerald-700' },
       { name: 'Strategy Builder', path: '/strategies', icon: Layers, badge: 'Hot', badgeColor: 'bg-rose-100 text-rose-700' },
       { name: 'Option Pricer', path: '/pricer', icon: Percent },
       { name: 'Behavioral Forensics', path: '/behavioral-lab', icon: Compass, badge: 'New', badgeColor: 'bg-indigo-100 text-indigo-700' },

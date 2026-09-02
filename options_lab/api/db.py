@@ -130,9 +130,24 @@ def _init_db():
                 proposed_at           TEXT NOT NULL,
                 approved_at           TEXT,
                 executed_at           TEXT,
-                week_label            TEXT NOT NULL
+                week_label            TEXT NOT NULL,
+                bid_price             REAL,
+                ask_price             REAL,
+                spread                REAL,
+                pricing_source        TEXT
             )
         """)
+        # Dynamic schema migration for existing databases
+        for col, col_type in [
+            ("bid_price", "REAL"),
+            ("ask_price", "REAL"),
+            ("spread", "REAL"),
+            ("pricing_source", "TEXT")
+        ]:
+            try:
+                conn.execute(f"ALTER TABLE staged_trades ADD COLUMN {col} {col_type}")
+            except Exception:
+                pass
         conn.commit()
 
 
@@ -527,14 +542,16 @@ def save_staged_trade(record: Dict[str, Any]):
                     collateral_required, thesis, edge_source, risk_rating,
                     margin_check_result, safety_check_result, status,
                     saxo_order_id, saxo_order_response, proposed_at,
-                    approved_at, executed_at, week_label
+                    approved_at, executed_at, week_label,
+                    bid_price, ask_price, spread, pricing_source
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
                     ?, ?, ?, ?,
                     ?, ?, ?,
                     ?, ?, ?,
-                    ?, ?, ?
+                    ?, ?, ?,
+                    ?, ?, ?, ?
                 )
                 ON CONFLICT(trade_id) DO UPDATE SET
                     status = excluded.status,
@@ -543,7 +560,11 @@ def save_staged_trade(record: Dict[str, Any]):
                     saxo_order_id = excluded.saxo_order_id,
                     saxo_order_response = excluded.saxo_order_response,
                     approved_at = excluded.approved_at,
-                    executed_at = excluded.executed_at
+                    executed_at = excluded.executed_at,
+                    bid_price = COALESCE(excluded.bid_price, staged_trades.bid_price),
+                    ask_price = COALESCE(excluded.ask_price, staged_trades.ask_price),
+                    spread = COALESCE(excluded.spread, staged_trades.spread),
+                    pricing_source = COALESCE(excluded.pricing_source, staged_trades.pricing_source)
                 """,
                 (
                     record.get("trade_id"), record.get("symbol"), record.get("strategy"), record.get("direction"),
@@ -552,7 +573,8 @@ def save_staged_trade(record: Dict[str, Any]):
                     record.get("collateral_required"), record.get("thesis"), record.get("edge_source"), record.get("risk_rating", 3),
                     record.get("margin_check_result"), record.get("safety_check_result"), record.get("status", "PROPOSED"),
                     record.get("saxo_order_id"), record.get("saxo_order_response"), record.get("proposed_at"),
-                    record.get("approved_at"), record.get("executed_at"), record.get("week_label")
+                    record.get("approved_at"), record.get("executed_at"), record.get("week_label"),
+                    record.get("bid_price"), record.get("ask_price"), record.get("spread"), record.get("pricing_source")
                 )
             )
             conn.commit()

@@ -348,3 +348,145 @@ def get_simulated_market_data(symbol: str) -> Dict[str, Any]:
         "dates": dates,
         "is_simulated": True
     }
+
+
+def fetch_option_market_quote(
+    symbol: str,
+    strike: float,
+    option_type: str = "put",
+    dte: int = 30,
+    uic: Optional[int] = None,
+    saxo_client: Optional[Any] = None
+) -> Dict[str, Any]:
+    """
+    Fetches authentic live market Bid, Ask, Mid, and Last quotes for an option contract.
+    Tiered Strategy:
+    1. Primary: Saxo OpenAPI live quote (trade/v1/infoprices) if user account has active market data entitlement.
+    2. Secondary: Real-Time OPRA exchange option chain (via yfinance/OCC) for authentic Bid/Ask/Mid.
+    3. Fallback: Theoretical Black-Scholes model only if markets are offline or no quotes exist.
+    """
+    symbol_clean = symbol.strip().upper()
+    opt_type_lower = option_type.lower()
+    is_put = "put" in opt_type_lower or opt_type_lower == "p"
+
+    # 1. Primary: Saxo OpenAPI live quote (if available and entitled)
+    if saxo_client and uic:
+        try:
+            resp = saxo_client._make_authenticated_request(
+                "GET", 
+                f"trade/v1/infoprices?Uic={uic}&AssetType=StockOption&FieldGroups=Quote,DisplayAndFormat,PriceInfoDetails"
+            )
+            if resp.status_code == 200:
+                d = resp.json()
+                quote = d.get("Quote", {})
+                price_type_ask = quote.get("PriceTypeAsk", "")
+                if price_type_ask != "NoAccess":
+                    bid = float(quote.get("Bid", 0.0) or 0.0)
+                    ask = float(quote.get("Ask", 0.0) or 0.0)
+                    if bid > 0 or ask > 0:
+                        mid = round((bid + ask) / 2.0, 2) if (bid > 0 and ask > 0) else max(bid, ask)
+                        if hasattr(saxo_client, "quantize_order_price"):
+                            mid = saxo_client.quantize_order_price(mid, uic=uic, asset_type="StockOption")
+                        return {
+                            "source": "SAXO_LIVE",
+                            "bid": bid,
+                            "ask": ask,
+                            "mid": mid,
+                            "last": float(quote.get("LastTraded", 0.0) or 0.0),
+                            "spread": round(max(0.0, ask - bid), 2),
+                            "uic": uic,
+                            "is_real_quote": True
+                        }
+        except Exception as e:
+            logger.debug(f"Saxo infoprices non-critical fallback: {e}")
+
+    # 2. Secondary: Real-Time OPRA Exchange Option Chain (yfinance/OCC)
+    try:
+        ticker = yf.Ticker(symbol_clean)
+        expiries = ticker.options
+        if expiries:
+            target_days = dte
+            best_exp = None
+            min_days_diff = float("inf")
+            now = datetime.now()
+            for exp in expiries:
+                try:
+                    exp_dt = datetime.strptime(exp, "%Y-%m-%d")
+                    days_diff = abs((exp_dt - now).days - target_days)
+                    if days_diff < min_days_diff:
+                        min_days_diff = days_diff
+                        best_exp = exp
+                except Exception:
+                    pass
+
+            if best_exp:
+                chain = ticker.option_chain(best_exp)
+                chain_df = chain.puts if is_put else chain.calls
+                if not chain_df.empty:
+                    chain_df = chain_df.copy()
+                    chain_df["strike_diff"] = (chain_df["strike"] - strike).abs()
+                    closest_row = chain_df.sort_values("strike_diff").iloc[0]
+                    def _safe_f(val, default=0.0):
+                        try:
+                            if val is None or pd.isna(val):
+                                return default
+                            return float(val)
+                        except Exception:
+                            return default
+
+                    def _safe_i(val, default=0):
+                        try:
+                            if val is None or pd.isna(val):
+                                return default
+                            return int(float(val))
+                        except Exception:
+                            return default
+
+                    bid = _safe_f(closest_row.get("bid"))
+                    ask = _safe_f(closest_row.get("ask"))
+                    last = _safe_f(closest_row.get("lastPrice"))
+                    iv = _safe_f(closest_row.get("impliedVolatility"))
+                    volume = _safe_i(closest_row.get("volume"))
+                    oi = _safe_i(closest_row.get("openInterest"))
+
+                    if bid > 0 or ask > 0 or last > 0:
+                        if bid > 0 and ask > 0:
+                            mid = round((bid + ask) / 2.0, 2)
+                        elif last > 0:
+                            mid = last
+                        else:
+                            mid = max(bid, ask)
+
+                        if saxo_client and hasattr(saxo_client, "quantize_order_price"):
+                            mid = saxo_client.quantize_order_price(mid, uic=uic, asset_type="StockOption")
+                        else:
+                            mid = round(round(mid / 0.05) * 0.05, 2)
+
+                        return {
+                            "source": "OPRA_LIVE",
+                            "bid": bid,
+                            "ask": ask,
+                            "mid": mid,
+                            "last": last,
+                            "spread": round(max(0.0, ask - bid), 2),
+                            "expiry": best_exp,
+                            "implied_volatility": round(iv, 4),
+                            "volume": volume,
+                            "open_interest": oi,
+                            "uic": uic,
+                            "is_real_quote": True
+                        }
+    except Exception as e:
+        logger.warning(f"OPRA real-time option chain lookup failed for {symbol_clean}: {e}")
+
+    # 3. Fallback: Theoretical Model
+    return {
+        "source": "THEORETICAL_MODEL",
+        "bid": 0.0,
+        "ask": 0.0,
+        "mid": 0.0,
+        "last": 0.0,
+        "spread": 0.0,
+        "uic": uic,
+        "is_real_quote": False
+    }

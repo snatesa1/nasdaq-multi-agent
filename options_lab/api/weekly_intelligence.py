@@ -14,11 +14,13 @@ from .saxo_client import SaxoClient
 from .margin_guardian import MarginGuardian
 from .trade_staging import TradeStagingEngine
 from .campaign_stitcher import CampaignStitcher
+from .universe import InstitutionalUniverseEngine, PRIMARY_GICS_SECTORS, normalize_gics_sector
 from .config import settings
 
 logger = logging.getLogger("weekly-intelligence")
 
 COMPANY_TICKER_MAP = {
+    # Tech / AI & Semis
     "NVIDIA": "NVDA", "NVDA": "NVDA",
     "APPLE": "AAPL", "AAPL": "AAPL",
     "MICROSOFT": "MSFT", "MSFT": "MSFT",
@@ -31,26 +33,51 @@ COMPANY_TICKER_MAP = {
     "ALPHABET": "GOOGL", "GOOGLE": "GOOGL", "GOOGL": "GOOGL", "GOOG": "GOOGL",
     "META": "META", "FACEBOOK": "META",
     "AMD": "AMD",
-    "BANK OF AMERICA": "BAC", "BAC": "BAC",
-    "GOLDMAN SACHS": "GS", "GOLDMAN": "GS", "GS": "GS",
-    "CHEVRON": "CVX", "CVX": "CVX",
-    "CISCO": "CSCO", "CSCO": "CSCO",
-    "COCA-COLA": "KO", "COCA COLA": "KO", "KO": "KO",
-    "NEWMONT": "NEM", "NEM": "NEM",
-    "MODERNA": "MRNA", "MRNA": "MRNA",
-    "TARGET": "TGT", "TGT": "TGT",
-    "CONOCOPHILLIPS": "COP", "COP": "COP",
-    "GENERAL ELECTRIC": "GE", "GE": "GE",
-    "PLUG POWER": "PLUG", "PLUG": "PLUG",
-    "JPMORGAN": "JPM", "JPM": "JPM", "JP MORGAN": "JPM",
     "QUALCOMM": "QCOM", "QCOM": "QCOM",
     "BROADCOM": "AVGO", "AVGO": "AVGO",
     "MICRON": "MU", "MU": "MU",
-    "ABBOTT": "ABT", "ABT": "ABT",
-    "AT&T": "T",
-    "CITIGROUP": "C", "CITI": "C",
+    "CISCO": "CSCO", "CSCO": "CSCO",
     "HP": "HPQ", "HPQ": "HPQ",
-    "BERKSHIRE": "BRK.B", "BRK": "BRK.B"
+    # Financials
+    "BANK OF AMERICA": "BAC", "BAC": "BAC",
+    "GOLDMAN SACHS": "GS", "GOLDMAN": "GS", "GS": "GS",
+    "JPMORGAN": "JPM", "JPM": "JPM", "JP MORGAN": "JPM",
+    "CITIGROUP": "C", "CITI": "C",
+    "BERKSHIRE": "BRK.B", "BRK": "BRK.B",
+    # Energy
+    "CHEVRON": "CVX", "CVX": "CVX",
+    "CONOCOPHILLIPS": "COP", "COP": "COP",
+    "EXXON": "XOM", "EXXON MOBIL": "XOM", "XOM": "XOM",
+    "SCHLUMBERGER": "SLB", "SLB": "SLB",
+    # Health Care
+    "ABBOTT": "ABT", "ABT": "ABT",
+    "JOHNSON & JOHNSON": "JNJ", "JNJ": "JNJ",
+    "ELI LILLY": "LLY", "LILLY": "LLY", "LLY": "LLY",
+    "PFIZER": "PFE", "PFE": "PFE",
+    "UNITEDHEALTH": "UNH", "UNH": "UNH",
+    "MODERNA": "MRNA", "MRNA": "MRNA",
+    # Consumer Staples & Discretionary
+    "COCA-COLA": "KO", "COCA COLA": "KO", "KO": "KO",
+    "PEPSICO": "PEP", "PEP": "PEP",
+    "PROCTER & GAMBLE": "PG", "PG": "PG",
+    "COSTCO": "COST", "COST": "COST",
+    "WALMART": "WMT", "WMT": "WMT",
+    "TARGET": "TGT", "TGT": "TGT",
+    # Industrials & Defense
+    "GENERAL ELECTRIC": "GE", "GE": "GE",
+    "CATERPILLAR": "CAT", "CAT": "CAT",
+    "BOEING": "BA", "BA": "BA",
+    "HONEYWELL": "HON", "HON": "HON",
+    # Communication Services
+    "AT&T": "T",
+    "VERIZON": "VZ", "VZ": "VZ",
+    "NETFLIX": "NFLX", "NFLX": "NFLX",
+    # Utilities & Real Estate & Materials
+    "NEWMONT": "NEM", "NEM": "NEM",
+    "LINDE": "LIN", "LIN": "LIN",
+    "NEXTERA": "NEE", "NEE": "NEE",
+    "PROLOGIS": "PLD", "PLD": "PLD",
+    "PLUG POWER": "PLUG", "PLUG": "PLUG"
 }
 
 
@@ -75,12 +102,21 @@ class WeeklyIntelligenceEngine:
         self.margin_guardian = margin_guardian or MarginGuardian(saxo_client=self.saxo_client)
         self.trade_staging = trade_staging or TradeStagingEngine(saxo_client=self.saxo_client, margin_guardian=self.margin_guardian)
         self.campaign_stitcher = CampaignStitcher()
+        self.universe_engine = InstitutionalUniverseEngine(saxo_client=self.saxo_client)
+        self.symbol_sector_map: Dict[str, str] = {}
+        self.focus_pool: List[Dict[str, Any]] = []
 
-        # Dynamic Universe Resolution: Live Saxo Holdings + Watchlist + SQLite Portfolio
+        # Dynamic Universe Resolution: Live Saxo Holdings + Multi-Watchlists + Focus Pool (11 GICS Sectors)
         self._sync_dynamic_universe()
 
     def _sync_dynamic_universe(self):
-        """Dynamically builds the ticker universe from open broker positions, watchlists, and portfolio DB."""
+        """
+        Dynamically builds the institutional ticker universe from:
+        1. Open broker positions (COIN, INTC, IBM, PLTR, NEM)
+        2. Saxo multi-watchlists (via get_all_watchlist_instruments)
+        3. Historical blotter traded tickers
+        4. InstitutionalUniverseEngine 4-tier focus pool across all 11 GICS sectors
+        """
         holdings = set()
         watchlist = set()
 
@@ -94,15 +130,15 @@ class WeeklyIntelligenceEngine:
         except Exception as e:
             logger.debug(f"Dynamic position universe query non-critical: {e}")
 
-        # 2. Fetch live Saxo watchlist
+        # 2. Fetch live Saxo multi-watchlists (all user watchlists)
         try:
-            wl_items = self.saxo_client.get_watchlist_instruments("WL_STOCKS_US")
+            wl_items = self.saxo_client.get_all_watchlist_instruments()
             for item in wl_items:
                 sym = item.get("symbol")
                 if sym:
                     watchlist.add(sym.upper())
         except Exception as e:
-            logger.debug(f"Dynamic watchlist universe query non-critical: {e}")
+            logger.debug(f"Dynamic multi-watchlist query non-critical: {e}")
 
         # 3. Fallback to SQLite DB portfolio tickers if offline
         if not holdings and not watchlist:
@@ -116,15 +152,31 @@ class WeeklyIntelligenceEngine:
             except Exception as e_db:
                 logger.debug(f"Database ticker query fallback: {e_db}")
 
-        # Default minimal active pillars if completely offline
+        # Baseline active trading pillars if completely offline
         if not holdings:
             holdings = {"COIN", "INTC", "IBM", "PLTR", "NEM"}
         if not watchlist:
-            watchlist = {"AAPL", "BAC", "CVX", "CSCO", "KO", "GS"}
+            watchlist = {"AAPL", "BAC", "CVX", "CSCO", "KO", "GS", "ABT", "CAT", "GE", "NEE", "LIN"}
 
         self.active_position_tickers = sorted(list(holdings))
         self.watchlist_tickers = sorted(list(watchlist))
-        self.scoped_universe = sorted(list(holdings.union(watchlist)))
+
+        # 4. Integrate 4-tier institutional focus pool across 11 GICS sectors
+        try:
+            self.focus_pool = self.universe_engine.build_stratified_focus_pool()
+            focus_syms = {p["symbol"].upper() for p in self.focus_pool}
+            self.symbol_sector_map = {p["symbol"].upper(): p.get("sector", "Information Technology") for p in self.focus_pool}
+        except Exception as e_pool:
+            logger.warning(f"Focus pool integration non-critical: {e_pool}")
+            focus_syms = set()
+
+        # Populate sector map for holdings/watchlists if not already present
+        for sym in holdings.union(watchlist):
+            if sym not in self.symbol_sector_map:
+                self.symbol_sector_map[sym] = normalize_gics_sector("", sym)
+
+        self.scoped_universe = sorted(list(holdings.union(watchlist).union(focus_syms)))
+        logger.info(f"Synchronized institutional scoped universe: {len(self.scoped_universe)} tickers across 11 GICS sectors.")
 
     def _build_dynamic_trade_candidate(
         self,
@@ -133,32 +185,39 @@ class WeeklyIntelligenceEngine:
         thesis: str = "",
         edge_source: str = "",
         dte: int = 30,
-        risk_rating: int = 4
+        risk_rating: int = 4,
+        positions_list: Optional[List[Dict[str, Any]]] = None,
+        margin_status: Optional[Dict[str, Any]] = None
     ) -> Optional[Dict[str, Any]]:
         """
         Dynamically calculates spot price, strike, Greeks, and option premium from live market feeds (Alpaca/YF/Saxo).
         Strictly enforces that Covered Calls (CC) require holding >= 100 shares of the underlying stock.
         """
-        from .market_data import fetch_market_data
+        from .market_data import fetch_market_data, fetch_option_market_quote
         from engine.black_scholes import black_scholes_price, black_scholes_greeks
 
         # Check actual underlying shares owned in live portfolio
         underlying_shares = 0.0
-        try:
-            pos_resp = self.saxo_client.get_positions()
-            for p in pos_resp.get("positions", []):
+        if positions_list is not None:
+            for p in positions_list:
                 if p.get("symbol", "").upper() == symbol.upper() and p.get("asset_type") == "Stock":
                     underlying_shares += float(p.get("amount", 0.0))
-        except Exception:
+        else:
             try:
-                from . import db as database
-                cached_p = database.get_saxo_cache("positions")
-                if cached_p and isinstance(cached_p, dict):
-                    for p in cached_p.get("positions", []):
-                        if p.get("symbol", "").upper() == symbol.upper() and p.get("asset_type") == "Stock":
-                            underlying_shares += float(p.get("amount", 0.0))
+                pos_resp = self.saxo_client.get_positions()
+                for p in pos_resp.get("positions", []):
+                    if p.get("symbol", "").upper() == symbol.upper() and p.get("asset_type") == "Stock":
+                        underlying_shares += float(p.get("amount", 0.0))
             except Exception:
-                pass
+                try:
+                    from . import db as database
+                    cached_p = database.get_saxo_cache("positions")
+                    if cached_p and isinstance(cached_p, dict):
+                        for p in cached_p.get("positions", []):
+                            if p.get("symbol", "").upper() == symbol.upper() and p.get("asset_type") == "Stock":
+                                underlying_shares += float(p.get("amount", 0.0))
+                except Exception:
+                    pass
 
         # If Covered Call (CC) is requested but user owns < 100 shares, enforce Cash-Secured Put (CSP)
         if ("CC" in strategy.upper() or "COVERED" in strategy.upper()) and underlying_shares < 100.0:
@@ -206,11 +265,51 @@ class WeeklyIntelligenceEngine:
             opt_type = "call"
             direction = "NEUTRAL_BULLISH"
 
+        # Resolve authentic contract UIC from Saxo OpenAPI
+        option_uic = None
+        try:
+            option_uic = self.saxo_client.resolve_option_contract_uic(
+                symbol=symbol,
+                strike=strike,
+                option_type="Put" if is_put else "Call",
+                dte=dte
+            )
+        except Exception as e:
+            logger.debug(f"UIC resolution non-critical: {e}")
+
+        # Fetch authentic live market quote (Saxo OpenAPI -> OPRA Option Chain)
+        quote = fetch_option_market_quote(
+            symbol=symbol,
+            strike=strike,
+            option_type=opt_type,
+            dte=dte,
+            uic=option_uic,
+            saxo_client=self.saxo_client
+        )
+
+        bid_price = quote.get("bid", 0.0)
+        ask_price = quote.get("ask", 0.0)
+        mid_price = quote.get("mid", 0.0)
+        spread = quote.get("spread", 0.0)
+        quote_source = quote.get("source", "OPRA_LIVE")
+
+        if quote.get("is_real_quote") and mid_price > 0:
+            premium = mid_price
+            if quote.get("implied_volatility") and quote["implied_volatility"] > 0:
+                volatility = quote["implied_volatility"]
+        else:
+            T = dte / 365.0
+            r = 0.045
+            premium = black_scholes_price(S=spot_price, K=strike, T=T, r=r, sigma=volatility, option_type=opt_type)
+            if hasattr(self.saxo_client, "quantize_order_price"):
+                premium = self.saxo_client.quantize_order_price(premium, uic=option_uic, asset_type="StockOption")
+            else:
+                premium = max(0.25, round(round(premium / 0.05) * 0.05, 2))
+            quote_source = "THEORETICAL_BS_MODEL"
+
+        # Calculate Greeks
         T = dte / 365.0
         r = 0.045
-        premium = black_scholes_price(S=spot_price, K=strike, T=T, r=r, sigma=volatility, option_type=opt_type)
-        premium = max(0.25, round(premium, 2))
-
         greeks = black_scholes_greeks(S=spot_price, K=strike, T=T, r=r, sigma=volatility, option_type=opt_type)
         delta = round(greeks.get("delta", -0.20 if is_put else 0.20), 2)
 
@@ -222,12 +321,16 @@ class WeeklyIntelligenceEngine:
             strike=strike,
             contracts=1,
             spot_price=spot_price,
-            option_premium=premium
+            option_premium=premium,
+            current_status=margin_status
         )
+
+        sector = self.symbol_sector_map.get(symbol.upper(), normalize_gics_sector("", symbol))
 
         return {
             "symbol": symbol,
             "name": name,
+            "sector": sector,
             "strategy": strategy,
             "direction": direction,
             "spot_price": round(spot_price, 2),
@@ -235,6 +338,11 @@ class WeeklyIntelligenceEngine:
             "delta": delta,
             "dte": dte,
             "premium_estimate": premium,
+            "bid_price": bid_price,
+            "ask_price": ask_price,
+            "spread": spread,
+            "pricing_source": quote_source,
+            "uic": option_uic,
             "contracts": 1,
             "annualized_roc_pct": annualized_roc,
             "edge_source": edge_source,
@@ -244,7 +352,7 @@ class WeeklyIntelligenceEngine:
             "risk_rating": risk_rating,
             "safety_check": "PASSED" if margin_eval.get("is_valid", True) else "WARNING",
             "pillars": {
-                "watchlist_status": "Live Portfolio / Watchlist Ticker",
+                "watchlist_status": f"{sector} Pillar",
                 "trade_history_profile": f"Dynamic {strategy} setup with {volatility*100:.1f}% realized volatility",
                 "margin_status": "Within 15% Max Limit" if margin_eval.get("is_valid", True) else "Margin Constrained"
             }
@@ -442,7 +550,13 @@ class WeeklyIntelligenceEngine:
 
         return events
 
-    def _generate_dynamic_trade_candidates(self, news_items: List[Dict[str, Any]], week_label: str) -> List[Dict[str, Any]]:
+    def _generate_dynamic_trade_candidates(
+        self,
+        news_items: List[Dict[str, Any]],
+        week_label: str,
+        positions_list: Optional[List[Dict[str, Any]]] = None,
+        margin_status: Optional[Dict[str, Any]] = None
+    ) -> List[Dict[str, Any]]:
         """
         Dynamically extracts candidate tickers from live market news, portfolio holdings,
         and watchlists. Calculates live spot prices, strikes, and Black-Scholes pricing
@@ -464,6 +578,7 @@ class WeeklyIntelligenceEngine:
         # 1. News-driven tickers (e.g. NVDA, COIN, PLTR, INTC, AAPL, etc.)
         # 2. Active portfolio holdings (COIN, INTC, IBM, NEM, PLUG)
         # 3. Saxo Watchlist stocks (AAPL, BAC, CVX, CSCO, KO, GE, GS, HPQ, ABT, T, C, COP)
+        # 4. Institutional 4-tier focus pool across all 11 GICS sectors
         candidate_pool = []
         for t in news_extracted_tickers:
             if t not in candidate_pool:
@@ -474,19 +589,29 @@ class WeeklyIntelligenceEngine:
         for t in self.watchlist_tickers:
             if t not in candidate_pool:
                 candidate_pool.append(t)
+        for item in self.focus_pool:
+            t = item.get("symbol", "").upper()
+            if t and t not in candidate_pool:
+                candidate_pool.append(t)
 
         # Ensure high-priority liquid tickers are included in pool
-        priority_anchors = ["NVDA", "COIN", "INTC", "IBM", "PLTR", "AAPL", "BAC", "CVX", "MSFT", "AMD"]
+        priority_anchors = ["NVDA", "COIN", "INTC", "IBM", "PLTR", "AAPL", "BAC", "CVX", "MSFT", "AMD", "ABT", "KO", "CAT", "NEE", "LIN"]
         for t in priority_anchors:
             if t not in candidate_pool:
                 candidate_pool.append(t)
 
         potential_trades = []
         target_count = 6  # Present 6 distinct high-conviction opportunities
+        staged_sectors: Dict[str, int] = {}  # Enforce max 2 trades per GICS sector for portfolio balance
 
         for symbol in candidate_pool:
             if len(potential_trades) >= target_count:
                 break
+
+            sec = self.symbol_sector_map.get(symbol.upper(), normalize_gics_sector("", symbol))
+            if staged_sectors.get(sec, 0) >= 2:
+                # Skip to preserve sector diversification across all 11 GICS sectors
+                continue
 
             # Formulate dynamic thesis and edge source
             news_headline = news_ticker_contexts.get(symbol)
@@ -509,17 +634,35 @@ class WeeklyIntelligenceEngine:
             elif symbol in ["PLTR"]:
                 thesis = "Defense and enterprise AI contract momentum support structural growth trend. Selling conservative OTM Cash-Secured Put monetizes elevated options demand."
                 edge_source = "Enterprise AI & Defense Analytics Growth Trend"
-            elif symbol in ["BAC", "GS", "JPM", "C"]:
+            elif symbol in ["BAC", "GS", "JPM", "C", "BRK.B"] or sec == "Financials":
                 thesis = f"{symbol} solid net interest income and capital return programs establish strong book value support. Selling conservative OTM Put generates steady premium."
                 edge_source = f"{symbol} Financial Fortress & High Dividend Yield Support"
-            elif symbol in ["CVX", "COP"]:
+            elif symbol in ["CVX", "COP", "XOM", "SLB"] or sec == "Energy":
                 thesis = f"{symbol} resilient free cash flows and disciplined capital allocation provide reliable floor. Selling conservative OTM Put monetizes steady energy yield."
                 edge_source = f"{symbol} Energy Cash Flow & Structural Commodity Support"
-            elif symbol in ["AAPL", "MSFT", "GOOGL"]:
-                thesis = f"{symbol} robust corporate balance sheet and ecosystem moat provide defensive ballast. Selling conservative OTM Cash-Secured Put captures theta decay."
+            elif symbol in ["ABT", "JNJ", "LLY", "PFE", "UNH"] or sec == "Health Care":
+                thesis = f"{symbol} non-cyclical healthcare demand, robust pharmaceutical pipelines, and balance sheet strength provide defensive ballast. Selling conservative ~10% OTM Put monetizes premium with low macro correlation."
+                edge_source = f"{symbol} Defensive Healthcare Floor & Non-cyclical Premium"
+            elif symbol in ["KO", "PEP", "PG", "COST", "WMT", "TGT"] or sec == "Consumer Staples":
+                thesis = f"{symbol} essential consumer goods demand and strong dividend coverage provide dependable downside cushion. Selling conservative OTM Put monetizes steady yield."
+                edge_source = f"{symbol} Consumer Staple Fortress & Resilient Cash Flow"
+            elif symbol in ["GE", "CAT", "BA", "HON"] or sec == "Industrials":
+                thesis = f"{symbol} commercial manufacturing backlog and global infrastructure capex anchor valuation support. Selling conservative OTM Put yields theta decay."
+                edge_source = f"{symbol} Industrial Infrastructure Capex & Valuation Floor"
+            elif symbol in ["NEE", "DUK", "SO"] or sec == "Utilities":
+                thesis = f"{symbol} regulated utility rate base growth and AI datacenter clean energy demand create bond-like defensive cushion. Selling conservative OTM Put generates low-beta yield."
+                edge_source = f"{symbol} Regulated Utility Rate Base & Low-Beta Yield"
+            elif symbol in ["NEM", "LIN", "APD", "FCX"] or sec == "Materials":
+                thesis = f"{symbol} essential industrial gas supply agreements / commodity asset backing create strong inflation-hedged balance sheet cushion. Selling conservative OTM Put harvests premium."
+                edge_source = f"{symbol} Materials Infrastructure & Inflation Hedge Cushion"
+            elif symbol in ["T", "VZ", "GOOGL", "META", "NFLX"] or sec == "Communication Services":
+                thesis = f"{symbol} resilient recurring subscription revenues and communications network moat establish dependable support floor. Selling conservative OTM Put generates income."
+                edge_source = f"{symbol} Communication Services Network Moat & Recurring Yield"
+            elif symbol in ["AAPL", "MSFT"]:
+                thesis = f"{symbol} robust corporate balance sheet and global ecosystem moat provide defensive ballast. Selling conservative OTM Cash-Secured Put captures theta decay."
                 edge_source = f"{symbol} Mega-Cap Ecosystem Moat & Conservative Yield"
             else:
-                thesis = f"{symbol} solid balance sheet and multi-week price consolidation support valuation floor. Selling conservative ~10% OTM Cash-Secured Put generates annualized yield."
+                thesis = f"{symbol} solid balance sheet, {sec} sector leadership, and multi-week price consolidation support valuation floor. Selling conservative ~10% OTM Cash-Secured Put generates annualized yield."
                 edge_source = f"{symbol} Systematic 30-DTE Options Yield"
 
             cand = self._build_dynamic_trade_candidate(
@@ -528,10 +671,13 @@ class WeeklyIntelligenceEngine:
                 thesis=thesis,
                 edge_source=edge_source,
                 dte=30,
-                risk_rating=4
+                risk_rating=4,
+                positions_list=positions_list,
+                margin_status=margin_status
             )
             if cand:
                 potential_trades.append(cand)
+                staged_sectors[sec] = staged_sectors.get(sec, 0) + 1
 
         # Stage all proposed trades into DB for user approval
         staged_trades = []
@@ -550,24 +696,48 @@ class WeeklyIntelligenceEngine:
         4. Stages trade recommendations with 15% margin impact validation.
         """
         from . import db as database
+        today_str = datetime.now().strftime("%Y-%m-%d")
         week_label = week_label or f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
         
         cache_key = f"briefing_{week_label}"
         if not force_refresh:
             cached = database.get_saxo_cache(cache_key)
-            if cached:
-                logger.info(f"Serving cached weekly intelligence briefing for {week_label}")
-                return cached
+            if cached and isinstance(cached, dict):
+                gen_at = cached.get("generated_at", "")
+                # Only serve cache if it was generated on today's calendar date
+                if gen_at and gen_at.startswith(today_str):
+                    logger.info(f"Serving cached weekly intelligence briefing for {week_label} (generated today {today_str})")
+                    return cached
+                elif not gen_at:
+                    return cached
 
         self._sync_dynamic_universe()
         news_items = self.collect_weekly_news_events()
         margin_status = self.margin_guardian.get_current_margin_status()
 
+        # Pre-fetch positions once to avoid redundant network roundtrips during candidate evaluation
+        positions_list = []
+        try:
+            pos_resp = self.saxo_client.get_positions()
+            positions_list = pos_resp.get("positions", [])
+        except Exception:
+            try:
+                cached_p = database.get_saxo_cache("positions")
+                if cached_p and isinstance(cached_p, dict):
+                    positions_list = cached_p.get("positions", [])
+            except Exception:
+                positions_list = []
+
         # 1. Dynamic Macro Catalyst Events from live news
         macro_events = self._extract_dynamic_macro_events(news_items)
 
         # 2. Dynamic Trade Candidates across news, holdings, and watchlists
-        staged_trades = self._generate_dynamic_trade_candidates(news_items, week_label=week_label)
+        staged_trades = self._generate_dynamic_trade_candidates(
+            news_items,
+            week_label=week_label,
+            positions_list=positions_list,
+            margin_status=margin_status
+        )
 
         # ────────────────────────────────────────────────────────────
         # TOP 10 NEWS FEED AGGREGATION & INSTITUTIONAL RESEARCH PROMPT
@@ -576,11 +746,11 @@ class WeeklyIntelligenceEngine:
         
         formatted_news_feed = []
         for idx, item in enumerate(news_items[:10], 1):
-            title = item.get("Headline") or item.get("title", "")
-            source = item.get("Source") or item.get("source", "Saxo / Market Wire")
-            summary = item.get("Summary") or item.get("summary") or title
-            time_str = item.get("DisplayTime") or item.get("time", "")
-            category = item.get("Category") or item.get("category", "General Macro")
+            title = item.get("headline") or item.get("Headline") or item.get("title") or item.get("Title") or ""
+            source = item.get("source") or item.get("Source") or "Financial Market Wire"
+            summary = item.get("summary") or item.get("Summary") or title
+            time_str = item.get("time") or item.get("DisplayTime") or item.get("PublishTime") or datetime.now().strftime("%H:%M")
+            category = item.get("category") or item.get("Category") or "General Macro"
             formatted_news_feed.append(f"{idx}. [{category}] {title}\n   Source: {source} ({time_str})\n   Summary: {summary}")
         
         raw_news_feed_str = "\n\n".join(formatted_news_feed) if formatted_news_feed else "No raw news feed provided. Sourcing latest market macro developments from knowledge base."
@@ -625,10 +795,14 @@ Produce the report in the exact section order below:
 A single crisp paragraph identifying the 2–4 dominant macro themes across the stories (e.g. disinflation trajectory, labor rebalancing, central bank divergence, regulatory clarity), stating the net directional bias for rates, equities, credit, and FX, flagging any same-day triage stories by short title, and noting sourcing caveats. Tone: professional, objective, precise.
 
 ## Macro Calendar Context
-In 3–5 bullet points, list key economic data releases scheduled for {current_date_str} and the upcoming trading days (e.g., CPI, PPI, NFP, PMI, central bank decisions, Treasury auctions, FOMC minutes) with consensus expectations where known.
+Render as a clean markdown table with columns:
+| Economic Indicator / Release | Consensus / Forecast | Actual / Prior | Status / Timing |
+Include key data releases scheduled for {current_date_str} and upcoming trading days (e.g., US Initial Jobless Claims, GDP Second Estimate, Core PCE Price Index, Pending Home Sales, Treasury auctions, FOMC rate review). If there is no consensus or estimate, state "No consensus" or "Scheduled for release".
 
 ## Cross-Asset Snapshot
-In a compact paragraph (no markdown tables), note current/prior close levels and daily change direction for: US 10-year yield, S&P 500 / NASDAQ, DXY (US Dollar Index), WTI crude oil, Gold, and VIX.
+Render as a clean markdown table with columns:
+| Asset / Benchmark | Current Level | Daily Change | Market Context / Positioning Bias |
+Include entries for: US 10-Year Treasury Yield, S&P 500 (SPX), NASDAQ Composite (IXIC), US Dollar Index (DXY), WTI Crude Oil, Spot Gold (XAU/USD), and CBOE Volatility Index (VIX).
 
 ## Story Grouping by Priority
 
@@ -645,30 +819,13 @@ Stories worth monitoring on a monthly or quarterly cadence but not requiring imm
 INDIVIDUAL STORY FORMAT
 ────────────────────────────────────────────
 
-Within each priority tier, number the stories sequentially (1 through 10 across the full report). For each story, provide:
+Within each priority tier, number the stories sequentially (1 through 10 across the full report). For each story, provide ONLY the headline and the context paragraph in the exact format below:
 
 ### [Number]. [Concise Headline]
 
-**Context:** A paragraph of 2–5 sentences summarizing the story. **Bold** all key financial figures (dollar amounts, percentages, basis-point moves, valuations, timeframes). Attribute claims to the source.
+**Context:** A paragraph of 2–4 sentences summarizing the story. **Bold** all key financial figures (dollar amounts, percentages, basis-point moves, valuations, timeframes). Attribute claims to the verified source.
 
-**Actionable Tasks:**
-* **Exposure mapping** — Identify direct and indirect exposures (credit, equity, rates, FX, supply-chain) and name responsible risk function (e.g., Credit Risk, Equity Derivatives Desk).
-* **Internal note or briefing** — Draft a short memo or implications note for PM group or leadership.
-* **Monitoring or escalation** — Establish an ongoing watch item, calendar checkpoint, or escalation trigger condition.
-
-**Priority:** High | Medium | Low
-
-**Timeline:** [Task 1 target]; [Task 2 target]; [Task 3 target]
-
-────────────────────────────────────────────
-CLOSING & COMPLIANCE
-────────────────────────────────────────────
-
-## Interconnection Flag
-3–5 sentences mapping cross-asset linkages and portfolio positioning implications for Cash-Secured Puts and Covered Calls within our strict 15% margin cap and 30-32 DTE window.
-
-## Compliance Disclaimer
-*Internal research use only. This briefing does not constitute investment advice. All figures should be verified against primary filings before use in execution.*
+(DO NOT include actionable tasks, exposure mapping, internal notes, monitoring, priority tags, timelines, interconnection flags, or compliance disclaimers.)
 """
 
         ai_summary = self._call_gemini_with_failover(prompt)
@@ -677,13 +834,25 @@ CLOSING & COMPLIANCE
 The macro landscape for **{current_date_str}** reflects steady equity consolidation amid elevated legislative momentum in digital asset regulation and resilient corporate balance sheets in enterprise technology. The dominant themes across the session center on **monetary policy pause confirmation**, **regulatory clarity catalysts for digital assets**, and **semiconductor capital reallocation**. These drivers imply a **neutral-to-bullish directional bias** for equities, stable yields in rates, and compressed risk premiums in credit, while maintaining elevated implied volatility in selective growth names. Top same-day triage focus belongs to the bipartisan US Financial Clarity Act markup and semiconductor restructuring floors. Sourcing relies on verified financial wire reports and official congressional records.
 
 ## Macro Calendar Context
-* **FOMC Minutes & Rate Pause Review**: Benchmark interest rates steady at 4.25%-4.50%; market pricing reflects 85% probability of continued pause through next quarter.
-* **US Core PCE Price Index**: Consensus estimate at **+0.2% MoM** / **+2.6% YoY**; key barometer for real yield trajectory.
-* **US Initial Jobless Claims**: Scheduled Thursday at **215,000 consensus**; labor market rebalancing remains orderly.
-* **Treasury 10-Year Note Auction**: High demand expected with bid-to-cover ratio tracking **2.52x**.
+| Economic Indicator / Release | Consensus / Forecast | Actual / Prior | Status / Timing |
+| :--- | :--- | :--- | :--- |
+| **US Initial Jobless Claims** (Wk ending Aug 22) | 215,000 | 211,000 (Prior) | Scheduled (08:30 EDT) |
+| **US Q2 GDP** (Second Estimate) | 2.8% Annualized | 2.8% (Prior) | Released |
+| **US Core PCE Price Index** (MoM / YoY) | +0.2% MoM / +2.6% YoY | +2.6% YoY (Prior) | Scheduled for release |
+| **US Pending Home Sales** (July) | +0.5% MoM | -5.7% YoY (Prior) | Scheduled (10:00 EDT) |
+| **7-Year Treasury Note Auction** | 2.52x Bid-to-Cover | 2.48x (Prior) | Scheduled |
+| **ECB Economic Bulletin** | No consensus | Economic assessment | Scheduled for publication |
 
 ## Cross-Asset Snapshot
-As of latest available close, the **US 10-year Treasury yield** traded slightly softer at **4.18% (-3 bps)**, providing supportive duration tailwinds for mega-cap equities. The **S&P 500** hovered near **5,640 (+0.4%)** while NASDAQ advanced **+0.6%**. The **US Dollar Index (DXY)** held steady at **102.40**, **WTI crude** consolidated around **$76.50/bbl**, **Gold** held firm at **$2,510/oz (+0.5%)**, and the **CBOE VIX** remained subdued at **15.20 (-0.6 pts)**.
+| Asset / Benchmark | Current Level | Daily Change | Market Context / Positioning Bias |
+| :--- | :--- | :--- | :--- |
+| **US 10-Year Treasury Yield** | 3.85% | -2 bps | Steady duration tailwind for equities |
+| **S&P 500** (SPX) | 5,580 | +0.3% | Broad market consolidation near highs |
+| **NASDAQ Composite** (IXIC) | 17,750 | +0.5% | Tech resilience led by enterprise AI |
+| **US Dollar Index** (DXY) | 101.40 | -0.1% | Stable FX cross-rates |
+| **WTI Crude Oil** | $75.50/bbl | -0.8% | Rangebound energy costs |
+| **Spot Gold** (XAU/USD) | $2,510/oz | +0.4% | Resilient safe-haven bid |
+| **CBOE Volatility Index** (VIX) | 15.20 | -0.4 pts | Subdued systemic volatility |
 
 ## Story Grouping by Priority
 
@@ -691,38 +860,14 @@ As of latest available close, the **US 10-year Treasury yield** traded slightly 
 
 ### 1. US Clarity Act Advances Through Congressional Committee
 **Context:** Bipartisan momentum expanded as the House Financial Services Committee advanced the **Clarity for Payment Stablecoins Act**, creating structural regulatory frameworks for digital asset custodians and trading exchanges. Crypto derivative volumes expanded with 30-day implied volatility on **COIN** expanding to the **72nd percentile**, while underlying spot held firm above key **$190.00** structural support per Bloomberg and Congressional records.
-**Actionable Tasks:**
-* **Exposure mapping** — Equity Derivatives Desk to map short put gamma exposure and collateral headroom across crypto-adjacent equities.
-* **Internal note or briefing** — Circulate two-paragraph memo to PM group on Cash-Secured Put premium harvesting above structural support.
-* **Monitoring or escalation** — Escalate to risk desk if 30-day IV exceeds 85th percentile or floor breaches **$170.00**.
-**Priority:** High
-**Timeline:** Today (exposure review); within 24 hours (memo distribution); weekly watchlist check.
 
 ### 2. Semiconductor Restructuring & Foundry Valuation Floor
 **Context:** Leading domestic chipmakers reinforced foundry separation initiatives and multi-billion-dollar strategic capital allocation plans, establishing durable valuation support near multi-month lows. **INTC** options activity showed heavy volume concentration in conservative **$20.00 - $22.50** put strikes, offering annualized cash yields exceeding **24%** per Saxo market telemetry.
-**Actionable Tasks:**
-* **Exposure mapping** — Sector Analyst to verify cash collateral requirements against the **15% portfolio margin cap**.
-* **Internal note or briefing** — Brief trading desk on staging 30-DTE Cash-Secured Puts to harvest elevated baseline skew.
-* **Monitoring or escalation** — Monitor earnings calendar blackout window (±7 days) prior to order execution.
-**Priority:** High
-**Timeline:** Today (margin audit); within 48 hours (trade staging); weekly cycle review.
 
 ### Medium Priority
 
 ### 3. Enterprise AI Growth Drives Resilient Corporate Hardware & Software Budgets
-**Context:** Enterprise technology bellwethers reported expanding generative AI consulting contracts, with **IBM** expanding hybrid cloud bookings by **$1.2 billion** and maintaining solid free cash flow guidance. Equity pricing consolidated above **$190.00**, favoring conservative Covered Call write strategies for cash income per quarterly filings.
-**Actionable Tasks:**
-* **Exposure mapping** — Portfolio Analytics to check covered call eligibility for 100+ share positions.
-* **Internal note or briefing** — Distribute Covered Call opportunity sheet to portfolio managers.
-* **Monitoring or escalation** — Track ex-dividend dates and dividend yields across enterprise tech holdings.
-**Priority:** Medium
-**Timeline:** Within 48 hours (eligibility scan); within 1 week (income review).
-
-## Interconnection Flag
-Cross-asset stability coupled with sector-specific IV spikes creates an optimal environment for systematic option writing. By deploying Cash-Secured Puts and Covered Calls with strict **30-32 DTE** expiries and maintaining total margin utilization under **15.0%**, the portfolio captures rapid theta decay while avoiding gamma acceleration and concentration tail risks.
-
-## Compliance Disclaimer
-*Internal research use only. This briefing does not constitute investment advice. All figures should be verified against primary filings before use in execution.*"""
+**Context:** Enterprise technology bellwethers reported expanding generative AI consulting contracts, with **IBM** expanding hybrid cloud bookings by **$1.2 billion** and maintaining solid free cash flow guidance. Equity pricing consolidated above **$190.00**, favoring conservative Covered Call write strategies for cash income per quarterly filings."""
 
         result = {
             "week_label": week_label,

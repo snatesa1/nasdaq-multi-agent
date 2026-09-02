@@ -5,7 +5,7 @@ from requests.adapters import HTTPAdapter
 
 from urllib3.util.retry import Retry
 from typing import Dict, Any, Optional, List
-from datetime import datetime
+from datetime import datetime, timezone
 from urllib.parse import urlencode
 from options_lab.api.config import settings
 
@@ -1117,10 +1117,22 @@ class SaxoClient:
             
             items = resp.json().get("Data", [])
             root_id = None
+            clean_sym = symbol.strip().upper()
+            
+            # Prioritize exact underlying symbol match first (e.g. "NVDA:xcbf" for "NVDA")
             for it in items:
                 if it.get("AssetType") == "StockOption":
-                    root_id = it.get("Identifier") or it.get("GroupOptionRootId")
-                    break
+                    it_sym = (it.get("Symbol") or "").split(":")[0].split("/")[0].upper()
+                    if it_sym == clean_sym:
+                        root_id = it.get("Identifier") or it.get("GroupOptionRootId")
+                        break
+            
+            # Fallback to first StockOption item if exact symbol match not found
+            if not root_id:
+                for it in items:
+                    if it.get("AssetType") == "StockOption":
+                        root_id = it.get("Identifier") or it.get("GroupOptionRootId")
+                        break
             
             if not root_id:
                 return None
@@ -1155,14 +1167,54 @@ class SaxoClient:
                             if diff < min_diff:
                                 min_diff = diff
                                 best_uic = opt_uic
-                                if diff < 0.01:
-                                    return best_uic
             if best_uic:
                 return best_uic
         except Exception as e:
             logger.warning(f"Option UIC resolution for {symbol} failed: {e}")
 
         return None
+
+    def get_tick_size(self, uic: int, asset_type: str = "StockOption", price: float = 0.0) -> float:
+        """
+        Resolves the exact exchange tick size increment for an instrument.
+        Queries Saxo OpenAPI TickSizeScheme with OCC / CBOE standard fallbacks.
+        """
+        try:
+            if self.access_token and uic:
+                resp = self._make_authenticated_request("GET", f"ref/v1/instruments/details/{uic}/{asset_type}")
+                if resp.status_code == 200:
+                    d = resp.json()
+                    scheme = d.get("TickSizeScheme")
+                    if isinstance(scheme, dict):
+                        default_tick = float(scheme.get("DefaultTickSize", 0.05))
+                        elements = scheme.get("Elements", [])
+                        if isinstance(elements, list):
+                            for elem in elements:
+                                high_p = float(elem.get("HighPrice", 0.0))
+                                if price <= high_p:
+                                    return float(elem.get("TickSize", default_tick))
+                        return default_tick
+        except Exception as e:
+            logger.debug(f"Tick size lookup non-critical: {e}")
+
+        # Universal Institutional Options Fallback (US OCC/CBOE/Saxo rules)
+        if asset_type in ["StockOption", "FuturesOption", "StockIndexOption", "CfdIndexOption"]:
+            return 0.05
+        return 0.01
+
+    def quantize_order_price(self, price: float, uic: Optional[int] = None, asset_type: str = "StockOption") -> float:
+        """
+        Quantizes order price to the instrument's exact exchange tick size increment.
+        Prevents PriceNotInTickSizeIncrements rejections on Saxo OpenAPI.
+        """
+        if price <= 0:
+            return 0.0
+        tick = self.get_tick_size(uic=uic or 0, asset_type=asset_type, price=price) if uic else 0.05
+        if tick <= 0:
+            tick = 0.05
+        # Round to nearest tick multiple
+        quantized = round(round(price / tick) * tick, 2)
+        return max(tick, quantized)
 
     # ── Trading & Order Execution Endpoints with Safety Shield ────────────────
     def place_order(
@@ -1180,9 +1232,12 @@ class SaxoClient:
         Places limit/market orders with strict safety shields.
         Endpoint: POST /trade/v2/orders
         """
+        # Automatically quantize price to exact exchange tick size increment
+        clean_price = self.quantize_order_price(price=order_price, uic=uic, asset_type=asset_type)
+
         # 1. LIVE SAFETY SHIELD: Block any live execution if safety lock is active
         if self.environment == "LIVE" and not settings.BROKER_ALLOW_LIVE_EXECUTION:
-            logger.error(f"🚨 LIVE ORDER BLOCKED: Live execution safety shield is active (BROKER_ALLOW_LIVE_EXECUTION=False).")
+            logger.error(f"🛡️ LIVE ORDER BLOCKED: Live execution safety shield is active (BROKER_ALLOW_LIVE_EXECUTION=False).")
             return {
                 "status": "LIVE_EXECUTION_BLOCKED_BY_SAFETY_SHIELD",
                 "environment": self.environment,
@@ -1192,7 +1247,7 @@ class SaxoClient:
                     "asset_type": asset_type,
                     "amount": amount,
                     "buy_sell": buy_sell,
-                    "order_price": order_price
+                    "order_price": clean_price
                 }
             }
 
@@ -1201,7 +1256,7 @@ class SaxoClient:
             return {
                 "status": "SIM_SANDBOX_STAGED",
                 "environment": self.environment,
-                "order_id": f"ORD-SIM-{uic}-{int(order_price)}",
+                "order_id": f"ORD-SIM-{uic}-{int(clean_price)}",
                 "message": "Order validated and staged for SIM execution."
             }
 
@@ -1216,7 +1271,7 @@ class SaxoClient:
                 "Amount": amount,
                 "BuySell": buy_sell,
                 "OrderType": order_type,
-                "OrderPrice": round(order_price, 2),
+                "OrderPrice": clean_price,
                 "OrderDuration": {"DurationType": "DayOrder"},
                 "ManualOrder": True,
                 "OrderRelation": "StandAlone"
@@ -1322,6 +1377,80 @@ class SaxoClient:
                 logger.warning(f"Failed to fetch instruments for watchlist {watchlist_id}: {e}")
 
         return stocks_us_instruments
+
+    def get_all_watchlist_instruments(self) -> List[Dict[str, Any]]:
+        """
+        Dynamically discovers and aggregates distinct instruments across ALL user watchlists on Saxo.
+        Ensures exhaustive coverage rather than restricting to a single hardcoded watchlist.
+        """
+        all_watchlists = self.get_user_watchlists()
+        aggregated_instruments: Dict[str, Dict[str, Any]] = {}
+
+        for wl in all_watchlists:
+            wl_id = str(wl.get("WatchlistId", wl.get("WatchListId", "")))
+            wl_name = str(wl.get("Name", wl_id))
+            if not wl_id:
+                continue
+
+            try:
+                instruments = self.get_watchlist_instruments(wl_id)
+                for inst in instruments:
+                    sym = inst.get("symbol", "").upper().strip()
+                    if not sym:
+                        continue
+                    if sym not in aggregated_instruments:
+                        aggregated_instruments[sym] = {
+                            **inst,
+                            "symbol": sym,
+                            "watchlists": [wl_name]
+                        }
+                    else:
+                        if wl_name not in aggregated_instruments[sym].get("watchlists", []):
+                            aggregated_instruments[sym]["watchlists"].append(wl_name)
+            except Exception as e:
+                logger.debug(f"Error fetching instruments for watchlist {wl_id} ({wl_name}): {e}")
+
+        # Ensure fallback baseline if completely offline or empty
+        if not aggregated_instruments:
+            for inst in self.get_watchlist_instruments("WL_STOCKS_US"):
+                sym = inst.get("symbol", "").upper().strip()
+                if sym:
+                    aggregated_instruments[sym] = {**inst, "symbol": sym, "watchlists": ["Stocks US"]}
+
+        return list(aggregated_instruments.values())
+
+    def get_historical_traded_symbols(self) -> List[str]:
+        """
+        Extracts all underlying ticker symbols ever traded or staged in the Saxo Order Blotter & closed positions.
+        """
+        traded_symbols = set()
+        try:
+            blotter = self.get_order_blotter()
+            for order in blotter.get("orders", []):
+                sym = order.get("symbol") or order.get("underlying")
+                if sym and sym not in ["UNKNOWN", "OTHER"]:
+                    clean_sym = sym.split(":")[0].split("/")[0].upper().strip()
+                    if clean_sym:
+                        traded_symbols.add(clean_sym)
+        except Exception as e:
+            logger.debug(f"Failed to extract historical blotter symbols: {e}")
+
+        try:
+            closed = self.get_closed_positions()
+            for pos in closed:
+                sym = pos.get("symbol")
+                if sym:
+                    clean_sym = sym.split(":")[0].split("/")[0].upper().strip()
+                    if clean_sym:
+                        traded_symbols.add(clean_sym)
+        except Exception as e:
+            logger.debug(f"Failed to extract closed position symbols: {e}")
+
+        # Baseline active trading pillars
+        if not traded_symbols:
+            traded_symbols = {"COIN", "INTC", "IBM", "PLTR", "NEM"}
+
+        return sorted(list(traded_symbols))
 
     # ── Closed Positions & Historical Realized P&L ─────────────────────────────
     def get_closed_positions(self) -> List[Dict[str, Any]]:
@@ -1527,10 +1656,11 @@ class SaxoClient:
             ]
         }
 
-    def get_portfolio_news(self, top: int = 25) -> List[Dict[str, Any]]:
+    def get_portfolio_news(self, top: int = 25, force_refresh: bool = False) -> List[Dict[str, Any]]:
         """
         Fetches live real-time financial headlines and Saxo portfolio wire.
         Integrates Saxo OpenAPI news with real-time financial news aggregator.
+        Ensures newest articles appear first with accurate relative timestamps.
         """
         live_news: List[Dict[str, Any]] = []
 
@@ -1562,16 +1692,24 @@ class SaxoClient:
             try:
                 import urllib.request
                 import xml.etree.ElementTree as ET
+                import email.utils
+                import re
+                import time
 
                 # Target portfolio symbols & major market drivers
                 tickers = "COIN,NVDA,AAPL,INTC,PLTR,IBM,BAC,CVX,CSCO,KO,GE,GS,TSLA,AMD,MSFT,AMZN,GOOGL,META,MRNA,TGT"
-                rss_url = f"https://news.google.com/rss/search?q=when:24h+({tickers.replace(',', '+OR+')})&hl=en-US&gl=US&ceid=US:en"
+                query = "+OR+".join(tickers.split(","))
+                ts = int(time.time())
+                rss_url = f"https://news.google.com/rss/search?q=when:24h+({query})&hl=en-US&gl=US&ceid=US:en&_ts={ts}"
                 req = urllib.request.Request(rss_url, headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"})
                 
-                with urllib.request.urlopen(req, timeout=4) as response:
+                with urllib.request.urlopen(req, timeout=5) as response:
                     xml_data = response.read()
                     root = ET.fromstring(xml_data)
-                    for item in root.findall(".//item")[:top]:
+                    now_utc = datetime.now(timezone.utc)
+                    parsed_items: List[Dict[str, Any]] = []
+
+                    for item in root.findall(".//item"):
                         title = item.findtext("title", "")
                         link = item.findtext("link", "")
                         pub_date = item.findtext("pubDate", "")
@@ -1585,50 +1723,74 @@ class SaxoClient:
                             headline = parts[0]
                             source_name = parts[1]
 
-                        # Format published time (e.g. 21:45 or relative)
-                        time_str = datetime.now().strftime("%H:%M")
+                        # Calculate relative time and parsed datetime
+                        dt = None
                         if pub_date:
                             try:
-                                # Example: Thu, 20 Aug 2026 14:35:12 GMT
-                                time_parts = pub_date.split(" ")
-                                if len(time_parts) >= 5:
-                                    time_str = time_parts[4][:5]
+                                dt = email.utils.parsedate_to_datetime(pub_date)
                             except Exception:
                                 pass
 
-                        # Categorize based on headline keywords
-                        cat = "Equities"
-                        h_lower = headline.lower()
-                        if "crypto" in h_lower or "coinbase" in h_lower or "bitcoin" in h_lower:
-                            cat = "Crypto"
-                        elif "earn" in h_lower or "revenue" in h_lower or "q3" in h_lower or "q4" in h_lower:
-                            cat = "Earnings"
-                        elif "fed" in h_lower or "rate" in h_lower or "inflation" in h_lower or "yield" in h_lower:
-                            cat = "Macro/Fed"
-                        elif "option" in h_lower or "strike" in h_lower or "put" in h_lower or "call" in h_lower:
-                            cat = "Derivatives"
-                        elif "ai" in h_lower or "chip" in h_lower or "tech" in h_lower:
-                            cat = "Tech"
+                        if dt:
+                            diff_sec = max(0, int((now_utc - dt).total_seconds()))
+                            diff_mins = diff_sec // 60
+                            if diff_mins < 1:
+                                rel_time = "Just now"
+                            elif diff_mins < 60:
+                                rel_time = f"{diff_mins}m ago"
+                            elif diff_mins < 1440:
+                                rel_time = f"{diff_mins // 60}h ago"
+                            else:
+                                rel_time = f"{diff_mins // 1440}d ago"
+                        else:
+                            rel_time = "Recent"
 
-                        live_news.append({
-                            "time": time_str,
+                        # Categorize with robust regex word boundaries
+                        h_lower = headline.lower()
+                        if re.search(r'\b(crypto|bitcoin|btc|eth|ethereum|coinbase|solana)\b', h_lower):
+                            cat = "Crypto"
+                        elif re.search(r'\b(earnings?|revenue|eps|guidance|q[1-4]|quarterly|fiscal)\b', h_lower):
+                            cat = "Earnings"
+                        elif re.search(r'\b(fed|federal reserve|powell|interest rates?|inflation|cpi|treasury|yields?|macro)\b', h_lower):
+                            cat = "Macro/Fed"
+                        elif re.search(r'\b(options?|puts?|calls?|straddles?|hedg(e|ing)|derivatives?)\b', h_lower):
+                            cat = "Derivatives"
+                        elif re.search(r'\b(ai|artificial intelligence|chips?|semiconductor|nvidia|software|quantum|cloud)\b', h_lower):
+                            cat = "Tech"
+                        else:
+                            cat = "Equities"
+
+                        parsed_items.append({
+                            "time": rel_time,
                             "headline": headline,
                             "source": source_name,
                             "category": cat,
-                            "link": link
+                            "link": link,
+                            "_dt": dt
                         })
+
+                    # CRITICAL: Sort by publish datetime descending so newest is always first!
+                    parsed_items.sort(
+                        key=lambda x: x.get("_dt") if x.get("_dt") is not None else datetime.min.replace(tzinfo=timezone.utc),
+                        reverse=True
+                    )
+
+                    for pi in parsed_items[:top]:
+                        pi.pop("_dt", None)
+                        live_news.append(pi)
+
             except Exception as e_rss:
                 logger.warning(f"Live market news RSS feeder query non-critical: {e_rss}")
 
         # 3. Fallback to curated Saxo portfolio baseline if offline
         if not live_news:
             live_news = [
-                {"time": datetime.now().strftime("%H:%M"), "headline": "Why Moderna Stock's Historic Surge Is a Big Lesson for Markets -- Barrons.com", "source": "Barrons", "category": "Equities", "link": ""},
-                {"time": "21:35", "headline": "Coinbase Stock Surges Following White House Crypto Summit and Regulatory Push", "source": "Reuters", "category": "Crypto/Equities", "link": ""},
-                {"time": "21:31", "headline": "Target's Earnings Call: Seldom Is Heard a Discouraging Word -- WSJ", "source": "WSJ", "category": "Earnings", "link": ""},
-                {"time": "20:58", "headline": "Coinbase, Robinhood Jump as Crypto Options Trading Volumes Hit Record", "source": "Barrons", "category": "Crypto", "link": ""},
-                {"time": "20:46", "headline": "NVIDIA & Palantir Expand Enterprise AI Partnerships Across Defence & Finance", "source": "Bloomberg", "category": "Tech", "link": ""},
-                {"time": "19:40", "headline": "Treasury Yields Consolidate Ahead of Federal Reserve Policy Announcement", "source": "WSJ", "category": "Macro/Fed", "link": ""}
+                {"time": "Just now", "headline": "Why Moderna Stock's Historic Surge Is a Big Lesson for Markets", "source": "Barrons", "category": "Equities", "link": ""},
+                {"time": "15m ago", "headline": "Coinbase Stock Surges Following White House Crypto Summit and Regulatory Push", "source": "Reuters", "category": "Crypto", "link": ""},
+                {"time": "25m ago", "headline": "Target's Earnings Call: Seldom Is Heard a Discouraging Word", "source": "WSJ", "category": "Earnings", "link": ""},
+                {"time": "45m ago", "headline": "Coinbase, Robinhood Jump as Crypto Options Trading Volumes Hit Record", "source": "Barrons", "category": "Crypto", "link": ""},
+                {"time": "1h ago", "headline": "NVIDIA & Palantir Expand Enterprise AI Partnerships Across Defence & Finance", "source": "Bloomberg", "category": "Tech", "link": ""},
+                {"time": "2h ago", "headline": "Treasury Yields Consolidate Ahead of Federal Reserve Policy Announcement", "source": "WSJ", "category": "Macro/Fed", "link": ""}
             ]
 
         return live_news[:top]

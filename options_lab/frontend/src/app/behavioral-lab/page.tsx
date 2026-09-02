@@ -92,7 +92,7 @@ export default function BehavioralLabPage() {
   const fetchLiveNews = async (showSpinner = true) => {
     if (showSpinner) setNewsRefreshing(true);
     try {
-      const newsRes = await optionsApi.getPortfolioNews(35);
+      const newsRes = await optionsApi.getPortfolioNews(35, true);
       if (newsRes?.news) {
         setNewsItems(newsRes.news);
         setLastNewsUpdate(new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }));
@@ -724,7 +724,11 @@ export default function BehavioralLabPage() {
                       className="py-3 px-2 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:bg-slate-50/80 rounded-xl transition group"
                     >
                       <div className="flex items-start gap-3 min-w-0">
-                        <div className="px-2 py-1 bg-slate-100 text-slate-700 font-mono text-[11px] font-bold rounded-lg shrink-0 border border-slate-200">
+                        <div className={`px-2 py-1 font-mono text-[11px] font-bold rounded-lg shrink-0 border ${
+                          item.time?.includes('m ago') || item.time === 'Just now'
+                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            : 'bg-slate-100 text-slate-700 border-slate-200'
+                        }`}>
                           {item.time || 'Live'}
                         </div>
                         

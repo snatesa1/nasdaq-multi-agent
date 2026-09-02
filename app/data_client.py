@@ -141,10 +141,17 @@ class AlpacaOHLCVClient:
     """Lightweight Alpaca client — only for price data (OHLCV)."""
 
     def __init__(self):
-        self.client = StockHistoricalDataClient(
-            api_key=settings.ALPACA_API_KEY,
-            secret_key=settings.ALPACA_SECRET_KEY,
-        )
+        try:
+            if settings.ALPACA_API_KEY and settings.ALPACA_SECRET_KEY:
+                self.client = StockHistoricalDataClient(
+                    api_key=settings.ALPACA_API_KEY,
+                    secret_key=settings.ALPACA_SECRET_KEY,
+                )
+            else:
+                self.client = None
+        except Exception as e:
+            logger.warning(f"Alpaca client initialization offline: {e}")
+            self.client = None
 
     def get_ohlcv(self, symbol: str, days: int = 365) -> pd.DataFrame:
         """Fetch daily OHLCV bars for a single symbol over the last N days directly from the Google Sheet."""

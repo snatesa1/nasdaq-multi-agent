@@ -43,12 +43,17 @@ interface MacroEvent {
 interface StagedTrade {
   trade_id: string;
   symbol: string;
+  sector?: string;
   strategy: string;
   direction: string;
   strike: number;
   delta: number;
   dte: number;
   premium_estimate: number;
+  bid_price?: number;
+  ask_price?: number;
+  spread?: number;
+  pricing_source?: string;
   contracts: number;
   spot_price: number;
   max_margin_impact_pct: number;
@@ -86,6 +91,8 @@ interface BriefingData {
   week_label: string;
   generated_at: string;
   ai_summary: string;
+  framework?: string;
+  hitl_status?: string;
   margin_status: MarginStatus;
   scoped_universe_count: number;
   watchlist_tickers: string[];
@@ -98,6 +105,8 @@ export default function WeeklyIntelligencePage() {
   const [briefing, setBriefing] = useState<BriefingData | null>(null);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+  const [handshakeError, setHandshakeError] = useState<string | null>(null);
+  const [loadingStep, setLoadingStep] = useState<string>('Verifying Backend Handshake...');
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
@@ -158,31 +167,71 @@ export default function WeeklyIntelligencePage() {
   const fetchBriefing = async (forceRefresh: boolean = false) => {
     setLoading(true);
     setError(null);
-    try {
-      if (forceRefresh) {
-        // Step 1: Force refresh broker cache so Saxo equity/cash/margin are 100% current
-        try {
-          await optionsApi.refreshBrokerData();
-        } catch (e) {
-          console.warn('Broker refresh during briefing update non-critical:', e);
-        }
-      }
+    setHandshakeError(null);
+    setLoadingStep('Verifying Backend Handshake...');
 
-      // Step 2: Fetch weekly briefing (with force_refresh=true if requested)
-      const data = await optionsApi.getWeeklyBriefing(undefined, forceRefresh);
+    // ── STEP 1: PRE-FLIGHT HANDSHAKE & SHORT-CIRCUIT ───────────────────────
+    try {
+      const handshake = await optionsApi.checkHandshake(3000);
+      if (!handshake.ok) {
+        // Fast short-circuit: do NOT hang in spinning state!
+        const errMsg = handshake.error || 'OptionsLab backend on port 8000 is unreachable.';
+        setLoading(false);
+        setHandshakeError(errMsg);
+        setError(`🔌 Backend Handshake Failed: ${errMsg}`);
+        setActionLog(prev => [
+          { id: `HANDSHAKE-FAIL-${Date.now()}`, msg: `❌ Handshake Short-Circuited: Backend is offline or not responding.`, time: new Date().toLocaleTimeString(), type: 'danger' },
+          ...prev
+        ]);
+        return; // HALT IMMEDIATELY
+      }
+    } catch (hErr: any) {
+      setLoading(false);
+      const errMsg = 'Cannot connect to OptionsLab backend on http://localhost:8000. Server is offline.';
+      setHandshakeError(errMsg);
+      setError(`🔌 Backend Handshake Failed: ${errMsg}`);
+      return;
+    }
+
+    // ── STEP 2: DELEGATE TO GOOGLE ADK 2.0 WORKFLOW PIPELINE ───────────────
+    setLoadingStep('Synthesizing Google ADK 2.0 Macro Intelligence & Live Quotes...');
+    if (forceRefresh) {
+      setActionLog(prev => [
+        { id: `REFRESH-START-${Date.now()}`, msg: '🔄 Delegating live market synthesis to Google ADK 2.0 graph engine...', time: new Date().toLocaleTimeString(), type: 'info' },
+        ...prev
+      ]);
+    }
+
+    try {
+      // Step 2: Fetch weekly briefing with 35s timeout guard
+      const data = await optionsApi.getWeeklyBriefing(undefined, forceRefresh, 35000);
       setBriefing(data);
       const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLastRefreshedAt(nowStr);
 
       if (forceRefresh) {
         setActionLog(prev => [
-          { id: `SYNC-${Date.now()}`, msg: `⚡ Fresh Macro Intelligence & Market Data Synchronized (${nowStr})`, time: nowStr, type: 'success' },
+          { id: `SYNC-${Date.now()}`, msg: `⚡ Fresh Macro Intelligence & Live OPRA Quotes Synchronized (${nowStr})`, time: nowStr, type: 'success' },
           ...prev
         ]);
       }
     } catch (err: any) {
       console.error('Failed to load weekly briefing:', err);
-      setError(err.message || 'Failed to generate weekly macro intelligence briefing.');
+      const isTimeout = err.message?.includes('timed out') || err.message?.includes('Timeout');
+      const isConnection = err.message?.includes('Handshake Disconnected') || err.message?.includes('Failed to fetch');
+
+      if (isConnection) {
+        setHandshakeError('Connection dropped: OptionsLab backend server became unreachable.');
+        setError('🔌 Backend Handshake Disconnected: Unable to reach localhost:8000.');
+      } else if (isTimeout) {
+        setError('⏳ Synthesis Timed Out: The background engine took longer than 35s. Please click "Refresh Intelligence" to retry.');
+        setActionLog(prev => [
+          { id: `TIMEOUT-${Date.now()}`, msg: '⚠️ ADK Pipeline timeout: You can retry or rely on cached data.', time: new Date().toLocaleTimeString(), type: 'danger' },
+          ...prev
+        ]);
+      } else {
+        setError(err.message || 'Failed to generate weekly macro intelligence briefing.');
+      }
     } finally {
       setLoading(false);
     }
@@ -252,9 +301,19 @@ export default function WeeklyIntelligencePage() {
           <div className="absolute right-0 top-0 h-40 w-40 rounded-full bg-indigo-50/60 blur-2xl" />
           <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-2 max-w-3xl">
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-[#4051B5] border border-indigo-100">
-                <Sparkles className="h-3.5 w-3.5" /> Weekly Macro Intelligence &amp; Execution Gate
-              </span>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-50 px-3 py-1 text-xs font-semibold text-[#4051B5] border border-indigo-100">
+                  <Sparkles className="h-3.5 w-3.5" /> Weekly Macro Intelligence &amp; Execution Gate
+                </span>
+                {briefing?.framework && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700 border border-emerald-200">
+                    <Cpu className="h-3 w-3 text-emerald-600" /> {briefing.framework}
+                  </span>
+                )}
+                <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 border border-amber-200">
+                  <Lock className="h-3 w-3 text-amber-600" /> HITL Gate: Dual-Key Guard
+                </span>
+              </div>
               <h1 className="text-2xl font-bold text-slate-800 tracking-tight sm:text-3xl">
                 Weekly Intelligence &amp; <span className="text-[#4051B5]">Trade Command Center</span>
               </h1>
@@ -287,10 +346,45 @@ export default function WeeklyIntelligencePage() {
           </div>
         </div>
 
-        {error && (
-          <div className="flex items-center gap-3 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
-            <AlertTriangle className="h-5 w-5 shrink-0 text-rose-500" />
-            <span>{error}</span>
+        {handshakeError ? (
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-5 rounded-xl bg-amber-50 border-2 border-amber-300 text-amber-950 shadow-sm">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="h-6 w-6 shrink-0 text-amber-600 mt-0.5" />
+              <div>
+                <h4 className="text-sm font-bold text-amber-900 flex items-center gap-2">
+                  🔌 Backend Handshake Short-Circuited
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-200 text-amber-800">
+                    HTTP 127.0.0.1:8000
+                  </span>
+                </h4>
+                <p className="text-xs text-amber-800 mt-1 leading-relaxed font-medium">
+                  {handshakeError}
+                </p>
+                <p className="text-[11px] font-mono text-amber-700 mt-1.5">
+                  Launch backend natively in PowerShell: <code className="bg-amber-200/70 px-2 py-0.5 rounded font-bold">.\restart_backend.ps1</code>
+                </p>
+              </div>
+            </div>
+            <button
+              onClick={() => fetchBriefing(true)}
+              className="shrink-0 flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Retry Handshake
+            </button>
+          </div>
+        ) : error && (
+          <div className="flex items-center justify-between gap-3 p-4 rounded-xl bg-rose-50 border border-rose-200 text-rose-700 text-xs font-medium">
+            <div className="flex items-center gap-3">
+              <AlertTriangle className="h-5 w-5 shrink-0 text-rose-500" />
+              <span>{error}</span>
+            </div>
+            <button
+              onClick={() => fetchBriefing(true)}
+              className="px-3 py-1.5 bg-rose-100 hover:bg-rose-200 text-rose-800 rounded-lg text-xs font-bold transition cursor-pointer"
+            >
+              Retry
+            </button>
           </div>
         )}
 
@@ -402,7 +496,28 @@ export default function WeeklyIntelligencePage() {
           </div>
 
           <div className="pt-1">
-            <MacroBriefingView content={briefing?.ai_summary || ''} />
+            {loading ? (
+              <div className="flex flex-col items-center justify-center py-16 px-4 space-y-4 rounded-xl bg-white/70 border border-indigo-100/80 shadow-2xs backdrop-blur-xs">
+                <div className="relative flex items-center justify-center">
+                  <div className="h-14 w-14 rounded-full border-4 border-indigo-100 border-t-[#4051B5] animate-spin" />
+                  <Sparkles className="h-6 w-6 text-[#4051B5] absolute animate-pulse" />
+                </div>
+                <div className="text-center space-y-1.5 max-w-md">
+                  <h4 className="text-sm font-bold text-slate-800">
+                    {loadingStep}
+                  </h4>
+                  <p className="text-xs text-slate-500 leading-relaxed">
+                    Aggregating real-time news catalysts, fetching authentic Saxo &amp; OPRA Bid-Ask quotes, and evaluating margin safety across watchlist.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-indigo-50 border border-indigo-100 text-[11px] font-mono font-semibold text-[#4051B5]">
+                  <RefreshCw className="h-3.5 w-3.5 animate-spin text-[#4051B5]" />
+                  <span>Google ADK 2.0 DAG &amp; Live OPRA Quotes</span>
+                </div>
+              </div>
+            ) : (
+              <MacroBriefingView content={briefing?.ai_summary || ''} />
+            )}
           </div>
         </div>
 
@@ -482,7 +597,7 @@ export default function WeeklyIntelligencePage() {
                         {trade.symbol}
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="text-base font-bold text-slate-800">{trade.strategy} ${trade.strike}</span>
                           <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-700 rounded font-mono font-medium">
                             Δ {trade.delta}
@@ -490,8 +605,35 @@ export default function WeeklyIntelligencePage() {
                           <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-700 rounded font-mono font-medium">
                             {trade.dte} DTE
                           </span>
+                          {trade.sector && (
+                            <span className="text-[11px] px-2 py-0.5 bg-indigo-50 text-[#4051B5] border border-indigo-100 rounded font-medium">
+                              {trade.sector}
+                            </span>
+                          )}
                         </div>
-                        <p className="text-xs text-slate-500 mt-0.5">Spot Price: ${trade.spot_price.toFixed(2)} | Est. Premium: ${trade.premium_estimate.toFixed(2)}</p>
+                        <div className="flex flex-wrap items-center gap-2 mt-1">
+                          <span className="text-xs text-slate-500 font-medium">Spot: ${trade.spot_price.toFixed(2)}</span>
+                          <span className="text-slate-300">|</span>
+                          <span className="text-xs font-bold font-mono text-slate-800">Limit (Mid): ${trade.premium_estimate.toFixed(2)}</span>
+                          {trade.bid_price !== undefined && trade.bid_price > 0 && (
+                            <>
+                              <span className="text-[11px] px-1.5 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded font-mono font-medium">
+                                Bid: ${trade.bid_price.toFixed(2)}
+                              </span>
+                              <span className="text-[11px] px-1.5 py-0.5 bg-sky-50 text-sky-700 border border-sky-200 rounded font-mono font-medium">
+                                Ask: ${trade.ask_price?.toFixed(2)}
+                              </span>
+                              {trade.spread !== undefined && trade.spread > 0 && (
+                                <span className="text-[10px] text-slate-400 font-mono">
+                                  Spread: ${trade.spread.toFixed(2)}
+                                </span>
+                              )}
+                              <span className="text-[10px] px-1.5 py-0.5 bg-indigo-50 text-[#4051B5] border border-indigo-100 rounded font-semibold uppercase tracking-wider">
+                                {trade.pricing_source === 'SAXO_LIVE' ? 'Saxo Live' : trade.pricing_source === 'OPRA_LIVE' ? 'OPRA Live Quote' : 'Model Quote'}
+                              </span>
+                            </>
+                          )}
+                        </div>
                       </div>
                     </div>
 
@@ -617,76 +759,170 @@ function MacroBriefingView({ content }: { content: string }) {
   }
 
   const lines = content.split('\n');
+  const elements: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      elements.push(<div key={`blank-${i}`} className="h-1" />);
+      i++;
+      continue;
+    }
+
+    // Markdown Table Detection
+    if (trimmed.startsWith('|') && trimmed.endsWith('|')) {
+      const tableLines: string[] = [];
+      while (i < lines.length && lines[i].trim().startsWith('|') && lines[i].trim().endsWith('|')) {
+        tableLines.push(lines[i].trim());
+        i++;
+      }
+
+      if (tableLines.length >= 2) {
+        // Headers from first line
+        const headerCells = tableLines[0]
+          .split('|')
+          .slice(1, -1)
+          .map((c) => c.trim());
+
+        // Data rows (skipping divider rows that contain only dashes/colons/pipes)
+        const dataRows = tableLines
+          .slice(1)
+          .filter((l) => Boolean(l.replace(/[\s|:\-]/g, '')))
+          .map((l) =>
+            l
+              .split('|')
+              .slice(1, -1)
+              .map((c) => c.trim())
+          );
+
+        elements.push(
+          <div key={`table-${i}`} className="overflow-x-auto my-3 border border-slate-200 rounded-xl shadow-xs">
+            <table className="min-w-full divide-y divide-slate-200 text-xs">
+              <thead className="bg-slate-50/90 border-b border-slate-200">
+                <tr>
+                  {headerCells.map((h, hi) => (
+                    <th
+                      key={hi}
+                      className="px-3.5 py-2.5 text-left font-bold text-slate-800 uppercase tracking-wider text-[11px]"
+                    >
+                      <FormattedText text={h} />
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 bg-white">
+                {dataRows.map((row, ri) => (
+                  <tr
+                    key={ri}
+                    className={
+                      ri % 2 === 0
+                        ? 'bg-white hover:bg-slate-50/70 transition'
+                        : 'bg-slate-50/40 hover:bg-slate-50/70 transition'
+                    }
+                  >
+                    {row.map((cell, ci) => (
+                      <td key={ci} className="px-3.5 py-2.5 text-slate-700 whitespace-normal font-normal">
+                        <FormattedText text={cell} />
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        );
+        continue;
+      }
+    }
+
+    // ## Level 2 Section Heading
+    if (trimmed.startsWith('## ')) {
+      const title = trimmed.replace(/^##\s+/, '');
+      elements.push(
+        <div key={`h2-${i}`} className="pt-4 pb-1.5 border-b border-indigo-100 flex items-center gap-2">
+          <span className="w-2.5 h-2.5 rounded-full bg-[#4051B5] inline-block"></span>
+          <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
+            {title}
+          </h3>
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // ### Level 3 Priority Headers or Story Headlines
+    if (trimmed.startsWith('### ')) {
+      const subTitle = trimmed.replace(/^###\s+/, '');
+      const isPriorityTier =
+        subTitle.includes('High Priority') ||
+        subTitle.includes('Medium Priority') ||
+        subTitle.includes('Low Priority');
+
+      if (isPriorityTier) {
+        const isHigh = subTitle.includes('High');
+        const isMed = subTitle.includes('Medium');
+        elements.push(
+          <div key={`tier-${i}`} className="pt-3 pb-1">
+            <span
+              className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-extrabold uppercase tracking-wider border ${
+                isHigh
+                  ? 'bg-rose-50 text-rose-700 border-rose-200'
+                  : isMed
+                  ? 'bg-amber-50 text-amber-700 border-amber-200'
+                  : 'bg-slate-100 text-slate-700 border-slate-200'
+              }`}
+            >
+              <span
+                className={`w-2 h-2 rounded-full ${
+                  isHigh ? 'bg-rose-500' : isMed ? 'bg-amber-500' : 'bg-slate-400'
+                }`}
+              ></span>
+              {subTitle}
+            </span>
+          </div>
+        );
+      } else {
+        elements.push(
+          <h4 key={`story-${i}`} className="text-xs sm:text-sm font-bold text-slate-800 pt-2 flex items-center gap-1.5">
+            <ChevronRight className="h-3.5 w-3.5 text-[#4051B5] shrink-0" />
+            <span>{subTitle}</span>
+          </h4>
+        );
+      }
+      i++;
+      continue;
+    }
+
+    // Bullet Point
+    if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
+      const bulletText = trimmed.replace(/^[\*\-]\s+/, '');
+      elements.push(
+        <div key={`bullet-${i}`} className="flex items-start gap-2 pl-3 py-0.5">
+          <span className="text-[#4051B5] font-bold text-sm leading-none mt-1">•</span>
+          <div className="text-slate-700 flex-1 leading-relaxed">
+            <FormattedText text={bulletText} />
+          </div>
+        </div>
+      );
+      i++;
+      continue;
+    }
+
+    // Standard Paragraph
+    elements.push(
+      <p key={`p-${i}`} className="text-slate-700 leading-relaxed">
+        <FormattedText text={trimmed} />
+      </p>
+    );
+    i++;
+  }
 
   return (
     <div className="space-y-3 text-xs sm:text-sm text-slate-700 leading-relaxed font-normal">
-      {lines.map((line, idx) => {
-        const trimmed = line.trim();
-        if (!trimmed) return <div key={idx} className="h-1" />;
-
-        // ## Level 2 Section Heading
-        if (trimmed.startsWith('## ')) {
-          const title = trimmed.replace(/^##\s+/, '');
-          return (
-            <div key={idx} className="pt-4 pb-1.5 border-b border-indigo-100 flex items-center gap-2">
-              <span className="w-2.5 h-2.5 rounded-full bg-[#4051B5] inline-block"></span>
-              <h3 className="text-sm sm:text-base font-bold text-slate-900 tracking-tight">
-                {title}
-              </h3>
-            </div>
-          );
-        }
-
-        // ### Level 3 Priority Headers or Story Headlines
-        if (trimmed.startsWith('### ')) {
-          const subTitle = trimmed.replace(/^###\s+/, '');
-          const isPriorityTier = subTitle.includes('High Priority') || subTitle.includes('Medium Priority') || subTitle.includes('Low Priority');
-          
-          if (isPriorityTier) {
-            const isHigh = subTitle.includes('High');
-            const isMed = subTitle.includes('Medium');
-            return (
-              <div key={idx} className="pt-3 pb-1">
-                <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-extrabold uppercase tracking-wider border ${
-                  isHigh ? 'bg-rose-50 text-rose-700 border-rose-200' :
-                  isMed ? 'bg-amber-50 text-amber-700 border-amber-200' :
-                  'bg-slate-100 text-slate-700 border-slate-200'
-                }`}>
-                  <span className={`w-2 h-2 rounded-full ${isHigh ? 'bg-rose-500' : isMed ? 'bg-amber-500' : 'bg-slate-400'}`}></span>
-                  {subTitle}
-                </span>
-              </div>
-            );
-          }
-
-          return (
-            <h4 key={idx} className="text-xs sm:text-sm font-bold text-slate-800 pt-2 flex items-center gap-1.5">
-              <ChevronRight className="h-3.5 w-3.5 text-[#4051B5] shrink-0" />
-              <span>{subTitle}</span>
-            </h4>
-          );
-        }
-
-        // Bullet Point
-        if (trimmed.startsWith('* ') || trimmed.startsWith('- ')) {
-          const bulletText = trimmed.replace(/^[\*\-]\s+/, '');
-          return (
-            <div key={idx} className="flex items-start gap-2 pl-3 py-0.5">
-              <span className="text-[#4051B5] font-bold text-sm leading-none mt-1">•</span>
-              <div className="text-slate-700 flex-1 leading-relaxed">
-                <FormattedText text={bulletText} />
-              </div>
-            </div>
-          );
-        }
-
-        // Standard Paragraph
-        return (
-          <p key={idx} className="text-slate-700 leading-relaxed">
-            <FormattedText text={trimmed} />
-          </p>
-        );
-      })}
+      {elements}
     </div>
   );
 }
