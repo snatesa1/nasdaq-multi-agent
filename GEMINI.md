@@ -188,10 +188,10 @@ Hierarchical Multi-Agent System (FastAPI) for comprehensive NASDAQ and Multi-Ass
 
 
 - **Socratic Tutor Persistence (`api/db.py` & `api/tutor.py`)**:
-  - Persists learning sessions permanently in a native GCP Firestore instance (`tutor_sessions` collection) with SQLite fallback in dev mode.
-  - Summarizes transcript takeaways into 3-5 bulleted **Key Financial Learnings** dynamically using the Gemini API.
-  - Acting Persona: Upgraded to a Senior Financial Analyst and Research Assistant style (covering corporate finance, capital allocation, risk, and regulatory updates).
-  - **Billing & Model Safety Configuration [NEW]**: Restores `gemini-flash-latest` model target for Google AI Studio API calls (resolving deprecation issues for new accounts) and adds `DISABLE_VERTEX_FALLBACK=True` to fully block Vertex AI fallback triggers, preventing accidental charges on GCP billing accounts. Added explicit `location="us-central1"` initialization mapping to resolve GCP publisher model access paths.
+  - **Local SQLite Primary Default**: Persists learning sessions permanently in local SQLite (`optionslab.db`, `sessions` table) for 100% offline, native Windows execution without GCP or Firebase lock-in.
+  - **Configurable Cloud Fallback**: Cloud Firestore storage is strictly optional opt-in via `TUTOR_STORAGE_BACKEND="firestore"` or `USE_FIRESTORE="true"`, with automatic fallback to SQLite on failure.
+  - **Non-Regression Contract Guard**: `SaveSessionRequest` and `UpdateSessionRequest` maintain backward-compatible field structures (`session_id: Optional[str] = None`, `title: Optional[str] = None`), allowing immediate saving from message 1 without 422 errors.
+  - Summarizes transcript takeaways into bulleted **Key Financial Learnings** dynamically using the Gemini API for sessions with 4+ messages, keeping initial saves instantaneous.
 
 - **Fundamental Indexation Strategy (`api/fundamental_index.py` & `api/tutor.py` & `frontend/src/app/learn/page.tsx`) [NEW]**:
   - Replicates the 80/20 Pareto principle from Arnott, Hsu, & Moore (2005) "Fundamental Indexation".

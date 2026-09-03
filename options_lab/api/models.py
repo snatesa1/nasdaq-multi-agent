@@ -82,23 +82,24 @@ class PortfolioGreeksRequest(BaseModel):
     sigma: Optional[float] = 0.25
 
 class SocraticTutorRequest(BaseModel):
-    session_id: Optional[str] = None
-    message: Optional[str] = None
-    question: Optional[str] = None
-    chat_history: Optional[List[Dict[str, Any]]] = None
-    context: Optional[str] = None
-    enable_grounding: bool = False
+    message: Optional[str] = Field(None, description="Message from the user")
+    question: Optional[str] = Field(None, description="Alternative alias for user message")
+    chat_history: List[Dict[str, Any]] = Field(default_factory=list, description="List of past messages")
+    context: Optional[Any] = Field(None, description="Optional simulation state or positions context")
+    enable_grounding: bool = Field(False, description="Enable Google Search Grounding for live market news")
+    session_id: Optional[str] = Field(None, description="Optional session ID")
 
 class TutorHintRequest(BaseModel):
-    session_id: Optional[str] = None
-    current_topic: Optional[str] = None
-    chat_history: Optional[List[Dict[str, Any]]] = None
-    context: Optional[str] = None
+    chat_history: List[Dict[str, Any]] = Field(default_factory=list, description="List of past messages")
+    context: Optional[Any] = Field(None, description="Optional simulation state context")
+    session_id: Optional[str] = Field(None, description="Optional session ID")
+    current_topic: Optional[str] = Field(None, description="Optional current topic")
 
 class ExplainerRequest(BaseModel):
-    metric_name: str
-    value: str
-    context: Optional[str] = None
+    concept: Optional[str] = Field(None, description="Concept to explain (e.g., 'Covered Call', 'Delta')")
+    metric_name: Optional[str] = Field(None, description="Alternative alias for metric/concept")
+    value: Optional[str] = Field(None, description="Optional metric value")
+    context: Optional[str] = Field(None, description="Optional context")
 
 class ScenarioHedgingRequest(BaseModel):
     spot_price: float
@@ -106,14 +107,15 @@ class ScenarioHedgingRequest(BaseModel):
     portfolio_delta: float = 100.0
 
 class SaveSessionRequest(BaseModel):
-    session_id: str
-    title: str
-    messages: List[Dict[str, Any]]
-    key_learnings: Optional[List[str]] = []
+    title: str = Field(..., description="Human-readable session title")
+    messages: List[Dict[str, Any]] = Field(..., description="Full chat transcript")
+    session_id: Optional[str] = Field(None, description="Optional specific session ID (defaults to new UUID)")
+    key_learnings: Optional[List[str]] = Field(default_factory=list, description="Optional pre-extracted key learnings")
 
 class UpdateSessionRequest(BaseModel):
-    messages: Optional[List[Dict[str, Any]]] = None
-    key_learnings: Optional[List[str]] = None
+    messages: Optional[List[Dict[str, Any]]] = Field(None, description="Updated chat transcript")
+    title: Optional[str] = Field(None, description="Optional new title")
+    key_learnings: Optional[List[str]] = Field(None, description="Optional key learnings list")
 
 class AnalyzeRequest(BaseModel):
     symbol: str = "AAPL"

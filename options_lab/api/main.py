@@ -374,9 +374,10 @@ def portfolio_greeks(params: PortfolioGreeksRequest, user=Depends(verify_firebas
 @app.post("/tutor/ask")
 def tutor_ask(params: SocraticTutorRequest, user=Depends(verify_firebase_token)):
     try:
+        user_msg = params.message or params.question or ""
         response = tutor_service.generate_response(
-            message=params.message,
-            chat_history=params.chat_history,
+            message=user_msg,
+            chat_history=params.chat_history or [],
             context=params.context,
             enable_grounding=params.enable_grounding
         )
@@ -390,7 +391,7 @@ def tutor_ask(params: SocraticTutorRequest, user=Depends(verify_firebase_token))
 def tutor_hint(params: TutorHintRequest, user=Depends(verify_firebase_token)):
     try:
         hint = tutor_service.generate_hint(
-            chat_history=params.chat_history,
+            chat_history=params.chat_history or [],
             context=params.context
         )
         return {"hint": hint}
@@ -402,7 +403,8 @@ def tutor_hint(params: TutorHintRequest, user=Depends(verify_firebase_token)):
 @app.post("/tutor/explain")
 def tutor_explain(params: ExplainerRequest, user=Depends(verify_firebase_token)):
     try:
-        response = tutor_service.get_concept_explanation(concept=params.concept)
+        concept = params.concept or params.metric_name or "Options"
+        response = tutor_service.get_concept_explanation(concept=concept)
         return {"explanation": response}
     except Exception as e:
         logger.error(f"Tutor explanation failed: {e}")
@@ -420,7 +422,11 @@ def list_sessions(user=Depends(verify_firebase_token)):
 @app.post("/tutor/sessions", status_code=201)
 def create_session(req: SaveSessionRequest, user=Depends(verify_firebase_token)):
     try:
-        return database.create_session(title=req.title, messages=req.messages)
+        return database.create_session(
+            title=req.title, 
+            messages=req.messages, 
+            session_id=req.session_id
+        )
     except Exception as e:
         logger.error(f"create_session failed: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -434,10 +440,20 @@ def get_session(session_id: str, user=Depends(verify_firebase_token)):
 
 @app.put("/tutor/sessions/{session_id}")
 def update_session(session_id: str, req: UpdateSessionRequest, user=Depends(verify_firebase_token)):
-    result = database.update_session(session_id, messages=req.messages, title=req.title)
-    if result is None:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return result
+    try:
+        result = database.update_session(
+            session_id, 
+            messages=req.messages or [], 
+            title=req.title
+        )
+        if result is None:
+            raise HTTPException(status_code=404, detail="Session not found")
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"update_session failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/tutor/sessions/{session_id}", status_code=204)
 def delete_session(session_id: str, user=Depends(verify_firebase_token)):

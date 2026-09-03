@@ -26,20 +26,24 @@ _DATA_DIR = os.environ.get(
 _DB_PATH = os.path.join(_DATA_DIR, "optionslab.db")
 
 
-# ── Firestore Initialization (with SQLite fallback) ──────────────────────────
+# ── Storage Configuration (SQLite Primary, Configurable Firestore Override/Fallback) ──
+# Local SQLite is the primary database for OptionsLab offline/local operations.
+# To override and persist to Firestore, set TUTOR_STORAGE_BACKEND="firestore" or USE_FIRESTORE="true".
 _USE_FIRESTORE = False
 _firestore_client = None
 
-if os.getenv("USE_FIRESTORE", "false").lower() == "true" or os.getenv("K_SERVICE"):
+_storage_backend_env = os.getenv("TUTOR_STORAGE_BACKEND", "sqlite").lower()
+if _storage_backend_env == "firestore" or os.getenv("USE_FIRESTORE", "false").lower() == "true":
     try:
         from google.cloud import firestore
         _firestore_client = firestore.Client()
         _USE_FIRESTORE = True
-        logger.info("Firestore storage initialized for Socratic tutor sessions.")
+        logger.info("Firestore storage initialized for Socratic tutor sessions (override active).")
     except Exception as e:
-        logger.warning(f"Could not initialize Firestore client: {e}. Falling back to SQLite for sessions.")
+        logger.warning(f"Could not initialize Firestore client: {e}. Falling back to local SQLite.")
+        _USE_FIRESTORE = False
 else:
-    logger.info("Using SQLite database for local sessions storage.")
+    logger.info("Using local SQLite database for Socratic tutor sessions (primary).")
 
 
 def _get_conn() -> sqlite3.Connection:
@@ -168,9 +172,10 @@ def get_key_learnings(messages: List[Dict[str, str]]) -> str:
         logger.error(f"Failed to generate key learnings: {e}")
         return "- Discussed financial markets and quantitative modeling strategies."
 
-def list_sessions() -> List[Dict[str, Any]]:
+def list_sessions(backend: Optional[str] = None) -> List[Dict[str, Any]]:
     """Return all sessions ordered by last update (newest first), without messages."""
-    if _USE_FIRESTORE and _firestore_client:
+    use_firestore = (backend == "firestore") or (_USE_FIRESTORE and backend != "sqlite")
+    if use_firestore and _firestore_client:
         try:
             from google.cloud import firestore
             docs = _firestore_client.collection("tutor_sessions").order_by("updated_at", direction=firestore.Query.DESCENDING).stream()
@@ -190,13 +195,25 @@ def list_sessions() -> List[Dict[str, Any]]:
     return [dict(r) for r in rows]
 
 
-def create_session(title: str, messages: List[Dict[str, str]]) -> Dict[str, Any]:
+def create_session(
+    title: str, 
+    messages: List[Dict[str, Any]], 
+    session_id: Optional[str] = None,
+    backend: Optional[str] = None
+) -> Dict[str, Any]:
     """Persist a new session and return it."""
-    session_id = str(uuid.uuid4())
+    if not session_id:
+        session_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    learnings = get_key_learnings(messages)
+    
+    # Lightweight learnings generation for fast saving
+    if len(messages) >= 4:
+        learnings = get_key_learnings(messages)
+    else:
+        learnings = f"- Session initialized on topic: {title}"
 
-    if _USE_FIRESTORE and _firestore_client:
+    use_firestore = (backend == "firestore") or (_USE_FIRESTORE and backend != "sqlite")
+    if use_firestore and _firestore_client:
         try:
             doc_ref = _firestore_client.collection("tutor_sessions").document(session_id)
             session_data = {
@@ -231,15 +248,15 @@ def create_session(title: str, messages: List[Dict[str, str]]) -> Dict[str, Any]
     }
 
 
-def get_session(session_id: str) -> Optional[Dict[str, Any]]:
+def get_session(session_id: str, backend: Optional[str] = None) -> Optional[Dict[str, Any]]:
     """Fetch a full session by ID (including messages)."""
-    if _USE_FIRESTORE and _firestore_client:
+    use_firestore = (backend == "firestore") or (_USE_FIRESTORE and backend != "sqlite")
+    if use_firestore and _firestore_client:
         try:
             doc_ref = _firestore_client.collection("tutor_sessions").document(session_id)
             doc = doc_ref.get()
             if doc.exists:
                 return doc.to_dict()
-            return None
         except Exception as e:
             logger.error(f"Firestore get_session failed: {e}. Falling back to SQLite.")
 
@@ -258,9 +275,10 @@ def get_session(session_id: str) -> Optional[Dict[str, Any]]:
 
 def update_session(
     session_id: str, 
-    messages: List[Dict[str, str]], 
+    messages: List[Dict[str, Any]], 
     title: Optional[str] = None,
-    generate_learnings: bool = False
+    generate_learnings: bool = False,
+    backend: Optional[str] = None
 ) -> Optional[Dict[str, Any]]:
     """Append / overwrite messages for an existing session."""
     now = datetime.now(timezone.utc).isoformat()
@@ -270,7 +288,8 @@ def update_session(
     if generate_learnings or (title is not None and len(messages) >= 4):
         learnings = get_key_learnings(messages)
 
-    if _USE_FIRESTORE and _firestore_client:
+    use_firestore = (backend == "firestore") or (_USE_FIRESTORE and backend != "sqlite")
+    if use_firestore and _firestore_client:
         try:
             doc_ref = _firestore_client.collection("tutor_sessions").document(session_id)
             update_data: Dict[str, Any] = {
@@ -285,7 +304,6 @@ def update_session(
             doc = doc_ref.get()
             if doc.exists:
                 return doc.to_dict()
-            return None
         except Exception as e:
             logger.error(f"Firestore update_session failed: {e}. Falling back to SQLite.")
 
@@ -323,16 +341,20 @@ def update_session(
     return data
 
 
-def delete_session(session_id: str) -> bool:
+def delete_session(session_id: str, backend: Optional[str] = None) -> bool:
     """Delete a session by ID. Returns True if found and deleted."""
-    if _USE_FIRESTORE and _firestore_client:
+    use_firestore = (backend == "firestore") or (_USE_FIRESTORE and backend != "sqlite")
+    if use_firestore and _firestore_client:
         try:
             doc_ref = _firestore_client.collection("tutor_sessions").document(session_id)
             doc = doc_ref.get()
             if doc.exists:
                 doc_ref.delete()
+                # Also delete from SQLite if present
+                with _get_conn() as conn:
+                    conn.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+                    conn.commit()
                 return True
-            return False
         except Exception as e:
             logger.error(f"Firestore delete_session failed: {e}. Falling back to SQLite.")
 

@@ -48,6 +48,7 @@ export default function LearnPage() {
   const [currentSessionId, setCurrentSessionId] = useState<string | null>(null);
   const [expandedSessionId, setExpandedSessionId] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
   const [showSaveDialog, setShowSaveDialog] = useState(false);
   const [sessionTitle, setSessionTitle] = useState('');
 
@@ -142,11 +143,12 @@ export default function LearnPage() {
   };
 
   const handleSaveSession = async () => {
-    if (messages.length <= 1) return;
+    if (messages.length === 0) return;
     const autoTitle = sessionTitle.trim() ||
       `Session — ${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })}`;
 
     setSaveStatus('saving');
+    setSaveError(null);
     try {
       if (currentSessionId) {
         await optionsApi.updateSession(currentSessionId, messages, autoTitle);
@@ -157,12 +159,14 @@ export default function LearnPage() {
       setSaveStatus('saved');
       setShowSaveDialog(false);
       setSessionTitle('');
+      setSaveError(null);
       loadSessions();
       setTimeout(() => setSaveStatus('idle'), 2500);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error('Save session failed:', e);
       setSaveStatus('error');
-      setTimeout(() => setSaveStatus('idle'), 3000);
+      setSaveError(e?.message || 'Failed to save session. Please verify backend connection.');
+      setTimeout(() => setSaveStatus('idle'), 4000);
     }
   };
 
@@ -423,12 +427,15 @@ export default function LearnPage() {
             <input
               type="text"
               value={sessionTitle}
-              onChange={e => setSessionTitle(e.target.value)}
+              onChange={e => { setSessionTitle(e.target.value); if (saveError) setSaveError(null); }}
               onKeyDown={e => e.key === 'Enter' && handleSaveSession()}
               placeholder="Give this session a title..."
               autoFocus
               className="w-full rounded-lg px-4 py-2 text-xs bg-slate-50 border border-slate-200 font-medium text-slate-800"
             />
+            {saveError && (
+              <p className="text-xs text-rose-600 font-semibold">{saveError}</p>
+            )}
             <div className="flex gap-2">
               <button
                 onClick={handleSaveSession}
@@ -439,7 +446,7 @@ export default function LearnPage() {
                 {saveStatus === 'saving' ? 'Saving...' : 'Save'}
               </button>
               <button
-                onClick={() => { setShowSaveDialog(false); setSessionTitle(''); }}
+                onClick={() => { setShowSaveDialog(false); setSessionTitle(''); setSaveError(null); }}
                 className="text-xs px-3 py-2 rounded-lg border border-slate-200 text-slate-600 hover:text-slate-800 transition"
               >
                 Cancel
