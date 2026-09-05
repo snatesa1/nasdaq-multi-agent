@@ -1,28 +1,46 @@
+# ==============================================================================
+# Unified Requirements for NASDAQ & OptionsLab Multi-Agent System
+# ==============================================================================
+
 # === Core Framework ===
-fastapi
-uvicorn[standard]
-python-dotenv
+fastapi>=0.110.0
+uvicorn[standard]>=0.28.0
+pydantic>=2.6.0
+python-dotenv>=1.0.0
+python-multipart>=0.0.9
 
-# === Data Sources ===
-alpaca-py
-yfinance
-requests
-feedparser
-fredapi
+# === Data Sources & Broker APIs ===
+alpaca-py>=0.20.0
+yfinance>=0.2.38
+requests>=2.31.0
+feedparser>=6.0.11
+fredapi>=0.5.2
 
-# === ML / Numerics ===
-numpy
-pandas
+# === ML, Quantitative Finance & Options Analytics ===
+numpy>=1.26.0
+pandas>=2.2.0
+scipy>=1.13.0
+matplotlib>=3.8.0
+seaborn>=0.13.0
+quantstats-lumi>=1.1.5
 
-# === GCP ===
-google-cloud-secret-manager
-google-api-python-client
-google-auth
-google-auth-httplib2
-google-auth-oauthlib
+# === Google Agent Development Kit (ADK) & Vertex AI ===
+google-adk>=2.8.0
+google-cloud-aiplatform>=1.44.0
+google-genai>=0.1.0
 
-# === Slack ===
-slack-sdk
+# === GCP & Persistence ===
+google-cloud-secret-manager>=2.18.0
+google-cloud-firestore>=2.15.0
+google-api-python-client>=2.122.0
+google-auth>=2.28.0
+google-auth-httplib2>=0.2.0
+google-auth-oauthlib>=1.2.0
 
-# === Vertex AI (for Gemini) ===
-google-cloud-aiplatform
+# === Document & Report Parsers ===
+pypdf>=4.1.0
+beautifulsoup4>=4.12.0
+lxml>=5.1.0
+
+# === Slack Integration ===
+slack-sdk>=3.27.0
