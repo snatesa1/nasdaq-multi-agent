@@ -45,7 +45,7 @@ def extract_spreadsheet_id(input_str: str) -> str:
 def _get_credentials():
     """Loads Google API credentials, prioritizing local token.json over ADC fallback."""
     search_dirs = [
-        "C:/Admin/Akpegis-Agent-Ecosystem",
+        os.getenv("WORKSPACE_ROOT", ""),
         os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")),
         os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..")),
         os.getcwd()
