@@ -6,25 +6,28 @@ import {
   BrokerOrdersResponse
 } from '@/types/broker';
 
-const getApiBase = () => {
+export const getApiBase = () => {
   if (typeof window === 'undefined') return 'http://localhost:8000';
   if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
-  // Dynamic host routing: connect to backend on port 8000 on the same host (works for LAN, Tailscale, or localhost)
-  if (window.location.port === '3000' || window.location.port === '5173') {
+  // If running locally in development mode (Next.js dev server without Nginx proxy on port 3000/5173):
+  if (process.env.NODE_ENV === 'development') {
     return `http://${window.location.hostname}:8000`;
   }
+  // In production (Nginx container), all API routes are reverse-proxied seamlessly.
+  // Relative path '' guarantees same-origin access over LAN, Tailscale, Cloudflare Tunnel, and localhost.
   return '';
 };
 
-const API_BASE_URL = getApiBase();
+export const API_BASE_URL = getApiBase();
 
 export async function checkBackendHandshake(timeoutMs: number = 3000): Promise<{ ok: boolean; error?: string }> {
-  const url = `${API_BASE_URL}/api/health`;
+  const targetHost = API_BASE_URL || (typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : 'localhost:8000');
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
+  // Try configured / same-origin API base first
   try {
-    const res = await fetch(url, { method: 'GET', signal: controller.signal });
+    const res = await fetch(`${API_BASE_URL}/api/health`, { method: 'GET', signal: controller.signal });
     clearTimeout(timer);
     if (res.ok) {
       return { ok: true };
@@ -32,10 +35,27 @@ export async function checkBackendHandshake(timeoutMs: number = 3000): Promise<{
     return { ok: false, error: `Backend responded with HTTP ${res.status}` };
   } catch (err: any) {
     clearTimeout(timer);
-    if (err.name === 'AbortError') {
-      return { ok: false, error: `Handshake timed out after ${timeoutMs / 1000}s (server on port 8000 non-responsive).` };
+    // If running in production container where port 8000 might also be reachable directly:
+    if (typeof window !== 'undefined' && API_BASE_URL === '' && window.location.hostname) {
+      try {
+        const directController = new AbortController();
+        const directTimer = setTimeout(() => directController.abort(), 1500);
+        const directRes = await fetch(`http://${window.location.hostname}:8000/api/health`, {
+          method: 'GET',
+          signal: directController.signal
+        });
+        clearTimeout(directTimer);
+        if (directRes.ok) {
+          return { ok: true };
+        }
+      } catch (dErr) {
+        // Both failed
+      }
     }
-    return { ok: false, error: 'Cannot connect to OptionsLab backend on http://localhost:8000. Server is offline.' };
+    if (err.name === 'AbortError') {
+      return { ok: false, error: `Handshake timed out after ${timeoutMs / 1000}s (server on ${targetHost} non-responsive).` };
+    }
+    return { ok: false, error: `Cannot connect to OptionsLab backend on ${targetHost}. Server is offline.` };
   }
 }
 
@@ -89,7 +109,8 @@ export async function apiRequest(endpoint: string, method: string = 'GET', body?
       throw timeoutErr;
     }
     if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
-      const netErr = new Error(`Backend Handshake Disconnected: Unable to reach OptionsLab API server (http://localhost:8000). Please verify the server is running natively.`);
+      const targetHost = API_BASE_URL || (typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : 'localhost:8000');
+      const netErr = new Error(`Backend Handshake Disconnected: Unable to reach OptionsLab API server (${targetHost}). Please verify the backend container or server is running.`);
       console.error(netErr.message);
       throw netErr;
     }
@@ -249,6 +270,17 @@ export const optionsApi = {
   approveTrade: (tradeId: string) => apiRequest('/api/trades/approve', 'POST', { trade_id: tradeId }),
   rejectTrade: (tradeId: string, reason?: string) => apiRequest('/api/trades/reject', 'POST', { trade_id: tradeId, reason }),
   getMarginStatus: () => apiRequest('/api/margin/status'),
+  runWheelBacktest: (params: {
+    symbol: string;
+    benchmark?: string;
+    lookback_years?: number;
+    initial_capital?: number;
+    target_dte?: number;
+    otm_pct?: number;
+    profit_target_pct?: number;
+    gamma_roll_dte?: number;
+    hold_to_expiration?: boolean;
+  }) => apiRequest('/api/analytics/wheel-backtest', 'POST', params),
 };
 
 

@@ -21,7 +21,7 @@ export default function RootLayout({
       <head>
         <meta
           httpEquiv="Content-Security-Policy"
-          content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:* https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' http://127.0.0.1:* http://localhost:* https:; style-src 'self' 'unsafe-inline' https: fonts.googleapis.com; font-src 'self' data: https: fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' http://127.0.0.1:* http://localhost:* https: ws: wss:; frame-src 'self' https:;"
+          content="default-src 'self' 'unsafe-inline' 'unsafe-eval' http: https: data: blob:; script-src 'self' 'unsafe-inline' 'unsafe-eval' http: https:; style-src 'self' 'unsafe-inline' https: fonts.googleapis.com; font-src 'self' data: https: fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' http: https: ws: wss:; frame-src 'self' https:;"
         />
       </head>
       <body className={`${inter.className} bg-[#F3F3F9] text-slate-800 min-h-screen antialiased`}>

@@ -26,6 +26,7 @@ build_logs.txt
 test_env/
 scratch_holdings*.html
 options_lab/test*.py
+options_lab/reports/
 
 # Virtual environments & node build outputs
 venv/

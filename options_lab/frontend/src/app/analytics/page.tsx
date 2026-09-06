@@ -33,6 +33,7 @@ import {
   Tooltip,
   Legend
 } from 'recharts';
+import { optionsApi } from '@/lib/api';
 import ProtectedRoute from '@/components/ProtectedRoute';
 
 interface SummaryMetrics {
@@ -162,28 +163,17 @@ export default function AnalyticsPage() {
     setError(null);
 
     try {
-      const res = await fetch('/api/analytics/wheel-backtest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          symbol: sym,
-          benchmark: bench,
-          lookback_years: yrs,
-          initial_capital: initialCapital,
-          target_dte: targetDte,
-          otm_pct: otmPct,
-          profit_target_pct: profitTargetPct,
-          gamma_roll_dte: gammaRollDte,
-          hold_to_expiration: hold
-        })
+      const result: BacktestResponse = await optionsApi.runWheelBacktest({
+        symbol: sym,
+        benchmark: bench,
+        lookback_years: yrs,
+        initial_capital: initialCapital,
+        target_dte: targetDte,
+        otm_pct: otmPct,
+        profit_target_pct: profitTargetPct,
+        gamma_roll_dte: gammaRollDte,
+        hold_to_expiration: hold
       });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({ detail: 'Failed to run backtest' }));
-        throw new Error(errData.detail || `Server error ${res.status}`);
-      }
-
-      const result: BacktestResponse = await res.json();
       setData(result);
     } catch (err: any) {
       console.error('Backtest error:', err);

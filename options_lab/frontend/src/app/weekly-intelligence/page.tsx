@@ -187,7 +187,8 @@ export default function WeeklyIntelligencePage() {
       }
     } catch (hErr: any) {
       setLoading(false);
-      const errMsg = 'Cannot connect to OptionsLab backend on http://localhost:8000. Server is offline.';
+      const targetHost = typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : 'localhost:8000';
+      const errMsg = `Cannot connect to OptionsLab backend on ${targetHost}. Server is offline.`;
       setHandshakeError(errMsg);
       setError(`🔌 Backend Handshake Failed: ${errMsg}`);
       return;
@@ -221,8 +222,9 @@ export default function WeeklyIntelligencePage() {
       const isConnection = err.message?.includes('Handshake Disconnected') || err.message?.includes('Failed to fetch');
 
       if (isConnection) {
-        setHandshakeError('Connection dropped: OptionsLab backend server became unreachable.');
-        setError('🔌 Backend Handshake Disconnected: Unable to reach localhost:8000.');
+        const targetHost = typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : 'localhost:8000';
+        setHandshakeError(`Connection dropped: OptionsLab backend server on ${targetHost} became unreachable.`);
+        setError(`🔌 Backend Handshake Disconnected: Unable to reach ${targetHost}.`);
       } else if (isTimeout) {
         setError('⏳ Synthesis Timed Out: The background engine took longer than 35s. Please click "Refresh Intelligence" to retry.');
         setActionLog(prev => [
@@ -354,14 +356,14 @@ export default function WeeklyIntelligencePage() {
                 <h4 className="text-sm font-bold text-amber-900 flex items-center gap-2">
                   🔌 Backend Handshake Short-Circuited
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-200 text-amber-800">
-                    HTTP 127.0.0.1:8000
+                    {typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : '8000'}
                   </span>
                 </h4>
                 <p className="text-xs text-amber-800 mt-1 leading-relaxed font-medium">
                   {handshakeError}
                 </p>
                 <p className="text-[11px] font-mono text-amber-700 mt-1.5">
-                  Launch backend natively in PowerShell: <code className="bg-amber-200/70 px-2 py-0.5 rounded font-bold">.\restart_backend.ps1</code>
+                  Check backend service: <code className="bg-amber-200/70 px-2 py-0.5 rounded font-bold">docker compose ps</code> or <code className="bg-amber-200/70 px-2 py-0.5 rounded font-bold">.\restart_backend.ps1</code>
                 </p>
               </div>
             </div>
