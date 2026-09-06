@@ -145,6 +145,7 @@ def health():
 
 # ── Fundamental Indexation Scan (Arnott 80/20 Replication) ───────────
 @app.post("/fundamental-index/scan")
+@app.post("/api/fundamental-index/scan")
 def scan_fundamental_index(params: FundamentalIndexRequest = FundamentalIndexRequest()):
     try:
         results = fundamental_engine.compute_index(symbols=params.symbols)
@@ -155,6 +156,7 @@ def scan_fundamental_index(params: FundamentalIndexRequest = FundamentalIndexReq
 
 
 @app.get("/debug/db")
+@app.get("/api/debug/db")
 def debug_db():
     try:
         conn = database._get_conn()
@@ -169,6 +171,7 @@ def debug_db():
         return {"error": str(e)}
 
 @app.get("/tutor/debug_firestore")
+@app.get("/api/tutor/debug_firestore")
 def debug_firestore():
     try:
         from google.cloud import firestore
@@ -205,11 +208,13 @@ def debug_firestore():
 
 # ── Market Data ────────────────────────────────────────────────────────────
 @app.get("/market/quote/{symbol}")
+@app.get("/api/market/quote/{symbol}")
 def get_quote(symbol: str, user=Depends(verify_firebase_token)):
     data = fetch_market_data(symbol)
     return data
 
 @app.get("/market/universe")
+@app.get("/api/market/universe")
 def get_universe(user=Depends(verify_firebase_token)):
     try:
         import pandas as pd
@@ -254,6 +259,7 @@ def get_universe(user=Depends(verify_firebase_token)):
 
 # ── GBM Simulation ─────────────────────────────────────────────────────────
 @app.post("/simulate/gbm")
+@app.post("/api/simulate/gbm")
 def post_simulate_gbm(params: GBMParams, user=Depends(verify_firebase_token)):
     try:
         results = simulate_gbm(
@@ -267,6 +273,7 @@ def post_simulate_gbm(params: GBMParams, user=Depends(verify_firebase_token)):
 
 # ── Analytical Option Pricing ──────────────────────────────────────────────
 @app.post("/price/analytical")
+@app.post("/api/price/analytical")
 def price_analytical(params: OptionParams, user=Depends(verify_firebase_token)):
     try:
         price = black_scholes_price(
@@ -284,6 +291,7 @@ def price_analytical(params: OptionParams, user=Depends(verify_firebase_token)):
 
 # ── Monte Carlo Option Pricing ──────────────────────────────────────────────
 @app.post("/price/monte-carlo")
+@app.post("/api/price/monte-carlo")
 def price_monte_carlo(params: MonteCarloPricingRequest, user=Depends(verify_firebase_token)):
     try:
         results = pricing_monte_carlo_standard(
@@ -297,6 +305,7 @@ def price_monte_carlo(params: MonteCarloPricingRequest, user=Depends(verify_fire
 
 # ── Legacy Lab Option Pricing ──────────────────────────────────────────────
 @app.post("/price/legacy-lab")
+@app.post("/api/price/legacy-lab")
 def price_legacy_lab(params: LegacyLabRequest, user=Depends(verify_firebase_token)):
     try:
         results = pricing_monte_carlo_lab_legacy(
@@ -310,6 +319,7 @@ def price_legacy_lab(params: LegacyLabRequest, user=Depends(verify_firebase_toke
 
 # ── Greeks Surface ─────────────────────────────────────────────────────────
 @app.post("/greeks/surface")
+@app.post("/api/greeks/surface")
 def greeks_surface(params: OptionParams, user=Depends(verify_firebase_token)):
     try:
         results = generate_greeks_surface(
@@ -323,6 +333,7 @@ def greeks_surface(params: OptionParams, user=Depends(verify_firebase_token)):
 
 # ── Strategy Payoff ────────────────────────────────────────────────────────
 @app.post("/strategy/payoff")
+@app.post("/api/strategy/payoff")
 def strategy_payoff(params: StrategyRequest, user=Depends(verify_firebase_token)):
     try:
         legs_data = []
@@ -350,6 +361,7 @@ def strategy_payoff(params: StrategyRequest, user=Depends(verify_firebase_token)
 
 # ── Volatility Surface ───────────────────────────────────────────────────────
 @app.post("/volatility/surface")
+@app.post("/api/volatility/surface")
 def volatility_surface(params: VolSurfaceRequest, user=Depends(verify_firebase_token)):
     try:
         results = generate_volatility_surface(
@@ -368,6 +380,7 @@ def volatility_surface(params: VolSurfaceRequest, user=Depends(verify_firebase_t
 
 # ── Portfolio Net Greeks Aggregator ──────────────────────────────────────────
 @app.post("/portfolio/greeks")
+@app.post("/api/portfolio/greeks")
 def portfolio_greeks(params: PortfolioGreeksRequest, user=Depends(verify_firebase_token)):
     try:
         from .analysis import calculate_portfolio_greeks
