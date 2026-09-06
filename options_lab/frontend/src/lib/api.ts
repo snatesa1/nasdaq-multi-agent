@@ -8,9 +8,10 @@ import {
 
 const getApiBase = () => {
   if (typeof window === 'undefined') return 'http://localhost:8000';
-  // Dev server redirects to local fastapi instance
+  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
+  // Dynamic host routing: connect to backend on port 8000 on the same host (works for LAN, Tailscale, or localhost)
   if (window.location.port === '3000' || window.location.port === '5173') {
-    return 'http://localhost:8000';
+    return `http://${window.location.hostname}:8000`;
   }
   return '';
 };
