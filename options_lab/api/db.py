@@ -152,11 +152,62 @@ def _init_db():
                 conn.execute(f"ALTER TABLE staged_trades ADD COLUMN {col} {col_type}")
             except Exception:
                 pass
+        # ── Broker Tokens (Persistent OAuth Credentials) ─────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS broker_tokens (
+                broker_id     TEXT PRIMARY KEY,
+                access_token  TEXT NOT NULL,
+                refresh_token TEXT,
+                token_type    TEXT DEFAULT 'Bearer',
+                expires_at    TEXT,
+                updated_at    TEXT NOT NULL
+            )
+        """)
         conn.commit()
 
 
 # Initialise on import
 _init_db()
+
+
+def save_broker_tokens(
+    broker_id: str,
+    access_token: str,
+    refresh_token: Optional[str] = None,
+    token_type: str = "Bearer",
+    expires_at: Optional[str] = None
+):
+    """Persists broker OAuth access & refresh tokens to SQLite."""
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with _get_conn() as conn:
+        conn.execute("""
+            INSERT INTO broker_tokens (broker_id, access_token, refresh_token, token_type, expires_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(broker_id) DO UPDATE SET
+                access_token=excluded.access_token,
+                refresh_token=COALESCE(excluded.refresh_token, broker_tokens.refresh_token),
+                token_type=excluded.token_type,
+                expires_at=excluded.expires_at,
+                updated_at=excluded.updated_at
+        """, (broker_id, access_token, refresh_token, token_type, expires_at, now_iso))
+        conn.commit()
+
+
+def get_broker_tokens(broker_id: str = "saxo") -> Optional[Dict[str, Any]]:
+    """Retrieves persistent broker tokens from SQLite."""
+    with _get_conn() as conn:
+        row = conn.execute("SELECT * FROM broker_tokens WHERE broker_id = ?", (broker_id,)).fetchone()
+        if row:
+            return dict(row)
+    return None
+
+
+def clear_broker_tokens(broker_id: str = "saxo"):
+    """Wipes persistent broker tokens from SQLite."""
+    with _get_conn() as conn:
+        conn.execute("DELETE FROM broker_tokens WHERE broker_id = ?", (broker_id,))
+        conn.commit()
+
 
 
 # ═══════════════════════════════════════════════════════════════════════════════

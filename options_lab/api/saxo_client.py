@@ -35,8 +35,45 @@ class SaxoClient:
         self.environment = settings.SAXO_ENV  # 'SIM' or 'LIVE'
         self.timeout = settings.SAXO_TIMEOUT_SECONDS
 
-        self.access_token = access_token or getattr(settings, "SAXO_ACCESS_TOKEN", None) or None
-        self.refresh_token = getattr(settings, "SAXO_REFRESH_TOKEN", None) or None
+        # Multi-tiered Token Hydration:
+        # Tier 1: SQLite Persistent Database
+        # Tier 2: Backup JSON file (/app/data/saxo_tokens.json or ./data/saxo_tokens.json)
+        # Tier 3: Passed argument or settings / environment variables
+        self.access_token = access_token
+        self.refresh_token = None
+
+        if not self.access_token:
+            # Check SQLite
+            try:
+                from options_lab.api import db as database
+                db_tokens = database.get_broker_tokens("saxo")
+                if db_tokens and db_tokens.get("access_token"):
+                    self.access_token = db_tokens.get("access_token")
+                    self.refresh_token = db_tokens.get("refresh_token")
+                    logger.info("Loaded active Saxo tokens from SQLite broker_tokens table.")
+            except Exception as e:
+                logger.debug(f"Could not load tokens from SQLite: {e}")
+
+        if not self.access_token:
+            # Check JSON file backup
+            try:
+                from options_lab.api.db import _DATA_DIR
+                json_path = os.path.join(_DATA_DIR, "saxo_tokens.json")
+                if os.path.exists(json_path):
+                    import json
+                    with open(json_path, "r", encoding="utf-8") as jf:
+                        jdata = json.load(jf)
+                        self.access_token = jdata.get("access_token")
+                        self.refresh_token = jdata.get("refresh_token")
+                        logger.info("Loaded active Saxo tokens from JSON backup.")
+            except Exception as e:
+                logger.debug(f"Could not load tokens from JSON: {e}")
+
+        if not self.access_token:
+            self.access_token = getattr(settings, "SAXO_ACCESS_TOKEN", None) or os.getenv("SAXO_ACCESS_TOKEN") or None
+        if not self.refresh_token:
+            self.refresh_token = getattr(settings, "SAXO_REFRESH_TOKEN", None) or os.getenv("SAXO_REFRESH_TOKEN") or None
+
         self.needs_reauth = False  # Set True when refresh token is expired/consumed
         self.token_acquired_at = None  # Track when we last got a valid token
 
@@ -90,14 +127,17 @@ class SaxoClient:
         self.refresh_token = data.get("refresh_token")
         self.needs_reauth = False
         self.token_acquired_at = datetime.now()
-        self._persist_tokens_to_env()
+        self._persist_tokens()
         logger.info("Saxo OAuth access token successfully acquired and persisted.")
         return data
 
     def refresh_access_token(self) -> Dict[str, Any]:
         """Refreshes an expired access_token using the refresh_token."""
         if not self.refresh_token:
-            raise ValueError("No refresh token available to renew Saxo session.")
+            # Attempt to pull refresh token from DB before giving up
+            self._token_from_db()
+            if not self.refresh_token:
+                raise ValueError("No refresh token available to renew Saxo session.")
         
         payload = {
             "grant_type": "refresh_token",
@@ -115,7 +155,7 @@ class SaxoClient:
                 self.refresh_token = data.get("refresh_token")
             self.needs_reauth = False
             self.token_acquired_at = datetime.now()
-            self._persist_tokens_to_env()
+            self._persist_tokens()
             logger.info("Saxo OAuth access token successfully renewed.")
             return data
         except Exception as e:
@@ -132,17 +172,83 @@ class SaxoClient:
             self.refresh_token = refresh_token.strip()
         self.needs_reauth = False
         self.token_acquired_at = datetime.now()
-        self._persist_tokens_to_env()
+        self._persist_tokens()
 
-    def _persist_tokens_to_env(self):
-        """Persists newly refreshed tokens to .env for seamless restarts."""
+    def _token_from_db(self) -> Optional[str]:
+        """Retrieves and synchronizes the active access token directly from persistent storage."""
+        if self.access_token and len(self.access_token) > 50:
+            return self.access_token
+
+        # Tier 1: Query SQLite broker_tokens
         try:
+            from options_lab.api import db as database
+            db_tokens = database.get_broker_tokens("saxo")
+            if db_tokens and db_tokens.get("access_token"):
+                self.access_token = db_tokens.get("access_token")
+                if db_tokens.get("refresh_token"):
+                    self.refresh_token = db_tokens.get("refresh_token")
+                logger.info("Synchronized active Saxo tokens from SQLite broker_tokens.")
+                return self.access_token
+        except Exception as e:
+            logger.debug(f"Could not load tokens from SQLite in _token_from_db: {e}")
+
+        # Tier 2: Query JSON backup file
+        try:
+            from options_lab.api.db import _DATA_DIR
+            json_path = os.path.join(_DATA_DIR, "saxo_tokens.json")
+            if os.path.exists(json_path):
+                import json
+                with open(json_path, "r", encoding="utf-8") as jf:
+                    jdata = json.load(jf)
+                    self.access_token = jdata.get("access_token")
+                    if jdata.get("refresh_token"):
+                        self.refresh_token = jdata.get("refresh_token")
+                    logger.info("Synchronized active Saxo tokens from JSON backup.")
+                    return self.access_token
+        except Exception as e:
+            logger.debug(f"Could not load tokens from JSON in _token_from_db: {e}")
+
+        return self.access_token
+
+    def _persist_tokens(self):
+        """Persists newly refreshed tokens across SQLite, JSON backup file, and .env."""
+        # Tier 1: Persistent SQLite Database
+        try:
+            from options_lab.api import db as database
+            database.save_broker_tokens("saxo", self.access_token or "", self.refresh_token or "")
+            logger.info("Persisted Saxo tokens to SQLite broker_tokens table.")
+        except Exception as e:
+            logger.warning(f"Failed to persist tokens to SQLite: {e}")
+
+        # Tier 2: Persistent JSON Backup File on mounted volume
+        try:
+            from options_lab.api.db import _DATA_DIR
+            os.makedirs(_DATA_DIR, exist_ok=True)
+            json_path = os.path.join(_DATA_DIR, "saxo_tokens.json")
+            import json
+            with open(json_path, "w", encoding="utf-8") as f:
+                json.dump({
+                    "access_token": self.access_token or "",
+                    "refresh_token": self.refresh_token or "",
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }, f, indent=2)
+            logger.info(f"Persisted Saxo tokens to JSON backup: {json_path}")
+        except Exception as e:
+            logger.warning(f"Failed to persist tokens to JSON backup: {e}")
+
+        # Tier 3: Environment variables & .env file
+        try:
+            if self.access_token:
+                os.environ["SAXO_ACCESS_TOKEN"] = self.access_token
+            if self.refresh_token:
+                os.environ["SAXO_REFRESH_TOKEN"] = self.refresh_token
+
             env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
             lines = []
             if os.path.exists(env_path):
                 with open(env_path, "r", encoding="utf-8") as f:
                     lines = f.readlines()
-            
+
             new_lines = []
             acc_tok = self.access_token or ""
             ref_tok = self.refresh_token or ""
@@ -166,24 +272,18 @@ class SaxoClient:
 
             with open(env_path, "w", encoding="utf-8") as f:
                 f.writelines(new_lines)
-            logger.info("Persisted refreshed/cleared Saxo tokens to .env successfully.")
+            logger.info("Persisted Saxo tokens to .env successfully.")
         except Exception as e:
-            logger.warning(f"Failed to persist tokens to .env: {e}")
+            logger.debug(f"Note: Could not update .env file (container environment or read-only): {e}")
+
+    def _persist_tokens_to_env(self):
+        """Backward-compatible alias for _persist_tokens."""
+        self._persist_tokens()
 
     def _ensure_valid_token(self):
-        """Ensures that access_token is populated, reloading from .env or refreshing if needed."""
+        """Ensures that access_token is populated, reloading from SQLite/JSON or refreshing if needed."""
         if not self.access_token or not self.refresh_token:
-            try:
-                from dotenv import dotenv_values
-                env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
-                if os.path.exists(env_path):
-                    vals = dotenv_values(env_path)
-                    if not self.access_token:
-                        self.access_token = vals.get("SAXO_ACCESS_TOKEN")
-                    if not self.refresh_token:
-                        self.refresh_token = vals.get("SAXO_REFRESH_TOKEN")
-            except Exception as e:
-                logger.warning(f"Failed reloading token from .env: {e}")
+            self._token_from_db()
 
         if (not self.access_token or len(self.access_token) < 50) and self.refresh_token:
             try:

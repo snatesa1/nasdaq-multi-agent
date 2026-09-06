@@ -113,6 +113,13 @@ wheel_backtester = WheelBacktester()
 @app.on_event("startup")
 async def start_token_heartbeat():
     """Background heartbeat that continuously rolls the Saxo OAuth access & refresh tokens."""
+    try:
+        saxo_broker_client._token_from_db()
+        status_msg = "ACTIVE" if saxo_broker_client.access_token else "UNAUTHENTICATED"
+        logger.info(f"🔐 [Broker Auth Startup] Hydrated broker session status: {status_msg}")
+    except Exception as e:
+        logger.warning(f"⚠️ [Broker Auth Startup] Initial hydration check: {e}")
+
     async def _heartbeat():
         while True:
             try:
@@ -813,13 +820,35 @@ def set_broker_token(payload: Dict[str, Any] = Body(...), user=Depends(verify_fi
 
     if token:
         saxo_broker_client.set_token(token, refresh_token)
-        saxo_broker_client._persist_tokens_to_env()
+        saxo_broker_client._persist_tokens()
         database.clear_saxo_cache()
         log_progress("Token Configuration", "SUCCESS", f"Developer token applied manually (Length: {len(token)})")
         return {"status": "SUCCESS", "message": "Live Saxo token successfully registered!", "environment": settings.SAXO_ENV}
 
     log_progress("Token Configuration", "ERROR", "Token set request failed due to missing params.")
     raise HTTPException(status_code=400, detail="Missing 'token' or 'code' parameter.")
+
+
+@app.post("/api/broker/oauth/sync-storage")
+def sync_broker_storage(user=Depends(verify_firebase_token)):
+    """
+    Forces immediate synchronization of in-memory broker tokens to persistent SQLite and JSON storage.
+    Useful for ensuring zero token loss before container updates or restarts.
+    """
+    if not saxo_broker_client.access_token and not saxo_broker_client.refresh_token:
+        # Try hydrating from DB first
+        saxo_broker_client._token_from_db()
+
+    saxo_broker_client._persist_tokens()
+    has_token = bool(saxo_broker_client.access_token)
+    has_refresh = bool(saxo_broker_client.refresh_token)
+    log_progress("Storage Sync", "SUCCESS", f"Saxo OAuth tokens synchronized to persistent SQLite and JSON (access={has_token}, refresh={has_refresh})")
+    return {
+        "status": "SYNCED",
+        "has_access_token": has_token,
+        "has_refresh_token": has_refresh,
+        "timestamp": datetime.now().isoformat()
+    }
 
 
 @app.post("/api/broker/oauth/disconnect")
@@ -831,7 +860,18 @@ def disconnect_broker(user=Depends(verify_firebase_token)):
     saxo_broker_client.refresh_token = None
     saxo_broker_client.needs_reauth = True
     saxo_broker_client.token_acquired_at = None
-    saxo_broker_client._persist_tokens_to_env()
+    saxo_broker_client._persist_tokens()
+    
+    # Wipe SQLite persistent tokens and backup JSON
+    try:
+        database.clear_broker_tokens("saxo")
+        from options_lab.api.db import _DATA_DIR
+        json_path = os.path.join(_DATA_DIR, "saxo_tokens.json")
+        if os.path.exists(json_path):
+            os.remove(json_path)
+    except Exception as e:
+        logger.warning(f"Failed clearing persistent tokens: {e}")
+
     if hasattr(saxo_broker_client, "session"):
         saxo_broker_client.session.cookies.clear()
     database.clear_saxo_cache()

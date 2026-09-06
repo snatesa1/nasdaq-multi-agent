@@ -214,6 +214,29 @@ export default function Dashboard() {
     window.open(authUrl, 'SaxoMFA', `width=${width},height=${height},left=${left},top=${top}`);
   };
 
+  // 1-Click Clipboard Auto-Linker (Zero Manual Typing)
+  const handleAutoLinkClipboard = async () => {
+    setActionLoading(true);
+    setErrorMsg(null);
+    try {
+      if (!navigator.clipboard) {
+        throw new Error('Clipboard API not accessible in this browser. Please paste manually into the input box below.');
+      }
+      const clipText = await navigator.clipboard.readText();
+      if (!clipText || !clipText.trim()) {
+        throw new Error('Clipboard is empty! Copy the authorization URL or code from the browser window first.');
+      }
+      const trimmed = clipText.trim();
+      await optionsApi.setBrokerToken({ token: trimmed });
+      setDevTokenInput('');
+      await fetchBrokerData(false);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to auto-link token from clipboard.');
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   useEffect(() => {
     fetchBrokerData();
 
@@ -223,8 +246,32 @@ export default function Dashboard() {
       }
     };
     window.addEventListener('message', handleAuthMessage);
-    return () => window.removeEventListener('message', handleAuthMessage);
-  }, []);
+
+    // Auto-detect authorization code on tab focus after user finishes MFA
+    const handleFocusCheck = async () => {
+      try {
+        if (!isAuthenticated && navigator.clipboard && document.hasFocus()) {
+          const clipText = await navigator.clipboard.readText();
+          if (clipText && (clipText.includes('code=') || clipText.includes('Akpegis-Agent.com.sg') || (clipText.trim().length === 36 && clipText.includes('-')))) {
+            console.log('[OptionsLab] Detected Saxo authorization code in clipboard upon window focus! Auto-linking...');
+            setActionLoading(true);
+            await optionsApi.setBrokerToken({ token: clipText.trim() });
+            await fetchBrokerData(false);
+          }
+        }
+      } catch (e) {
+        // Silent catch for clipboard read permission constraints
+      } finally {
+        setActionLoading(false);
+      }
+    };
+    window.addEventListener('focus', handleFocusCheck);
+
+    return () => {
+      window.removeEventListener('message', handleAuthMessage);
+      window.removeEventListener('focus', handleFocusCheck);
+    };
+  }, [isAuthenticated]);
 
   // Handle Developer Token manual configuration
   const handleSetDevToken = async (e: React.FormEvent) => {
@@ -314,21 +361,32 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <div className="flex flex-col sm:flex-row justify-center gap-4 pt-4">
+          <div className="flex flex-col sm:flex-row justify-center gap-3 pt-4">
             {authUrl ? (
-              <button 
-                onClick={handleStartOAuth}
-                disabled={actionLoading}
-                className="flex items-center justify-center gap-2 px-6 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-md transition-colors cursor-pointer"
-              >
-                {actionLoading && <RefreshCw className="h-4 w-4 animate-spin" />}
-                Sign In with Saxo OpenAPI <ExternalLink className="h-4 w-4" />
-              </button>
+              <div className="flex flex-col sm:flex-row gap-3 w-full justify-center">
+                <button 
+                  onClick={handleStartOAuth}
+                  disabled={actionLoading}
+                  className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-md transition-colors cursor-pointer"
+                >
+                  {actionLoading && <RefreshCw className="h-4 w-4 animate-spin" />}
+                  Sign In with Saxo OpenAPI <ExternalLink className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={handleAutoLinkClipboard}
+                  disabled={actionLoading}
+                  className="flex-1 flex items-center justify-center gap-2 px-5 py-3 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm shadow-md transition-colors cursor-pointer"
+                  title="Reads the callback URL or authorization code from your clipboard and connects automatically"
+                >
+                  {actionLoading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <span>⚡</span>}
+                  Auto-Link from Clipboard
+                </button>
+              </div>
             ) : (
               <button 
                 onClick={() => fetchBrokerData(true)} 
                 disabled={actionLoading}
-                className="px-6 py-3 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-sm transition-colors flex items-center justify-center gap-2"
+                className="px-6 py-3 rounded-xl bg-slate-200 hover:bg-slate-300 text-slate-800 font-bold text-sm transition-colors flex items-center justify-center gap-2 cursor-pointer"
               >
                 {actionLoading && <RefreshCw className="h-4 w-4 animate-spin" />}
                 Retry Broker Lookup
@@ -337,24 +395,38 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Manual Token Fallback Card */}
+        {/* Manual / Clipboard Token Input Card */}
         <div className="velzon-card p-6 border border-slate-200 bg-white rounded-xl shadow-sm space-y-4">
-          <div>
-            <h3 className="text-sm font-bold text-slate-800">Developer Access Token</h3>
-            <p className="text-xs text-slate-400">Configure a 24-hour developer access token directly from the Saxo Portal.</p>
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-bold text-slate-800">Quick Token / Code Injection</h3>
+              <p className="text-xs text-slate-400">Paste Saxo 24-hr token, authorization code, or copied callback URL.</p>
+            </div>
+            <span className="text-[10px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+              Permanent Storage Active
+            </span>
           </div>
           <form onSubmit={handleSetDevToken} className="flex gap-2">
             <input 
               type="text" 
-              placeholder="Paste Saxo developer token here..."
+              placeholder="Paste Saxo developer token, callback URL, or authorization code..."
               value={devTokenInput}
               onChange={(e) => setDevTokenInput(e.target.value)}
               className="flex-1 px-3.5 py-2 text-xs border border-slate-300 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-500 font-mono"
             />
+            <button
+              type="button"
+              onClick={handleAutoLinkClipboard}
+              disabled={actionLoading}
+              className="px-3 py-2 bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-700 text-xs font-bold rounded-lg transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+              title="Auto-fill and submit from clipboard"
+            >
+              ⚡ Paste & Link
+            </button>
             <button 
               type="submit"
               disabled={actionLoading || !devTokenInput.trim()}
-              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-200 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5"
+              className="px-4 py-2 bg-slate-800 hover:bg-slate-700 disabled:bg-slate-200 text-white text-xs font-semibold rounded-lg transition-colors flex items-center gap-1.5 cursor-pointer shrink-0"
             >
               {actionLoading && <RefreshCw className="h-3 w-3 animate-spin" />}
               Apply

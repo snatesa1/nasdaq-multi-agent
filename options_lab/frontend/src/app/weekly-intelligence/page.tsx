@@ -137,8 +137,61 @@ export default function WeeklyIntelligencePage() {
       }
     };
     window.addEventListener('message', handleAuthMessage);
-    return () => window.removeEventListener('message', handleAuthMessage);
+
+    const handleFocusCheck = async () => {
+      try {
+        if (navigator.clipboard && document.hasFocus()) {
+          const clipText = await navigator.clipboard.readText();
+          if (clipText && (clipText.includes('code=') || clipText.includes('Akpegis-Agent.com.sg') || (clipText.trim().length === 36 && clipText.includes('-')))) {
+            setActionLog(prev => [
+              { id: 'AUTH-CLIP', msg: '⚡ Detected Saxo authorization code in clipboard! Auto-linking session...', time: new Date().toLocaleTimeString(), type: 'info' },
+              ...prev
+            ]);
+            await optionsApi.setBrokerToken({ token: clipText.trim() });
+            setActionLog(prev => [
+              { id: 'AUTH-OK', msg: '✅ Live Saxo broker session successfully established and persisted!', time: new Date().toLocaleTimeString(), type: 'success' },
+              ...prev
+            ]);
+            fetchBriefing(true);
+          }
+        }
+      } catch (e) {}
+    };
+    window.addEventListener('focus', handleFocusCheck);
+
+    return () => {
+      window.removeEventListener('message', handleAuthMessage);
+      window.removeEventListener('focus', handleFocusCheck);
+    };
   }, []);
+
+  // 1-Click Clipboard Auto-Linker
+  const handleAutoLinkClipboard = async () => {
+    try {
+      if (!navigator.clipboard) {
+        throw new Error('Clipboard API not accessible.');
+      }
+      const clipText = await navigator.clipboard.readText();
+      if (!clipText || !clipText.trim()) {
+        throw new Error('Clipboard is empty. Copy the callback URL or code first.');
+      }
+      setActionLog(prev => [
+        { id: 'AUTH-CLIP', msg: '⚡ Auto-linking Saxo code from clipboard...', time: new Date().toLocaleTimeString(), type: 'info' },
+        ...prev
+      ]);
+      await optionsApi.setBrokerToken({ token: clipText.trim() });
+      setActionLog(prev => [
+        { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authenticated via Clipboard!', time: new Date().toLocaleTimeString(), type: 'success' },
+        ...prev
+      ]);
+      fetchBriefing(true);
+    } catch (err: any) {
+      setActionLog(prev => [
+        { id: 'AUTH-ERR', msg: `❌ Clipboard Auto-Link failed: ${err.message || err}`, time: new Date().toLocaleTimeString(), type: 'danger' },
+        ...prev
+      ]);
+    }
+  };
 
   const handleStartOAuth = (e?: React.MouseEvent) => {
     if (e) e.preventDefault();
@@ -326,14 +379,23 @@ export default function WeeklyIntelligencePage() {
 
             <div className="flex flex-wrap items-center gap-3">
               {authUrl && (
-                <button
-                  onClick={handleStartOAuth}
-                  className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-sm transition cursor-pointer"
-                  title="Authenticate Saxo Live via 1-Click MFA Popup"
-                >
-                  <Key className="h-4 w-4" />
-                  Authorize Saxo (MFA)
-                </button>
+                <>
+                  <button
+                    onClick={handleStartOAuth}
+                    className="flex items-center gap-2 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-semibold shadow-sm transition cursor-pointer"
+                    title="Authenticate Saxo Live via 1-Click MFA Popup"
+                  >
+                    <Key className="h-4 w-4" />
+                    Authorize Saxo (MFA)
+                  </button>
+                  <button
+                    onClick={handleAutoLinkClipboard}
+                    className="flex items-center gap-1.5 px-3.5 py-2.5 bg-white hover:bg-slate-50 text-emerald-700 border border-emerald-300 rounded-xl text-xs font-bold shadow-xs transition cursor-pointer"
+                    title="Auto-Link Saxo authorization code or URL directly from clipboard"
+                  >
+                    ⚡ Auto-Link
+                  </button>
+                </>
               )}
               <button
                 onClick={() => fetchBriefing(true)}

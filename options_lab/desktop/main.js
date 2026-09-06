@@ -24,10 +24,11 @@ let backendProcess = null;
 let frontendProcess = null;
 let isQuitting = false;
 
-const BACKEND_PORT = 8000;
-const FRONTEND_PORT = 3000;
-const BACKEND_URL = `http://127.0.0.1:${BACKEND_PORT}`;
-const FRONTEND_URL = `http://localhost:${FRONTEND_PORT}`;
+const BACKEND_HOST = process.env.OPTIONS_LAB_BACKEND_HOST || '127.0.0.1';
+const BACKEND_PORT = Number(process.env.OPTIONS_LAB_BACKEND_PORT || 8000);
+const FRONTEND_PORT = Number(process.env.OPTIONS_LAB_FRONTEND_PORT || 3000);
+const BACKEND_URL = process.env.OPTIONS_LAB_BACKEND_URL || `http://${BACKEND_HOST}:${BACKEND_PORT}`;
+const FRONTEND_URL = process.env.OPTIONS_LAB_FRONTEND_URL || `http://localhost:${FRONTEND_PORT}`;
 
 // ── 1. Backend & Frontend Process Management & Health Checks ────────────────
 function isBackendReady() {
@@ -273,7 +274,7 @@ async function createWindow() {
               console.log('[Electron OAuth] Captured Saxo code automatically:', code);
               const postData = JSON.stringify({ code: code });
               const req = http.request({
-                hostname: '127.0.0.1',
+                hostname: BACKEND_HOST,
                 port: BACKEND_PORT,
                 path: '/api/broker/oauth/set-token',
                 method: 'POST',
