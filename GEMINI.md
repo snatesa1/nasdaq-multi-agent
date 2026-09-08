@@ -320,3 +320,16 @@ Hierarchical Multi-Agent System (FastAPI) for comprehensive NASDAQ and Multi-Ass
       - 4. **Unified Internal Greeks**: Exchange Bid/Ask/Mid quotes are ingested from Alpaca OPRA feeds, while Delta, Gamma, Theta, and Vega are computed uniformly via OptionsLab's internal vectorized Black-Scholes engine using live FRED risk-free rates.
       - 5. **Dedicated Options Chain Inspector Cockpit (`/options-chain`)**: Standalone high-speed institutional options chain interface in the frontend sidebar with split Calls/Puts table, dynamic DTE pill bar, interactive Recharts IV Smile curve, and 1-click stage trade action.
       - 6. **Non-Regression & Local SQLite Invariant**: All models enforce optional defaults, with local SQLite (`optionslab.db`) as primary default storage and zero GCP/Firebase requirement.
+
+   13. **OptionsLab Institutional Weekly Intelligence, 4D Macro Direction & AI Corporate Interlink Architecture (2026-09-08) [NEW]**:
+       - 1. **Memo Format Deprecation**: Deprecated the unstructured Chief Investment Officer "MEMORANDUM" text prompt in favor of an institutional quantitative cockpit.
+       - 2. **Accumulated Weekly Headline Memory (`macro_news_memory` in SQLite)**: Persists all scraped financial wire headlines across Monday through Friday with SHA-256 deduplication to capture macro momentum and day-over-day trajectory.
+       - 3. **4-Dimensional Macro Direction Compass**: Evaluates Rates & Monetary Pressure, Broad Corporate Earnings & Demand, AI Ecosystem Interlink & Circular Capex Contagion, and Market Liquidity & Volatility Regime.
+       - 4. **US AI Corporate Interlink Map (6 Structural Anchors + 4 Dynamic Challengers)**:
+         * *6 Anchors (Annual Choke Points)*: `TSM` (Advanced Packaging), `NVDA` (AI GPUs), `MSFT` (Azure), `AMZN` (AWS), `GOOGL` (GCP), `NEE` (Utility Scale).
+         * *4 Dynamic Challengers (Quarterly Fluid Re-ranking)*: Power (`GE` vs `CEG` vs `VST`), Memory (`MU` vs `WDC`), Custom ASICs (`AVGO` vs `MRVL`), and Enterprise AI (`PLTR` vs `SNOW`/`NOW`).
+         * *Financial Mechanics*: Balances Sheet CapEx -> Revenue -> Prepayments; Inventory DSI & Finished Goods vs. Construction in Progress (CIP); Power Purchase Agreements (PPAs) -> Utility Backlog (RPO).
+       - 5. **Portfolio Cash Allocation Scenario Matrix (80/20, 60/40 Traditional, 50/50, 20/80)**: Connects live Saxo cash and equity balances to four distinct capital allocation models, including 60/40, deploying idle cash into Cash-Secured Puts (CSPs) at 15-25% annualized theta yield under strict 15% margin caps.
+       - 6. **$1,000/Month Systematic Wheel Harvest & Assignment Risk Engine**: Recommends 3-4 contracts in the $2.00-$3.00 sweet spot, computing PoP (75-82%) and assignment cash burn.
+       - 7. **Double-Cautious Ticker Normalization & Pre-Flight Exchange Verification Protocol**: Enforces canonical symbol normalization, 5-point contract verification (`AssetType`, `Underlying`, `Strike`, `PutCall`, `Expiry`), and Saxo native `POST /trade/v2/orders/precheck` before staging or releasing live orders.
+       - 8. **Interactive Cockpit UI (`/weekly-intelligence`)**: Modernized frontend with 4D Compass barometer cards, AI interlink status grid, 4-tier cash allocation matrix, and the $1,000/mo Wheel Harvest Blotter with live Bid/Ask, PoP badges, and verified contract badges.

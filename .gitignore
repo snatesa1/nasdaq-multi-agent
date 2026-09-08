@@ -15,6 +15,7 @@ tests/__pycache__/
 
 # Exceptions for options_lab
 !options_lab/**/*.json
+options_lab/**/saxo_tokens.json
 !options_lab/**/*.sh
 !options_lab/**/*.gitignore
 
