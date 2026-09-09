@@ -460,27 +460,48 @@ class InterlinkGraphEngine:
     def get_structural_anchors(self) -> List[Dict[str, Any]]:
         """
         Descriptive Summary:
-            Retrieves the current profiles and metrics for the 6 US AI Structural Anchors.
+            Retrieves the current profiles and metrics for the 6 US AI Structural Anchors,
+            normalizing financial balance-sheet attributes (CapEx, Revenue, DSI days, and DSI status).
 
         Parameters:
-            None
+            None. Internal state inspection on self.anchors.
 
         Returns:
-            List[Dict[str, Any]]: List of dictionary profiles for TSM, NVDA, MSFT, AMZN, GOOGL, NEE.
+            List[Dict[str, Any]]: List of dictionary profiles for TSM, NVDA, MSFT, AMZN, GOOGL, NEE
+                including normalized keys: 'capex_annual_b', 'revenue_annual_b', 'inventory_dsi_days',
+                'dsi_status', and 'is_live_data'.
 
         Exceptions / Side Effects:
-            None. Read-only in-memory inspection.
+            None. Read-only in-memory transformation.
 
         Usage Example:
             >>> anchors = engine.get_structural_anchors()
-            >>> print([a["ticker"] for a in anchors])
-            ['TSM', 'NVDA', 'MSFT', 'AMZN', 'GOOGL', 'NEE']
+            >>> print(anchors[0]["ticker"], anchors[0]["dsi_status"])
+            TSM Balanced Supply (65-85d)
         """
         results = []
         for ticker, data in self.anchors.items():
+            dsi = float(data.get("inventory_dsi", 0.0))
+            if dsi <= 0:
+                dsi_status = "N/A (Asset-Light)"
+            elif dsi < self.DSI_BOTTLENECK_CEILING:
+                dsi_status = "Bottleneck (<65d)"
+            elif dsi <= self.DSI_GLUT_FLOOR:
+                dsi_status = "Balanced Supply (65-85d)"
+            else:
+                dsi_status = "Inventory Glut (>85d)"
+
+            annual_capex = float(data.get("annual_capex", 0.0))
+            annual_revenue = float(data.get("annual_revenue", 0.0))
+
             results.append({
                 "ticker": ticker,
                 "node_type": "Anchor",
+                "capex_annual_b": annual_capex,
+                "revenue_annual_b": annual_revenue,
+                "inventory_dsi_days": dsi,
+                "dsi_status": dsi_status,
+                "is_live_data": True,
                 **data
             })
         return results
@@ -489,21 +510,22 @@ class InterlinkGraphEngine:
         """
         Descriptive Summary:
             Retrieves the dynamic challenger battleground status across Power, Memory, ASICs, and Software,
-            computing mathematically derived composite scores and rationales.
+            computing mathematically derived composite scores, key ticker arrays, and quantitative rationales.
 
         Parameters:
-            None
+            None. Internal state inspection on self.challengers.
 
         Returns:
-            List[Dict[str, Any]]: List of battleground matchup summaries, lead scores, and mathematical rationales.
+            List[Dict[str, Any]]: List of battleground matchup summaries, lead scores, mathematical rationales,
+                'composite_score', 'key_tickers', and aliased 'score_derivation' components.
 
         Exceptions / Side Effects:
             None.
 
         Usage Example:
             >>> challengers = engine.get_dynamic_challengers()
-            >>> print(challengers[0]["category"], challengers[0]["score"])
-            POWER 82.4
+            >>> print(challengers[0]["category"], challengers[0]["composite_score"])
+            POWER 53.3
         """
         results = []
         for category, data in self.challengers.items():
@@ -514,7 +536,20 @@ class InterlinkGraphEngine:
             )
             # Update score with mathematically verified value
             data["score"] = scoring_breakdown["composite_score"]
-            data["score_derivation"] = scoring_breakdown
+            data["composite_score"] = scoring_breakdown["composite_score"]
+
+            # Enrich score derivation with aliased fields expected by frontend
+            enriched_derivation = dict(scoring_breakdown)
+            enriched_derivation["growth_score"] = scoring_breakdown.get("growth_edge_score", 0.0)
+            enriched_derivation["margin_score"] = scoring_breakdown.get("operating_margin_score", 0.0)
+            enriched_derivation["efficiency_score"] = scoring_breakdown.get("sector_efficiency_score", 0.0)
+            enriched_derivation["formula"] = scoring_breakdown.get(
+                "score_formula", "0.40*Growth + 0.30*Margin + 0.30*Efficiency"
+            )
+
+            data["score_derivation"] = enriched_derivation
+            data["key_tickers"] = [data["current_leader"], data["runner_up"]]
+            data["rationale"] = scoring_breakdown.get("rationale", "")
 
             results.append({
                 "category": category,

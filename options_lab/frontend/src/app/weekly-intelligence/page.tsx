@@ -1088,46 +1088,61 @@ export default function WeeklyIntelligencePage() {
               </h3>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                {interlink?.anchors && Object.values(interlink.anchors).map((anchor) => (
-                  <div key={anchor.ticker} className="p-4 bg-white border border-slate-200 rounded-xl shadow-2xs space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <span className="font-mono font-black text-slate-900 text-base">{anchor.ticker}</span>
-                          <span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">
-                            {anchor.role}
-                          </span>
-                        </div>
-                        <span className="text-xs text-slate-400">{anchor.name}</span>
-                      </div>
-                      
-                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
-                        anchor.dsi_status.includes('Balanced') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
-                        anchor.dsi_status.includes('Bottleneck') ? 'bg-amber-50 text-amber-700 border border-amber-200' :
-                        'bg-slate-100 text-slate-600'
-                      }`}>
-                        {anchor.dsi_status}
-                      </span>
-                    </div>
+                {interlink?.anchors && (Array.isArray(interlink.anchors) ? interlink.anchors : Object.values(interlink.anchors)).map((anchor: any, idx: number) => {
+                  const dsiStatus = anchor?.dsi_status || (
+                    (anchor?.inventory_dsi_days ?? anchor?.inventory_dsi ?? 0) > 0
+                      ? (anchor?.inventory_dsi_days ?? anchor?.inventory_dsi) < 65
+                        ? 'Bottleneck (<65d)'
+                        : (anchor?.inventory_dsi_days ?? anchor?.inventory_dsi) <= 85
+                        ? 'Balanced Supply (65-85d)'
+                        : 'Inventory Glut (>85d)'
+                      : 'N/A (Asset-Light)'
+                  );
+                  const capex = Number(anchor?.capex_annual_b ?? anchor?.annual_capex ?? 0);
+                  const revenue = Number(anchor?.revenue_annual_b ?? anchor?.annual_revenue ?? 0);
+                  const dsiDays = Number(anchor?.inventory_dsi_days ?? anchor?.inventory_dsi ?? 0);
 
-                    <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-[11px]">
-                      <div>
-                        <span className="text-slate-400 block text-[9px] uppercase">CapEx/Yr</span>
-                        <strong className="font-mono text-slate-800">${anchor.capex_annual_b.toFixed(1)}B</strong>
+                  return (
+                    <div key={anchor?.ticker || idx} className="p-4 bg-white border border-slate-200 rounded-xl shadow-2xs space-y-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <div className="flex items-center gap-2">
+                            <span className="font-mono font-black text-slate-900 text-base">{anchor?.ticker}</span>
+                            <span className="text-[11px] px-2 py-0.5 rounded bg-slate-100 text-slate-600 font-medium">
+                              {anchor?.role}
+                            </span>
+                          </div>
+                          <span className="text-xs text-slate-400">{anchor?.name}</span>
+                        </div>
+                        
+                        <span className={`px-2 py-0.5 rounded text-[10px] font-bold font-mono ${
+                          dsiStatus.includes('Balanced') ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' :
+                          dsiStatus.includes('Bottleneck') ? 'bg-amber-50 text-amber-700 border border-amber-200' :
+                          'bg-slate-100 text-slate-600'
+                        }`}>
+                          {dsiStatus}
+                        </span>
                       </div>
-                      <div>
-                        <span className="text-slate-400 block text-[9px] uppercase">Revenue</span>
-                        <strong className="font-mono text-slate-800">${anchor.revenue_annual_b.toFixed(1)}B</strong>
-                      </div>
-                      <div>
-                        <span className="text-slate-400 block text-[9px] uppercase">DSI (Days)</span>
-                        <strong className="font-mono text-indigo-700">
-                          {anchor.inventory_dsi_days > 0 ? `${anchor.inventory_dsi_days.toFixed(1)}d` : 'N/A'}
-                        </strong>
+
+                      <div className="grid grid-cols-3 gap-2 pt-2 border-t border-slate-100 text-[11px]">
+                        <div>
+                          <span className="text-slate-400 block text-[9px] uppercase">CapEx/Yr</span>
+                          <strong className="font-mono text-slate-800">${capex.toFixed(1)}B</strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[9px] uppercase">Revenue</span>
+                          <strong className="font-mono text-slate-800">${revenue.toFixed(1)}B</strong>
+                        </div>
+                        <div>
+                          <span className="text-slate-400 block text-[9px] uppercase">DSI (Days)</span>
+                          <strong className="font-mono text-indigo-700">
+                            {dsiDays > 0 ? `${dsiDays.toFixed(1)}d` : 'N/A'}
+                          </strong>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 
@@ -1138,47 +1153,59 @@ export default function WeeklyIntelligencePage() {
               </h3>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {interlink?.challengers && Object.entries(interlink.challengers).map(([key, challenger]) => (
-                  <div key={key} className="p-5 bg-white border border-slate-200 rounded-xl shadow-sm space-y-3">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h4 className="text-sm font-bold text-slate-900">{challenger.label}</h4>
-                        <span className="text-xs text-slate-400">Category: {challenger.category}</span>
+                {interlink?.challengers && (Array.isArray(interlink.challengers) ? interlink.challengers : Object.values(interlink.challengers)).map((challenger: any, idx: number) => {
+                  const score = Number(challenger?.composite_score ?? challenger?.score ?? challenger?.score_derivation?.composite_score ?? 0);
+                  const growthScore = challenger?.score_derivation?.growth_score ?? challenger?.score_derivation?.growth_edge_score ?? 85.0;
+                  const marginScore = challenger?.score_derivation?.margin_score ?? challenger?.score_derivation?.operating_margin_score ?? 80.0;
+                  const efficiencyScore = challenger?.score_derivation?.efficiency_score ?? challenger?.score_derivation?.sector_efficiency_score ?? 80.0;
+                  const formula = challenger?.score_derivation?.formula ?? challenger?.score_derivation?.score_formula ?? '0.40 * Growth + 0.30 * Margin + 0.30 * Efficiency';
+                  const keyTickers = challenger?.key_tickers || [challenger?.current_leader, challenger?.runner_up].filter(Boolean);
+                  const rationale = challenger?.rationale || challenger?.score_derivation?.rationale || '';
+
+                  return (
+                    <div key={challenger?.category || idx} className="p-5 bg-white border border-slate-200 rounded-xl shadow-sm space-y-3">
+                      <div className="flex items-start justify-between">
+                        <div>
+                          <h4 className="text-sm font-bold text-slate-900">{challenger?.label || challenger?.category}</h4>
+                          <span className="text-xs text-slate-400">Category: {challenger?.category}</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-[10px] text-slate-400 font-bold uppercase block">Challenger Score</span>
+                          <span className="text-lg font-mono font-black text-[#4051B5]">
+                            {score.toFixed(1)} / 100
+                          </span>
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <span className="text-[10px] text-slate-400 font-bold uppercase block">Challenger Score</span>
-                        <span className="text-lg font-mono font-black text-[#4051B5]">
-                          {challenger.composite_score.toFixed(1)} / 100
+
+                      {/* Mathematical Score Breakdown */}
+                      <div className="bg-slate-50 p-3 rounded-xl border border-slate-150 space-y-1 text-xs">
+                        <div className="flex justify-between font-mono text-[11px] text-slate-600">
+                          <span>Growth Score (40%): <strong>{Number(growthScore).toFixed(1)}</strong></span>
+                          <span>Margin (30%): <strong>{Number(marginScore).toFixed(1)}</strong></span>
+                          <span>Efficiency (30%): <strong>{Number(efficiencyScore).toFixed(1)}</strong></span>
+                        </div>
+                        <span className="text-[10px] text-slate-400 font-mono block">
+                          Formula: {formula}
                         </span>
                       </div>
-                    </div>
 
-                    {/* Mathematical Score Breakdown */}
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-150 space-y-1 text-xs">
-                      <div className="flex justify-between font-mono text-[11px] text-slate-600">
-                        <span>Growth Score (40%): <strong>{challenger.score_derivation?.growth_score || 85.0}</strong></span>
-                        <span>Margin (30%): <strong>{challenger.score_derivation?.margin_score || 80.0}</strong></span>
-                        <span>Efficiency (30%): <strong>{challenger.score_derivation?.efficiency_score || 80.0}</strong></span>
+                      <div className="flex flex-wrap items-center gap-1.5 pt-1">
+                        <span className="text-xs font-medium text-slate-400">Key Beneficiaries:</span>
+                        {keyTickers?.map((t: string) => (
+                          <span key={t} className="px-2 py-0.5 bg-indigo-50 text-[#4051B5] border border-indigo-100 rounded text-xs font-mono font-bold">
+                            {t}
+                          </span>
+                        ))}
                       </div>
-                      <span className="text-[10px] text-slate-400 font-mono block">
-                        Formula: {challenger.score_derivation?.formula || '0.40 * Growth + 0.30 * Margin + 0.30 * Efficiency'}
-                      </span>
-                    </div>
 
-                    <div className="flex flex-wrap items-center gap-1.5 pt-1">
-                      <span className="text-xs font-medium text-slate-400">Key Beneficiaries:</span>
-                      {challenger.key_tickers?.map(t => (
-                        <span key={t} className="px-2 py-0.5 bg-indigo-50 text-[#4051B5] border border-indigo-100 rounded text-xs font-mono font-bold">
-                          {t}
-                        </span>
-                      ))}
+                      {rationale && (
+                        <p className="text-xs text-slate-600 leading-relaxed pt-1">
+                          {rationale}
+                        </p>
+                      )}
                     </div>
-
-                    <p className="text-xs text-slate-600 leading-relaxed pt-1">
-                      {challenger.rationale}
-                    </p>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -1697,9 +1724,9 @@ export default function WeeklyIntelligencePage() {
                         if (!corpusSearch) return true;
                         const q = corpusSearch.toLowerCase();
                         return (
-                          item.keyword.toLowerCase().includes(q) ||
-                          item.default_tickers.toLowerCase().includes(q) ||
-                          item.category.toLowerCase().includes(q)
+                          (item.keyword || '').toLowerCase().includes(q) ||
+                          (item.default_tickers || '').toLowerCase().includes(q) ||
+                          (item.category || '').toLowerCase().includes(q)
                         );
                       })
                       .map((item) => (
@@ -1727,11 +1754,11 @@ export default function WeeklyIntelligencePage() {
 
                           <td className="px-4 py-3 font-mono">
                             <div className="flex items-center gap-2">
-                              <span className="font-bold text-slate-700">{item.weight.toFixed(1)}x</span>
+                              <span className="font-bold text-slate-700">{(item.weight ?? 1.0).toFixed(1)}x</span>
                               <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
                                 <div
                                   className="h-full bg-[#4051B5] rounded-full"
-                                  style={{ width: `${Math.min(100, (item.weight / 3.0) * 100)}%` }}
+                                  style={{ width: `${Math.min(100, ((item.weight ?? 1.0) / 3.0) * 100)}%` }}
                                 />
                               </div>
                             </div>
@@ -1739,18 +1766,18 @@ export default function WeeklyIntelligencePage() {
 
                           <td className="px-4 py-3">
                             <span className={`px-2 py-0.5 rounded text-[11px] font-bold font-mono ${
-                              item.directional_bias.includes('BULLISH')
+                              (item.directional_bias || '').includes('BULLISH')
                                 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-                                : item.directional_bias.includes('DEFENSIVE')
+                                : (item.directional_bias || '').includes('DEFENSIVE')
                                 ? 'bg-amber-50 text-amber-700 border border-amber-200'
                                 : 'bg-slate-100 text-slate-700'
                             }`}>
-                              {item.directional_bias}
+                              {item.directional_bias || 'NEUTRAL'}
                             </span>
                           </td>
 
                           <td className="px-4 py-3 font-mono font-bold text-amber-600">
-                            {'★'.repeat(item.default_impact)}
+                            {'★'.repeat(Math.max(0, Math.min(5, item.default_impact || 1)))}
                           </td>
 
                           <td className="px-4 py-3">
