@@ -13,7 +13,8 @@ import json
 import uuid
 import logging
 import os
-from datetime import datetime, timezone
+import hashlib
+from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 
 logger = logging.getLogger(__name__)
@@ -161,6 +162,33 @@ def _init_db():
                 token_type    TEXT DEFAULT 'Bearer',
                 expires_at    TEXT,
                 updated_at    TEXT NOT NULL
+            )
+        """)
+        # ── Macro News Memory (Accumulated Weekly Headlines) ────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS macro_news_memory (
+                headline_hash TEXT PRIMARY KEY,
+                source        TEXT NOT NULL,
+                title         TEXT NOT NULL,
+                summary       TEXT,
+                category      TEXT,
+                published_at  TEXT NOT NULL,
+                ingested_at   TEXT NOT NULL
+            )
+        """)
+        # ── AI Corporate Interlink Fundamentals Cache ───────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS interlink_fundamentals_cache (
+                ticker           TEXT PRIMARY KEY,
+                capex_annual     REAL,
+                revenue_annual   REAL,
+                inventory_dsi    REAL,
+                rpo_backlog      REAL,
+                ppa_gw_capacity  REAL,
+                node_type        TEXT,
+                sector_tier      TEXT,
+                metrics_json     TEXT,
+                updated_at       TEXT NOT NULL
             )
         """)
         conn.commit()
@@ -696,6 +724,272 @@ def list_staged_trades(week_label: Optional[str] = None, status: Optional[str] =
             return [dict(r) for r in rows]
     except Exception as e:
         logger.error(f"Failed to list staged trades: {e}")
+        return []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MACRO NEWS MEMORY HELPERS (Accumulated Weekly Headlines & Deduplication)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def save_macro_headlines(headlines: List[Dict[str, Any]]) -> int:
+    """
+    Descriptive Summary:
+        Persists a collection of macro financial news headlines into SQLite with SHA-256 deduplication.
+
+    Parameters:
+        headlines (List[Dict[str, Any]]): List of headline dictionaries. Each dictionary must contain:
+            - 'title' (str): The headline string.
+            - 'source' (str, optional): Publication source (e.g. 'Saxo Wire', 'Reuters'). Defaults to 'Saxo Wire'.
+            - 'summary' (str, optional): Summary text or snippet. Defaults to ''.
+            - 'category' (str, optional): Classification tag ('Monetary', 'Earnings', 'Interlink', 'Liquidity', 'General'). Defaults to 'General'.
+            - 'published_at' (str, optional): ISO timestamp of publication. Defaults to current UTC time.
+
+    Returns:
+        int: Number of new unique headlines successfully inserted into the database.
+
+    Exceptions / Side Effects:
+        Writes new unique records to the 'macro_news_memory' table in optionslab.db.
+        Silently skips duplicates matching existing SHA-256 headline hashes.
+
+    Usage Example:
+        >>> news_items = [
+        ...     {"title": "Fed signals potential rate adjustments as inflation stabilizes", "source": "Saxo Wire", "category": "Monetary"}
+        ... ]
+        >>> count = save_macro_headlines(news_items)
+        >>> print(f"Inserted {count} new headlines")
+        Inserted 1 new headlines
+    """
+    if not headlines:
+        return 0
+
+    inserted_count = 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+
+    try:
+        with _get_conn() as conn:
+            for item in headlines:
+                title = item.get("title", "").strip()
+                if not title:
+                    continue
+
+                source = item.get("source", "Saxo Wire").strip()
+                summary = item.get("summary", "").strip()
+                category = item.get("category", "General").strip()
+                published_at = item.get("published_at") or now_iso
+
+                # Compute deterministic SHA-256 identifier
+                hash_input = f"{source}:{title.lower()}".encode("utf-8")
+                headline_hash = hashlib.sha256(hash_input).hexdigest()
+
+                cursor = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO macro_news_memory (
+                        headline_hash, source, title, summary, category, published_at, ingested_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (headline_hash, source, title, summary, category, published_at, now_iso)
+                )
+                if cursor.rowcount > 0:
+                    inserted_count += 1
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to save macro headlines: {e}")
+
+    return inserted_count
+
+
+def get_weekly_macro_headlines(days: int = 7, category: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Descriptive Summary:
+        Retrieves accumulated macro news headlines ingested over a trailing rolling window (default 7 days).
+
+    Parameters:
+        days (int, optional): Rolling lookback window in calendar days. Defaults to 7.
+        category (str, optional): Optional category filter ('Monetary', 'Earnings', 'Interlink', 'Liquidity'). Defaults to None.
+
+    Returns:
+        List[Dict[str, Any]]: List of persisted headline records sorted by published_at DESC. Each dictionary contains:
+            - 'headline_hash' (str): SHA-256 identifier.
+            - 'source' (str): Publication source.
+            - 'title' (str): Headline text.
+            - 'summary' (str): Article synopsis.
+            - 'category' (str): Macro classification tag.
+            - 'published_at' (str): ISO publication timestamp.
+            - 'ingested_at' (str): ISO database ingestion timestamp.
+
+    Exceptions / Side Effects:
+        Executes a read-only query against 'macro_news_memory' in SQLite.
+
+    Usage Example:
+        >>> headlines = get_weekly_macro_headlines(days=5, category="Monetary")
+        >>> for item in headlines:
+        ...     print(item["published_at"], item["title"])
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+    try:
+        with _get_conn() as conn:
+            query = "SELECT * FROM macro_news_memory WHERE published_at >= ?"
+            params: List[Any] = [cutoff]
+            if category:
+                query += " AND category = ?"
+                params.append(category)
+            query += " ORDER BY published_at DESC"
+            rows = conn.execute(query, tuple(params)).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to fetch weekly macro headlines: {e}")
+        return []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  AI CORPORATE INTERLINK FUNDAMENTALS CACHE HELPERS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def save_interlink_fundamentals(record: Dict[str, Any]) -> None:
+    """
+    Descriptive Summary:
+        Persists or updates balance sheet, CapEx, inventory DSI, and utility capacity fundamentals for an AI Interlink node.
+
+    Parameters:
+        record (Dict[str, Any]): Interlink company metrics dictionary containing:
+            - 'ticker' (str): Canonical ticker symbol (e.g. 'NVDA', 'TSM', 'NEE'). Required.
+            - 'capex_annual' (float, optional): Annualized CapEx in Billions USD. Defaults to 0.0.
+            - 'revenue_annual' (float, optional): Annualized Revenue in Billions USD. Defaults to 0.0.
+            - 'inventory_dsi' (float, optional): Days Sales of Inventory. Defaults to 0.0.
+            - 'rpo_backlog' (float, optional): Remaining Performance Obligation in Billions USD. Defaults to 0.0.
+            - 'ppa_gw_capacity' (float, optional): Power Purchase Agreement capacity in Gigawatts. Defaults to 0.0.
+            - 'node_type' (str, optional): 'Anchor' or 'Challenger'. Defaults to 'Anchor'.
+            - 'sector_tier' (str, optional): 'Silicon', 'Cloud', 'Power', or 'Enterprise'. Defaults to 'Silicon'.
+            - 'metrics_json' (dict or str, optional): Extended metrics serialized as JSON string.
+
+    Returns:
+        None
+
+    Exceptions / Side Effects:
+        Performs an UPSERT into 'interlink_fundamentals_cache' in optionslab.db.
+
+    Usage Example:
+        >>> save_interlink_fundamentals({
+        ...     "ticker": "NVDA", "capex_annual": 3.8, "revenue_annual": 120.0,
+        ...     "inventory_dsi": 72.5, "node_type": "Anchor", "sector_tier": "Silicon"
+        ... })
+    """
+    ticker = record.get("ticker", "").strip().upper()
+    if not ticker:
+        return
+
+    now_iso = datetime.now(timezone.utc).isoformat()
+    metrics_json = record.get("metrics_json", "")
+    if isinstance(metrics_json, dict):
+        metrics_json = json.dumps(metrics_json)
+
+    try:
+        with _get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO interlink_fundamentals_cache (
+                    ticker, capex_annual, revenue_annual, inventory_dsi,
+                    rpo_backlog, ppa_gw_capacity, node_type, sector_tier,
+                    metrics_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(ticker) DO UPDATE SET
+                    capex_annual = excluded.capex_annual,
+                    revenue_annual = excluded.revenue_annual,
+                    inventory_dsi = excluded.inventory_dsi,
+                    rpo_backlog = excluded.rpo_backlog,
+                    ppa_gw_capacity = excluded.ppa_gw_capacity,
+                    node_type = excluded.node_type,
+                    sector_tier = excluded.sector_tier,
+                    metrics_json = excluded.metrics_json,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    ticker,
+                    record.get("capex_annual", 0.0),
+                    record.get("revenue_annual", 0.0),
+                    record.get("inventory_dsi", 0.0),
+                    record.get("rpo_backlog", 0.0),
+                    record.get("ppa_gw_capacity", 0.0),
+                    record.get("node_type", "Anchor"),
+                    record.get("sector_tier", "Silicon"),
+                    metrics_json,
+                    now_iso,
+                )
+            )
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to save interlink fundamentals for {ticker}: {e}")
+
+
+def get_interlink_fundamentals(ticker: str) -> Optional[Dict[str, Any]]:
+    """
+    Descriptive Summary:
+        Retrieves cached balance sheet and operational interlink metrics for a specific corporate ticker.
+
+    Parameters:
+        ticker (str): Canonical stock symbol (e.g., 'MSFT', 'NEE', 'GE').
+
+    Returns:
+        Optional[Dict[str, Any]]: Cached record dictionary if found, else None. Contains:
+            - 'ticker' (str): Canonical symbol.
+            - 'capex_annual' (float): Annual CapEx in $B.
+            - 'revenue_annual' (float): Annual Revenue in $B.
+            - 'inventory_dsi' (float): Days Sales of Inventory.
+            - 'rpo_backlog' (float): RPO Backlog in $B.
+            - 'ppa_gw_capacity' (float): Gigawatts power contracted.
+            - 'node_type' (str): 'Anchor' or 'Challenger'.
+            - 'sector_tier' (str): Industry segment.
+            - 'metrics_json' (str): Serialized extended metrics.
+            - 'updated_at' (str): Timestamp of last refresh.
+
+    Exceptions / Side Effects:
+        Performs a SELECT query on 'interlink_fundamentals_cache' in SQLite.
+
+    Usage Example:
+        >>> metrics = get_interlink_fundamentals("MSFT")
+        >>> if metrics:
+        ...     print(metrics["capex_annual"], metrics["rpo_backlog"])
+    """
+    clean_ticker = ticker.strip().upper()
+    try:
+        with _get_conn() as conn:
+            row = conn.execute(
+                "SELECT * FROM interlink_fundamentals_cache WHERE ticker = ?",
+                (clean_ticker,)
+            ).fetchone()
+            if row:
+                return dict(row)
+    except Exception as e:
+        logger.error(f"Failed to get interlink fundamentals for {ticker}: {e}")
+    return None
+
+
+def list_all_interlink_fundamentals() -> List[Dict[str, Any]]:
+    """
+    Descriptive Summary:
+        Lists all cached corporate interlink nodes across Silicon, Cloud, Power, and Enterprise AI tiers.
+
+    Parameters:
+        None
+
+    Returns:
+        List[Dict[str, Any]]: List of all stored node metric dictionaries ordered by sector_tier, ticker ASC.
+
+    Exceptions / Side Effects:
+        Executes a SELECT query on 'interlink_fundamentals_cache' in SQLite.
+
+    Usage Example:
+        >>> nodes = list_all_interlink_fundamentals()
+        >>> print(f"Loaded {len(nodes)} interlink nodes")
+    """
+    try:
+        with _get_conn() as conn:
+            rows = conn.execute(
+                "SELECT * FROM interlink_fundamentals_cache ORDER BY sector_tier, ticker ASC"
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to list all interlink fundamentals: {e}")
         return []
 
 

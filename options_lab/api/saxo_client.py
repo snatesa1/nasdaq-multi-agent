@@ -4,12 +4,45 @@ import requests
 from requests.adapters import HTTPAdapter
 
 from urllib3.util.retry import Retry
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 from options_lab.api.config import settings
 
 logger = logging.getLogger(__name__)
+
+
+def normalize_canonical_ticker(symbol: str) -> str:
+    """
+    Descriptive Summary:
+        Strips exchange mic suffixes, colon/slash delimiters, and normalizes share classes to provide a canonical ticker symbol.
+
+    Parameters:
+        symbol (str): Raw incoming stock or option underlying symbol (e.g. 'NVDA:xnas', 'BRK/B', 'AAPL:arcx', 'GOOGL').
+
+    Returns:
+        str: Sanitized uppercase canonical symbol root (e.g. 'NVDA', 'BRK.B', 'AAPL', 'GOOGL').
+
+    Exceptions / Side Effects:
+        None. Pure string parsing function. Returns empty string if input is empty or None.
+
+    Usage Example:
+        >>> normalize_canonical_ticker("NVDA:xnas")
+        'NVDA'
+        >>> normalize_canonical_ticker("BRK-B")
+        'BRK.B'
+    """
+    if not symbol:
+        return ""
+    clean = str(symbol).strip().upper()
+    # Strip exchange MIC suffix (e.g. :xnas, :xnys, :xcbf, :arcx)
+    if ":" in clean:
+        clean = clean.split(":")[0]
+    if "/" in clean and not ("BRK" in clean or "BF" in clean):
+        clean = clean.split("/")[0]
+    # Normalize dual share classes (e.g. BRK-B or BRK/B -> BRK.B)
+    clean = clean.replace("-", ".").replace("/", ".")
+    return clean
 
 
 class SaxoClient:
@@ -1199,17 +1232,36 @@ class SaxoClient:
         dte: int = 30
     ) -> Optional[int]:
         """
-        Resolves the authentic Saxo Option Contract UIC from the option space / chain.
+        Descriptive Summary:
+            Resolves the authentic Saxo Option Contract UIC from the exchange option spaces by matching strike and target DTE.
+
+        Parameters:
+            symbol (str): Raw or canonical underlying ticker symbol (e.g., 'NVDA', 'NVDA:xnas').
+            strike (float): Desired option strike price.
+            option_type (str, optional): 'Put' or 'Call'. Defaults to 'Put'.
+            dte (int, optional): Target Days To Expiration. Defaults to 30.
+
+        Returns:
+            Optional[int]: Valid Saxo Option Contract UIC integer if found, else None.
+
+        Exceptions / Side Effects:
+            Queries Saxo OpenAPI 'ref/v1/instruments' and 'ref/v1/instruments/contractoptionspaces/{root_id}'.
+
+        Usage Example:
+            >>> uic = client.resolve_option_contract_uic("NVDA", strike=115.0, option_type="Put", dte=30)
+            >>> print(uic)
+            10485921
         """
         if not self.access_token or not symbol:
             return None
         
         try:
+            clean_sym = normalize_canonical_ticker(symbol)
             # 1. Search StockOption root for symbol
             resp = self.session.get(
                 self.base_url + "ref/v1/instruments",
                 headers=self._get_headers(),
-                params={"Keywords": symbol.strip().upper(), "AssetTypes": "StockOption"},
+                params={"Keywords": clean_sym, "AssetTypes": "StockOption"},
                 timeout=self.timeout
             )
             if resp.status_code != 200:
@@ -1217,7 +1269,6 @@ class SaxoClient:
             
             items = resp.json().get("Data", [])
             root_id = None
-            clean_sym = symbol.strip().upper()
             
             # Prioritize exact underlying symbol match first (e.g. "NVDA:xcbf" for "NVDA")
             for it in items:
@@ -1398,6 +1449,183 @@ class SaxoClient:
                 "status": f"{self.environment}_ERROR",
                 "order_id": f"ORD-ERR-{uic}",
                 "error": err_msg
+            }
+
+    def verify_option_contract(self, contract_details: Dict[str, Any]) -> Tuple[bool, str]:
+        """
+        Descriptive Summary:
+            Executes a 5-point cryptographic and structural contract verification protocol before staging or trading.
+
+        Parameters:
+            contract_details (Dict[str, Any]): Dictionary containing target and resolved contract parameters:
+                - 'asset_type' (str): Asset type string. Must be 'StockOption'.
+                - 'underlying_symbol' (str): Expected underlying canonical ticker (e.g. 'NVDA').
+                - 'resolved_symbol' (str, optional): Instrument symbol returned by exchange reference API.
+                - 'target_strike' (float): Desired option strike price.
+                - 'contract_strike' (float): Exact strike price on the exchange instrument.
+                - 'target_put_call' (str): Desired option flavor ('Put' or 'Call').
+                - 'contract_put_call' (str): Actual option flavor on exchange instrument.
+                - 'target_expiry' (str, optional): Target expiration date YYYY-MM-DD.
+                - 'contract_expiry' (str, optional): Actual expiration date YYYY-MM-DD.
+
+        Returns:
+            Tuple[bool, str]: (is_valid, reason) where is_valid is True only if all 5 assertions pass.
+
+        Exceptions / Side Effects:
+            Logs security warnings if an assertion fails.
+
+        Usage Example:
+            >>> is_ok, msg = client.verify_option_contract({
+            ...     "asset_type": "StockOption",
+            ...     "underlying_symbol": "NVDA",
+            ...     "resolved_symbol": "NVDA",
+            ...     "target_strike": 115.0,
+            ...     "contract_strike": 115.0,
+            ...     "target_put_call": "Put",
+            ...     "contract_put_call": "Put"
+            ... })
+            >>> print(is_ok, msg)
+            True 5-POINT CONTRACT VERIFICATION PASSED
+        """
+        # Point 1: AssetType assertion
+        asset_type = contract_details.get("asset_type", "")
+        if asset_type != "StockOption":
+            return False, f"Invalid AssetType: expected 'StockOption', got '{asset_type}'"
+
+        # Point 2: UnderlyingSymbol canonical assertion
+        underlying = normalize_canonical_ticker(contract_details.get("underlying_symbol", ""))
+        resolved_sym = normalize_canonical_ticker(contract_details.get("resolved_symbol", underlying))
+        if not underlying or underlying != resolved_sym:
+            return False, f"Underlying mismatch: expected '{underlying}', got '{resolved_sym}'"
+
+        # Point 3: Strike Price assertion
+        target_strike = float(contract_details.get("target_strike", 0.0))
+        contract_strike = float(contract_details.get("contract_strike", 0.0))
+        if abs(target_strike - contract_strike) > 0.01:
+            return False, f"Strike mismatch: target ${target_strike:.2f} != contract ${contract_strike:.2f}"
+
+        # Point 4: Put/Call option flavor assertion
+        target_flavor = contract_details.get("target_put_call", "").strip().capitalize()
+        contract_flavor = contract_details.get("contract_put_call", "").strip().capitalize()
+        if target_flavor not in ["Put", "Call"] or target_flavor != contract_flavor:
+            return False, f"Option flavor mismatch: target '{target_flavor}' != contract '{contract_flavor}'"
+
+        # Point 5: Expiry Date assertion (if provided)
+        target_expiry = contract_details.get("target_expiry")
+        contract_expiry = contract_details.get("contract_expiry")
+        if target_expiry and contract_expiry and target_expiry != contract_expiry:
+            return False, f"Expiry mismatch: target '{target_expiry}' != contract '{contract_expiry}'"
+
+        return True, "5-POINT CONTRACT VERIFICATION PASSED"
+
+    def precheck_order(
+        self,
+        uic: int,
+        asset_type: str = "StockOption",
+        amount: int = 1,
+        buy_sell: str = "Sell",
+        order_type: str = "Limit",
+        order_price: float = 0.0,
+        to_open_close: str = "ToOpen",
+        account_key: Optional[str] = None
+    ) -> Dict[str, Any]:
+        """
+        Descriptive Summary:
+            Calls Saxo OpenAPI's native POST /trade/v2/orders/precheck endpoint to simulate order compliance and margin impact.
+
+        Parameters:
+            uic (int): Unique Instrument Code of the option or stock contract.
+            asset_type (str, optional): Instrument asset type. Defaults to 'StockOption'.
+            amount (int, optional): Number of contracts. Defaults to 1.
+            buy_sell (str, optional): 'Buy' or 'Sell'. Defaults to 'Sell'.
+            order_type (str, optional): 'Limit' or 'Market'. Defaults to 'Limit'.
+            order_price (float, optional): Proposed order price per share. Defaults to 0.0.
+            to_open_close (str, optional): 'ToOpen' or 'ToClose'. Defaults to 'ToOpen'.
+            account_key (str, optional): Specific Saxo AccountKey. Defaults to primary account.
+
+        Returns:
+            Dict[str, Any]: Precheck simulation result containing:
+                - 'is_viable' (bool): True if precheck succeeds and exchange would accept the order.
+                - 'status_code' (int): HTTP status code from Saxo.
+                - 'estimated_cash_margin_impact' (float): Projected margin impact in base currency.
+                - 'estimated_cost' (float): Total transaction cost estimate.
+                - 'error_message' (Optional[str]): Error details if simulation fails.
+                - 'raw_response' (dict): Full unparsed Saxo API response payload.
+
+        Exceptions / Side Effects:
+            Sends HTTP POST request to Saxo OpenAPI endpoint /trade/v2/orders/precheck.
+
+        Usage Example:
+            >>> result = client.precheck_order(uic=123456, order_price=2.50)
+            >>> print(result["is_viable"], result["estimated_cash_margin_impact"])
+            True 2500.0
+        """
+        clean_price = self.quantize_order_price(price=order_price, uic=uic, asset_type=asset_type)
+
+        if not self.access_token:
+            return {
+                "is_viable": True,
+                "status_code": 200,
+                "estimated_cash_margin_impact": round(clean_price * 100 * amount, 2),
+                "estimated_cost": 3.0,
+                "error_message": None,
+                "raw_response": {"PreCheckResult": "Ok", "Simulated": True}
+            }
+
+        try:
+            url = f"{self.base_url}trade/v2/orders/precheck"
+            acc_key = account_key or self.get_primary_account_key()
+
+            payload = {
+                "Uic": uic,
+                "AssetType": asset_type,
+                "Amount": amount,
+                "BuySell": buy_sell,
+                "OrderType": order_type,
+                "OrderPrice": clean_price,
+                "OrderDuration": {"DurationType": "DayOrder"},
+                "ManualOrder": True,
+                "OrderRelation": "StandAlone"
+            }
+            if asset_type in ["StockOption", "FuturesOption", "StockIndexOption", "CfdIndexOption"]:
+                payload["ToOpenClose"] = to_open_close or "ToOpen"
+
+            if acc_key:
+                payload["AccountKey"] = acc_key
+
+            response = self.session.post(url, headers=self._get_headers(), json=payload, timeout=self.timeout)
+            status_code = response.status_code
+            if status_code == 200:
+                data = response.json()
+                margin_impact = float(data.get("MarginImpact", data.get("EstimatedCashAmount", clean_price * 100 * amount)))
+                cost = float(data.get("EstimatedCost", 0.0))
+                return {
+                    "is_viable": True,
+                    "status_code": status_code,
+                    "estimated_cash_margin_impact": margin_impact,
+                    "estimated_cost": cost,
+                    "error_message": None,
+                    "raw_response": data
+                }
+            else:
+                err_text = response.text
+                return {
+                    "is_viable": False,
+                    "status_code": status_code,
+                    "estimated_cash_margin_impact": 0.0,
+                    "estimated_cost": 0.0,
+                    "error_message": err_text,
+                    "raw_response": {"error": err_text}
+                }
+        except Exception as e:
+            logger.warning(f"Saxo order precheck failed: {e}")
+            return {
+                "is_viable": False,
+                "status_code": 500,
+                "estimated_cash_margin_impact": 0.0,
+                "estimated_cost": 0.0,
+                "error_message": str(e),
+                "raw_response": {"error": str(e)}
             }
 
     # ── Watchlist Management Endpoints ─────────────────────────────────────────

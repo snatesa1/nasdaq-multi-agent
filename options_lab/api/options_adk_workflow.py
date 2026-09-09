@@ -34,6 +34,7 @@ from .universe import InstitutionalUniverseEngine, normalize_gics_sector
 from .weekly_intelligence import WeeklyIntelligenceEngine, COMPANY_TICKER_MAP
 from .market_data import fetch_market_data, fetch_option_market_quote
 from engine.black_scholes import black_scholes_price, black_scholes_greeks
+from engine.interlink_graph import InterlinkGraphEngine
 from . import db as database
 
 logger = logging.getLogger("options-adk-workflow")
@@ -503,11 +504,51 @@ def create_options_adk_workflow() -> Workflow:
 
 class OptionsADKWorkflowEngine:
     """
-    High-level runner managing the ADK 2.0 Graph Workflow for OptionsLab.
-    Provides execution, caching, and fallback resilience.
+    Descriptive Summary:
+        Institutional Google ADK 2.0 Graph Workflow Engine for OptionsLab.
+        Executes a deterministic directed acyclic graph (DAG) coordinating pre-flight OAuth audit,
+        macro news ingestion, parallel specialist fan-out (Technical, Fundamental, Greeks), multi-agent
+        synthesis, margin guardian validation, and human-in-the-loop (HITL) order staging.
+
+    Encapsulation & Internal State:
+        - saxo_client (SaxoClient): Authenticated broker gateway client.
+        - margin_guardian (MarginGuardian): Real-time margin utilization and risk guardian.
+        - safety_shield (BehavioralSafetyShield): Behavioral execution shield preventing overtrading.
+        - trade_staging (TradeStagingEngine): SQLite trade candidate staging and audit blotter.
+        - weekly_engine (WeeklyIntelligenceEngine): Quantitative macro analysis and options engine.
+        - workflow (Workflow): Google ADK 2.0 declarative execution graph.
+
+    Member Functions (3 methods):
+        - __init__: Initializes clients, guardians, engines, and constructs the ADK workflow graph.
+        - run_pipeline: Executes the complete end-to-end graph workflow with automatic fallback.
+        - get_workflow_metadata: Returns graph topology, nodes, edges, and active guardrails.
+
+    Usage Example:
+        >>> engine = OptionsADKWorkflowEngine()
+        >>> report = engine.run_pipeline(week_label="2026-W37", force_refresh=True)
+        >>> print(report["status"], len(report["potential_trades"]))
+        SUCCESS 4
     """
 
     def __init__(self, saxo_client: Optional[SaxoClient] = None):
+        """
+        Descriptive Summary:
+            Initializes the ADK Workflow Engine, instantiating safety guardians, staging layers,
+            the underlying WeeklyIntelligenceEngine, and declarative ADK 2.0 DAG.
+
+        Parameters:
+            saxo_client (Optional[SaxoClient]): Broker client. Defaults to new SaxoClient instance.
+
+        Returns:
+            None (Constructor)
+
+        Exceptions / Side Effects:
+            Compiles the ADK Workflow graph with nodes and directed edges.
+
+        Usage Example:
+            >>> engine = OptionsADKWorkflowEngine()
+            >>> assert engine.workflow.name == "options_weekly_intelligence_adk_workflow"
+        """
         self.saxo_client = saxo_client or SaxoClient()
         self.margin_guardian = MarginGuardian(saxo_client=self.saxo_client)
         self.safety_shield = BehavioralSafetyShield()
@@ -517,8 +558,37 @@ class OptionsADKWorkflowEngine:
 
     def run_pipeline(self, week_label: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:
         """
-        Executes the ADK 2.0 Graph Workflow.
-        Returns the synthesized briefing and staged trade candidates.
+        Descriptive Summary:
+            Executes the ADK 2.0 Graph Workflow across all sequential and fan-out nodes.
+            Computes 4D Macro Direction Compass, AI Corporate Interlink Cockpit, 4-tier Capital
+            Allocation Scenarios, and assembles the $1,000/Month Systematic Wheel Harvest Blotter.
+
+        Parameters:
+            week_label (Optional[str], optional): Calendar week label (e.g. '2026-W37'). Defaults to current week.
+            force_refresh (bool, optional): If True, ignores SQLite cache and forces re-execution. Defaults to False.
+
+        Returns:
+            Dict[str, Any]: Institutional pipeline payload containing:
+                - 'status' (str): 'SUCCESS' or execution status.
+                - 'framework' (str): Google ADK version string.
+                - 'ai_summary' (str): Synthesized institutional briefing markdown.
+                - 'macro_compass' (Dict[str, Any]): 4D Macro Direction Compass metrics.
+                - 'capital_allocation_scenarios' (List[Dict[str, Any]]): 80/20, 60/40, 50/50, 20/80 models.
+                - 'interlink_cockpit' (Dict[str, Any]): AI Interlink graph nodes, edges, and DSI health.
+                - 'wheel_harvest_blotter' (Dict[str, Any]): Systematic $1,000/mo wheel blotter.
+                - 'potential_trades' (List[Dict[str, Any]]): Staged trade candidate records.
+                - 'routing_decision' (str): 'APPROVED' or 'REJECTED'.
+                - 'hitl_status' (str): 'PAUSED_AWAITING_USER_APPROVAL'.
+
+        Exceptions / Side Effects:
+            On any unhandled DAG node exception, catches error, logs stack trace, and seamlessly
+            executes an automatic fallback to `WeeklyIntelligenceEngine.analyze_weekly_macro_and_edges`.
+
+        Usage Example:
+            >>> engine = OptionsADKWorkflowEngine()
+            >>> result = engine.run_pipeline(force_refresh=True)
+            >>> print(result["routing_decision"], result["wheel_harvest_blotter"]["monthly_harvest_target"])
+            APPROVED 1000.0
         """
         week_label = week_label or f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
         today_str = datetime.now().strftime("%Y-%m-%d")
@@ -574,6 +644,54 @@ class OptionsADKWorkflowEngine:
             if not briefing_text:
                 briefing_text = f"Weekly Macro & Options Briefing for {week_label}: Active sectors diversified across Information Technology, Communication Services, Financials, and Industrials. Quantitative margin checks passed within 15% limit."
 
+            # Compute 4D Macro Direction Compass
+            raw_news = s1.get("raw_news", [])
+            macro_compass = self.weekly_engine.calculate_4d_macro_compass(raw_news)
+
+            # Compute 4-Tier Capital Allocation Scenarios (80/20, 60/40 Traditional, 50/50, 20/80)
+            account_equity = 100000.0
+            cash_available = 70000.0
+            try:
+                balances = self.saxo_client.get_account_balances()
+                if balances:
+                    account_equity = float(balances.get("total_equity") or balances.get("TotalEquity") or 100000.0)
+                    cash_available = float(balances.get("cash_available") or balances.get("CashAvailable") or (account_equity * 0.70))
+            except Exception:
+                try:
+                    cached_bal = database.get_saxo_cache("balances")
+                    if cached_bal and isinstance(cached_bal, dict):
+                        account_equity = float(cached_bal.get("total_equity") or cached_bal.get("TotalEquity") or 100000.0)
+                        cash_available = float(cached_bal.get("cash_available") or cached_bal.get("CashAvailable") or (account_equity * 0.70))
+                except Exception:
+                    pass
+            capital_scenarios = self.weekly_engine.calculate_capital_allocation_scenarios(account_equity=account_equity, cash_available=cash_available)
+
+            # Compute AI Corporate Interlink Cockpit
+            interlink_cockpit = InterlinkGraphEngine(use_db_cache=True).synthesize_interlink_cockpit()
+
+            # Assemble $1,000/Month Systematic Wheel Harvest Blotter
+            staged_trades = s5.get("staged_trades", [])
+            total_monthly_harvest_dollars = sum(
+                round(t.get("premium_estimate", 0.0) * 100.0 * t.get("contracts", 1), 2)
+                for t in staged_trades
+            )
+            avg_pop = (
+                round(sum(t.get("pop_percent", 75.0) for t in staged_trades) / max(len(staged_trades), 1), 1)
+                if staged_trades else 0.0
+            )
+            total_collateral = sum(t.get("collateral_required", 0.0) for t in staged_trades)
+
+            wheel_harvest_blotter = {
+                "monthly_harvest_target": 1000.0,
+                "target_premium_band": "$2.00 - $3.00 ($200 - $300 / contract)",
+                "total_staged_contracts": len(staged_trades),
+                "projected_monthly_harvest_dollars": total_monthly_harvest_dollars,
+                "target_achievement_pct": round((total_monthly_harvest_dollars / 1000.0) * 100.0, 1) if total_monthly_harvest_dollars else 0.0,
+                "average_pop_percent": avg_pop,
+                "total_collateral_required": total_collateral,
+                "candidates": staged_trades
+            }
+
             result_payload = {
                 "status": "SUCCESS",
                 "framework": f"Google ADK {adk_version}",
@@ -586,7 +704,11 @@ class OptionsADKWorkflowEngine:
                 "macro_briefing": briefing_text,
                 "macro_events": s1.get("macro_cards", []),
                 "events": s1.get("macro_cards", []),
-                "potential_trades": s5.get("staged_trades", []),
+                "potential_trades": staged_trades,
+                "macro_compass": macro_compass,
+                "capital_allocation_scenarios": capital_scenarios,
+                "interlink_cockpit": interlink_cockpit,
+                "wheel_harvest_blotter": wheel_harvest_blotter,
                 "margin_status": self.margin_guardian.get_current_margin_status(),
                 "routing_decision": s4.get("routing_decision", "APPROVED"),
                 "hitl_status": s5.get("hitl_status", "PAUSED_AWAITING_USER_APPROVAL"),
@@ -611,7 +733,31 @@ class OptionsADKWorkflowEngine:
             return fallback_res
 
     def get_workflow_metadata(self) -> Dict[str, Any]:
-        """Returns ADK 2.0 workflow topology, node contracts, and runtime metadata."""
+        """
+        Descriptive Summary:
+            Returns ADK 2.0 workflow topology, declarative node contracts, edges, and institutional guardrails.
+
+        Parameters:
+            None
+
+        Returns:
+            Dict[str, Any]: Workflow metadata dictionary containing:
+                - 'framework' (str): Google ADK version identifier.
+                - 'workflow_name' (str): Name of the DAG.
+                - 'description' (str): High-level mission synopsis.
+                - 'nodes' (List[Dict[str, str]]): List of node names and types.
+                - 'edges' (List[Dict[str, str]]): List of directed edges from origin to destination.
+                - 'hitl_enabled' (bool): True if human-in-the-loop gate is registered.
+                - 'deterministic_guardrails' (List[str]): Enforced risk constraints.
+
+        Exceptions / Side Effects:
+            None. Introspects static graph topology.
+
+        Usage Example:
+            >>> meta = engine.get_workflow_metadata()
+            >>> print(meta["workflow_name"], len(meta["nodes"]))
+            options_weekly_intelligence_adk_workflow 8
+        """
         return {
             "framework": f"Google ADK {adk_version}",
             "workflow_name": self.workflow.name,

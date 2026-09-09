@@ -7,6 +7,7 @@ import pandas as pd
 import yfinance as yf
 import requests
 from .config import settings
+from .saxo_client import normalize_canonical_ticker
 
 
 logger = logging.getLogger(__name__)
@@ -359,15 +360,46 @@ def fetch_option_market_quote(
     saxo_client: Optional[Any] = None
 ) -> Dict[str, Any]:
     """
-    Fetches authentic live market Bid, Ask, Mid, and Last quotes for an option contract.
-    Tiered Strategy:
-    1. Primary: Saxo OpenAPI live quote (trade/v1/infoprices) if user account has active market data entitlement.
-    2. Secondary: Real-Time OPRA exchange option chain (via yfinance/OCC) for authentic Bid/Ask/Mid.
-    3. Fallback: Theoretical Black-Scholes model only if markets are offline or no quotes exist.
+    Descriptive Summary:
+        Fetches authentic live market Bid, Ask, Mid, and Last quotes for an option contract via a multi-tiered pipeline.
+
+    Parameters:
+        symbol (str): Raw or canonical underlying ticker symbol (e.g. 'NVDA', 'NVDA:xnas').
+        strike (float): Option strike price.
+        option_type (str, optional): 'put' or 'call'. Defaults to 'put'.
+        dte (int, optional): Days To Expiration. Defaults to 30.
+        uic (Optional[int], optional): Saxo Unique Instrument Code if known. Defaults to None.
+        saxo_client (Optional[Any], optional): Authenticated SaxoClient instance. Defaults to None.
+
+    Returns:
+        Dict[str, Any]: Live option quote payload containing:
+            - 'source' (str): 'SAXO_LIVE', 'OPRA_LIVE', or 'THEORETICAL_MODEL'.
+            - 'bid' (float): Best exchange bid price.
+            - 'ask' (float): Best exchange ask price.
+            - 'mid' (float): Midpoint quote (quantized to exchange tick size).
+            - 'last' (float): Last executed trade price.
+            - 'spread' (float): Bid-Ask spread.
+            - 'uic' (Optional[int]): Option contract UIC.
+            - 'is_real_quote' (bool): True if verified from real exchange stream.
+
+    Exceptions / Side Effects:
+        Makes network calls to Saxo OpenAPI or yfinance OPRA feeds. Logs fallbacks.
+
+    Usage Example:
+        >>> quote = fetch_option_market_quote("NVDA", strike=115.0, option_type="put", dte=30)
+        >>> print(quote["bid"], quote["ask"], quote["mid"], quote["source"])
+        2.40 2.60 2.50 OPRA_LIVE
     """
-    symbol_clean = symbol.strip().upper()
+    symbol_clean = normalize_canonical_ticker(symbol)
     opt_type_lower = option_type.lower()
     is_put = "put" in opt_type_lower or opt_type_lower == "p"
+
+    # Auto-resolve UIC if saxo_client is available and UIC was not provided
+    if saxo_client and not uic:
+        try:
+            uic = saxo_client.resolve_option_contract_uic(symbol_clean, strike, option_type, dte)
+        except Exception as e:
+            logger.debug(f"Auto-resolving UIC in fetch_option_market_quote failed: {e}")
 
     # 1. Primary: Saxo OpenAPI live quote (if available and entitled)
     if saxo_client and uic:
