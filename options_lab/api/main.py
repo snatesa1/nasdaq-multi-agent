@@ -1327,25 +1327,30 @@ async def get_weekly_intelligence_briefing(
     Identifies edge setups (e.g. COIN Clarity Act spike) and stages trade recommendations.
     Uses asyncio.wait_for with a 40-second timeout guard to prevent connection hanging.
     """
+    resolved_week = week_label or f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
     try:
         res = await asyncio.wait_for(
             asyncio.to_thread(
                 adk_workflow_engine.run_pipeline,
-                week_label=week_label,
+                week_label=resolved_week,
                 force_refresh=force_refresh
             ),
-            timeout=40.0
+            timeout=75.0
         )
         return res
     except asyncio.TimeoutError:
-        logger.warning(f"ADK pipeline synthesis timed out after 40s for {week_label}. Attempting cached fallback.")
-        cached = database.get_saxo_cache(f"adk_workflow_briefing_{week_label or 'current'}")
+        logger.warning(f"ADK pipeline synthesis timed out for {resolved_week}. Attempting cached fallback.")
+        cached = (
+            database.get_saxo_cache(f"adk_briefing_{resolved_week}")
+            or database.get_saxo_cache(f"adk_workflow_briefing_{resolved_week}")
+            or database.get_saxo_cache("adk_workflow_briefing_current")
+        )
         if cached and isinstance(cached, dict):
-            cached["warning"] = "Live pipeline synthesis took longer than 40s; serving last synchronized briefing."
+            cached["warning"] = "Live pipeline synthesis took longer than expected; serving last synchronized briefing."
             return cached
         raise HTTPException(
             status_code=504, 
-            detail="ADK Macro Intelligence synthesis timed out after 40s. Background workers are continuing; please retry."
+            detail="ADK Macro Intelligence synthesis timed out. Background workers are continuing; please retry."
         )
     except Exception as e:
         logger.error(f"Failed to generate weekly intelligence briefing via ADK: {e}")

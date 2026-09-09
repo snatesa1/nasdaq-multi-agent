@@ -38,6 +38,17 @@ export interface MacroCompass {
   dimension_4_liquidity: MacroCompassDimension;
 }
 
+export interface BalanceProvenance {
+  total_equity: number;
+  cash_available: number;
+  balance_source: 'LIVE_BROKER' | 'CACHED_BROKER' | 'HISTORICAL_REPORT' | 'PORTFOLIO_HOLDINGS' | 'SIMULATED_BENCHMARK' | string;
+  is_simulated: boolean;
+  account_id?: string;
+  currency?: string;
+  as_of?: string;
+  details?: string;
+}
+
 export interface CapitalAllocationScenario {
   scenario_id: '80_20' | '60_40' | '50_50' | '20_80';
   label: string;
@@ -51,6 +62,7 @@ export interface CapitalAllocationScenario {
   options_playbook: string;
   annualized_theta_yield_est: string;
   cash_drag_status: string;
+  balance_provenance?: BalanceProvenance;
 }
 
 export interface InterlinkAnchorNode {
@@ -181,6 +193,7 @@ export interface BriefingData {
   potential_trades: StagedTrade[];
   macro_compass?: MacroCompass;
   capital_allocation_scenarios?: CapitalAllocationScenario[];
+  balance_provenance?: BalanceProvenance;
   interlink_cockpit?: InterlinkCockpit;
   wheel_harvest_blotter?: WheelHarvestBlotter;
 }

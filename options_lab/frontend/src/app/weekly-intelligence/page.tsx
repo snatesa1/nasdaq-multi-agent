@@ -391,6 +391,7 @@ export default function WeeklyIntelligencePage() {
   const wheelBlotter = briefing?.wheel_harvest_blotter;
   const scenarios = briefing?.capital_allocation_scenarios || [];
   const stagedTrades = wheelBlotter?.candidates || briefing?.potential_trades || [];
+  const provenance = briefing?.balance_provenance || scenarios[0]?.balance_provenance;
 
   return (
     <ProtectedRoute>
@@ -1195,7 +1196,7 @@ export default function WeeklyIntelligencePage() {
                   Portfolio Capital Allocation Playbook: 4 Distinct Scenarios
                 </h2>
                 <p className="text-xs text-slate-500 mt-1">
-                  Dynamically scaled to live account equity (${(margin?.total_equity || 100000).toLocaleString('en-US')}) and available cash buffer.
+                  Dynamically scaled to {provenance?.is_simulated ? 'reference model' : 'authentic broker capital'} (${(provenance?.total_equity || margin?.total_equity || 100000).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}) and available cash buffer.
                 </p>
               </div>
 
@@ -1206,6 +1207,62 @@ export default function WeeklyIntelligencePage() {
                 </span>
               </div>
             </div>
+
+            {/* Balance Provenance Ribbon */}
+            {provenance && (
+              <div className={`p-4 rounded-xl border flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs transition ${
+                provenance.balance_source === 'LIVE_BROKER'
+                  ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950'
+                  : provenance.balance_source === 'CACHED_BROKER'
+                  ? 'bg-amber-50/80 border-amber-200 text-amber-950'
+                  : provenance.balance_source === 'HISTORICAL_REPORT'
+                  ? 'bg-blue-50/80 border-blue-200 text-blue-950'
+                  : 'bg-slate-50 border-slate-200 text-slate-800'
+              }`}>
+                <div className="flex items-center gap-3">
+                  <span className={`h-3 w-3 rounded-full flex-shrink-0 ${
+                    provenance.balance_source === 'LIVE_BROKER'
+                      ? 'bg-emerald-500 animate-pulse'
+                      : provenance.balance_source === 'CACHED_BROKER'
+                      ? 'bg-amber-500'
+                      : provenance.balance_source === 'HISTORICAL_REPORT'
+                      ? 'bg-blue-500'
+                      : 'bg-slate-400'
+                  }`} />
+                  <div>
+                    <span className="font-bold uppercase tracking-wider text-[11px] block">
+                      {provenance.balance_source === 'LIVE_BROKER' && '🟢 Live Saxo Broker Connection (Real-Time)'}
+                      {provenance.balance_source === 'CACHED_BROKER' && '🟡 Persistent Broker Cache (SQLite)'}
+                      {provenance.balance_source === 'HISTORICAL_REPORT' && '📘 Authentic Account Statement (Saxo Verified)'}
+                      {provenance.balance_source === 'PORTFOLIO_HOLDINGS' && '🟣 Recorded Portfolio Holdings Valuation'}
+                      {provenance.balance_source === 'SIMULATED_BENCHMARK' && '⚠️ Standardized Reference Model ($100,000 Benchmark)'}
+                    </span>
+                    <p className="text-[11px] opacity-80 mt-0.5">{provenance.details || 'Dynamic capital allocation calibration.'}</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-4 text-xs font-mono font-semibold self-end sm:self-center">
+                  <div>
+                    <span className="text-[10px] uppercase text-slate-500 block">Total Net Equity</span>
+                    <span className="text-slate-900">${(provenance.total_equity || 100000).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  <div className="h-6 w-px bg-slate-300" />
+                  <div>
+                    <span className="text-[10px] uppercase text-slate-500 block">Uninvested Cash</span>
+                    <span className="text-slate-900">${(provenance.cash_available || 70000).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                  </div>
+                  {provenance.account_id && (
+                    <>
+                      <div className="h-6 w-px bg-slate-300" />
+                      <div>
+                        <span className="text-[10px] uppercase text-slate-500 block">Account Ref</span>
+                        <span className="text-slate-900">{provenance.account_id}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* 4 Scenario Cards */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

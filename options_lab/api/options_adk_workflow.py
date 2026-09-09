@@ -644,6 +644,16 @@ class OptionsADKWorkflowEngine:
                 f"You are a senior macroeconomic analyst and research desk assistant embedded "
                 f"within a multi-asset investment team. Produce a finance-oriented daily briefing on the most impactful market and "
                 f"economic news stories for {current_date_str} ({week_label}).\n\n"
+                f"────────────────────────────────────────────\n"
+                f"INSTITUTIONAL TONE & NARRATIVE EXEMPLAR (GOLDEN STANDARD)\n"
+                f"────────────────────────────────────────────\n"
+                f"Adopt the authoritative, data-driven, and structurally analytical voice of a Tier-1 multi-asset research desk:\n"
+                f"- Trace physical second-order supply chains rather than repeating surface headlines (e.g. hyperscaler capex -> chipmakers -> power demand, data centres, networking, memory, cooling, enterprise software).\n"
+                f"- Ground broad rallies in quantitative reality: 'Price breadth can be speculative. Earnings breadth is considerably harder to fake.'\n"
+                f"- Explicitly trace cross-asset causal contagion: Commodity spikes (e.g. Brent crude $92-$97) -> inflation expectations -> bond yields -> discount rates / WACC on growth multiples.\n"
+                f"- Emphasize the return on capital transition: 'The market is transitioning from \"Buy AI\" to \"Show me the earnings\" to \"Show me the return on invested capital (ROIC).\"'\n"
+                f"- Frame calendar seasonality and structural capital flows (e.g. post-Labor Day September dynamics, institutional rebalancing, corporate debt issuance, options expiry, CPI / macro catalysts).\n"
+                f"- Maintain an observant, high-conviction tone: 'There are moments when the market becomes unusually data-dependent — when the edge moves to the analysts who can see what's actually happening beneath the surface, before the headlines catch up.'\n\n"
                 f"Provide a concise, high-conviction macroeconomic and systematic options yield summary.\n"
                 f"Active portfolio sectors analyzed: {active_sectors}."
             )
@@ -660,22 +670,13 @@ class OptionsADKWorkflowEngine:
             macro_compass = self.weekly_engine.calculate_4d_macro_compass(raw_news)
 
             # Compute 4-Tier Capital Allocation Scenarios (80/20, 60/40 Traditional, 50/50, 20/80)
-            account_equity = 100000.0
-            cash_available = 70000.0
-            try:
-                balances = self.saxo_client.get_account_balances()
-                if balances:
-                    account_equity = float(balances.get("total_equity") or balances.get("TotalEquity") or 100000.0)
-                    cash_available = float(balances.get("cash_available") or balances.get("CashAvailable") or (account_equity * 0.70))
-            except Exception:
-                try:
-                    cached_bal = database.get_saxo_cache("balances")
-                    if cached_bal and isinstance(cached_bal, dict):
-                        account_equity = float(cached_bal.get("total_equity") or cached_bal.get("TotalEquity") or 100000.0)
-                        cash_available = float(cached_bal.get("cash_available") or cached_bal.get("CashAvailable") or (account_equity * 0.70))
-                except Exception:
-                    pass
-            capital_scenarios = self.weekly_engine.calculate_capital_allocation_scenarios(account_equity=account_equity, cash_available=cash_available)
+            # Dynamically resolved across 5-tier institutional hierarchy (OpenAPI -> Cache -> Report -> Holdings -> Benchmark)
+            account_balances = self.weekly_engine.resolve_account_balances()
+            capital_scenarios = self.weekly_engine.calculate_capital_allocation_scenarios(
+                account_equity=account_balances["total_equity"],
+                cash_available=account_balances["cash_available"],
+                balance_metadata=account_balances
+            )
 
             # Compute AI Corporate Interlink Cockpit
             interlink_cockpit = InterlinkGraphEngine(use_db_cache=True).synthesize_interlink_cockpit()
@@ -713,6 +714,7 @@ class OptionsADKWorkflowEngine:
                 "saxo_needs_mfa": s0.get("saxo_needs_mfa", False),
                 "ai_summary": briefing_text,
                 "macro_briefing": briefing_text,
+                "balance_provenance": account_balances,
                 "macro_events": s1.get("macro_cards", []),
                 "events": s1.get("macro_cards", []),
                 "potential_trades": staged_trades,
