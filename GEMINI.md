@@ -30,6 +30,32 @@ Hierarchical Multi-Agent System (FastAPI) for comprehensive NASDAQ and Multi-Ass
 
 
 
+## 📝 Strict 5-Point Class & Function Docstring Standard
+Whenever adding, refactoring, or touching any class or function across the codebase, the agent MUST stamp a complete 5-point docstring adhering to:
+1. **Descriptive Summary**: Comprehensive explanation of purpose, business logic, and architectural role.
+2. **Parameters / Encapsulation**: Complete enumeration of arguments, data types, and default values; for classes, internal state variables and encapsulation invariants.
+3. **Returns / Internal State**: Explicit return object, schema structure, data types, and lifecycle states.
+4. **Exceptions / Side Effects**: Handled and unhandled exceptions, database mutations, network calls, and file I/O.
+5. **Concrete Executable Usage Example**: Copy-pasteable, verified doctest/code snippet demonstrating practical invocation.
+
+## 💰 Multi-Tiered Broker Balance & Provenance Transparency Invariant
+1. **Zero Silent Numeric Defaults**: Never stage trades, model capital allocation scenarios, or compute cash buffers using silent numeric literals (e.g. `100000.0` or `70000.0`).
+2. **5-Tier Resilient Resolution**: All portfolio equity and cash balances must be resolved through `resolve_account_balances()` across:
+   - *Tier 1 (Live Saxo OpenAPI)*: Queries `/port/v1/balances/me` when authenticated.
+   - *Tier 2 (Bidirectional SQLite Cache)*: Fixed cache key mismatch bug by auto-synchronizing `'account_summary'` and `'balances'` keys in `saxo_cache`.
+   - *Tier 3 (Authentic Statement Report Ingestion)*: Automatically inspects ingested authentic statement records (`saxo_reports`), extracting verified net equity (**\$102,192.51**) and cash balances (**\$71,984.46**) for account `33888/221497` (`Natesan Sathish`).
+   - *Tier 4 (Holdings Market Value Aggregation)*: Sums open positions from `saxo_holdings_history` and `portfolio_tickers` (\$30,405.00 across 5 positions).
+   - *Tier 5 (Configurable Reference Benchmark)*: Fallback via `DEFAULT_PORTFOLIO_EQUITY` explicitly tagged with `is_simulated = True` and explanatory notices.
+3. **Mandatory Provenance Metadata**: All outputs, API responses, and UI components must display the provenance source badge (`LIVE_BROKER`, `CACHED_BROKER`, `HISTORICAL_REPORT`, `PORTFOLIO_HOLDINGS`, `SIMULATED_BENCHMARK`).
+
+## 🏛️ Institutional Macro Research Desk Standard (Golden Exemplar)
+When generating market briefings, weekly intelligence notes, or multi-agent macro syntheses:
+1. **Role**: Senior Macroeconomic Analyst and Research Desk Assistant embedded within a multi-asset investment team.
+2. **Physical Supply-Chain Reality**: Trace physical capital expenditure beyond chipmakers into data centers, power utilities, cooling, networking equipment, and memory capacity.
+3. **Cross-Asset Causal Transmission**: Trace the transmission mechanism from commodity shocks (e.g. Brent crude) to inflation expectations, 10Y Treasury yields, and DCF discount rates / WACC on growth multiples.
+4. **Earnings Breadth Axiom**: "Price breadth can be speculative. Earnings breadth is considerably harder to fake."
+5. **Capital Cycle Shift**: Frame market transitions from "Buy AI" to "Show me the earnings" to "Show me the Return on Invested Capital (ROIC)."
+
 ## Options Lab & Socratic Tutor Modules [NEW]
 - **Earnings Volatility Scanner (`api/earnings_scanner.py` & `frontend/src/app/earnings/page.tsx`)**:
   - Funnel logic: Universe Filter (S&P 500 Wikipedia scrape + NASDAQ) ➡️ 52W Low Proximity check (default 20%) ➡️ 5-Pillar Conviction Screener / Fundamental Quality ➡️ Option Open Interest Liquidity.
