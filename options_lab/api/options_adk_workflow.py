@@ -637,12 +637,23 @@ class OptionsADKWorkflowEngine:
             # Step 5: HITL Staging & Pause Node
             s5 = hitl_staging_node._func(s4)
 
-            # Generate structured briefing text
-            briefing_text = self.weekly_engine._call_gemini_with_failover(
-                f"You are the Chief Investment Officer. Provide a concise weekly macroeconomic and options yield summary for {week_label}. Sectors active: {list(set(t['sector'] for t in s5.get('staged_trades', [])))}."
+            # Generate structured briefing text using Senior Macroeconomic Analyst & Research Desk Assistant persona
+            current_date_str = datetime.now().strftime("%A, %B %d, %Y")
+            active_sectors = list(set(t['sector'] for t in s5.get('staged_trades', [])))
+            briefing_prompt = (
+                f"You are a senior macroeconomic analyst and research desk assistant embedded "
+                f"within a multi-asset investment team. Produce a finance-oriented daily briefing on the most impactful market and "
+                f"economic news stories for {current_date_str} ({week_label}).\n\n"
+                f"Provide a concise, high-conviction macroeconomic and systematic options yield summary.\n"
+                f"Active portfolio sectors analyzed: {active_sectors}."
             )
+            briefing_text = self.weekly_engine._call_gemini_with_failover(briefing_prompt)
             if not briefing_text:
-                briefing_text = f"Weekly Macro & Options Briefing for {week_label}: Active sectors diversified across Information Technology, Communication Services, Financials, and Industrials. Quantitative margin checks passed within 15% limit."
+                briefing_text = (
+                    f"Daily Macro & Options Briefing for {current_date_str} ({week_label}): "
+                    f"Active sectors diversified across {', '.join(active_sectors) if active_sectors else 'Information Technology, Communication Services, Financials, and Industrials'}. "
+                    f"Quantitative margin checks passed within 15% limit."
+                )
 
             # Compute 4D Macro Direction Compass
             raw_news = s1.get("raw_news", [])

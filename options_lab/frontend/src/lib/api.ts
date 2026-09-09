@@ -281,6 +281,23 @@ export const optionsApi = {
     gamma_roll_dte?: number;
     hold_to_expiration?: boolean;
   }) => apiRequest('/api/analytics/wheel-backtest', 'POST', params),
+
+  // ── Macro Category Taxonomy & Dynamic Corpus ─────────────────────────────
+  getMacroCorpus: (category?: string) => {
+    const q = category ? `?category=${encodeURIComponent(category)}` : '';
+    return apiRequest(`/api/intelligence/corpus${q}`);
+  },
+  addOrUpdateCorpusKeyword: (payload: {
+    category: string;
+    keyword: string;
+    weight?: number;
+    directional_bias?: string;
+    default_impact?: number;
+    default_tickers?: string;
+    source?: string;
+  }) => apiRequest('/api/intelligence/corpus/keyword', 'POST', payload),
+  deleteCorpusKeyword: (keyword: string) =>
+    apiRequest(`/api/intelligence/corpus/keyword/${encodeURIComponent(keyword)}`, 'DELETE'),
 };
 
 

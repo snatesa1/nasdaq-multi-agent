@@ -34,7 +34,8 @@ from .models import (
     BrokerOrder,
     SafetyCheckRequest,
     WheelBacktestRequest,
-    WheelBacktestResponse
+    WheelBacktestResponse,
+    CorpusKeywordRequest
 )
 import asyncio
 from .saxo_client import SaxoClient
@@ -1349,6 +1350,127 @@ async def get_weekly_intelligence_briefing(
     except Exception as e:
         logger.error(f"Failed to generate weekly intelligence briefing via ADK: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+
+# ── Macro Category Corpus Management Endpoints ──────────────────────────────
+
+@app.get("/intelligence/corpus")
+@app.get("/api/intelligence/corpus")
+async def get_macro_corpus_endpoint(
+    category: Optional[str] = None,
+    user=Depends(verify_firebase_token)
+):
+    """
+    Descriptive Summary:
+        Retrieves the dynamic macro classification vocabulary and weights from SQLite,
+        optionally filtered by thematic category.
+
+    Parameters:
+        category (Optional[str]): Optional filter category (e.g. 'AI_SEMICONDUCTORS').
+        user: Firebase/local authentication context.
+
+    Returns:
+        Dict[str, Any]: JSON payload containing:
+            - 'status' (str): 'SUCCESS'.
+            - 'count' (int): Number of returned keywords.
+            - 'corpus' (List[Dict[str, Any]]): List of keyword records.
+
+    Exceptions / Side Effects:
+        Returns HTTP 500 if database query fails.
+
+    Usage Example:
+        GET /api/intelligence/corpus?category=AI_SEMICONDUCTORS
+    """
+    try:
+        corpus = database.get_macro_category_corpus(category=category)
+        return {
+            "status": "SUCCESS",
+            "count": len(corpus),
+            "corpus": corpus
+        }
+    except Exception as e:
+        logger.error(f"Failed to fetch macro corpus: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/intelligence/corpus/keyword")
+@app.post("/api/intelligence/corpus/keyword")
+async def add_or_update_corpus_keyword_endpoint(
+    payload: CorpusKeywordRequest,
+    user=Depends(verify_firebase_token)
+):
+    """
+    Descriptive Summary:
+        Adds a new keyword or modifies an existing keyword's category, weight, directional bias,
+        or associated tickers in the SQLite database.
+
+    Parameters:
+        payload (CorpusKeywordRequest): Validated keyword payload.
+        user: Firebase/local authentication context.
+
+    Returns:
+        Dict[str, Any]: JSON payload with 'status' and the upserted 'record'.
+
+    Exceptions / Side Effects:
+        Persists record into SQLite macro_category_corpus table.
+
+    Usage Example:
+        POST /api/intelligence/corpus/keyword
+        {"category": "AI_SEMICONDUCTORS", "keyword": "agentic app development", "weight": 3.0}
+    """
+    try:
+        record = database.add_or_update_corpus_keyword(
+            category=payload.category,
+            keyword=payload.keyword,
+            weight=payload.weight,
+            directional_bias=payload.directional_bias,
+            default_impact=payload.default_impact,
+            default_tickers=payload.default_tickers,
+            source=payload.source
+        )
+        return {
+            "status": "SUCCESS",
+            "record": record
+        }
+    except Exception as e:
+        logger.error(f"Failed to upsert corpus keyword: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/intelligence/corpus/keyword/{keyword}")
+@app.delete("/api/intelligence/corpus/keyword/{keyword}")
+async def delete_corpus_keyword_endpoint(
+    keyword: str,
+    user=Depends(verify_firebase_token)
+):
+    """
+    Descriptive Summary:
+        Deletes a specific keyword from the dynamic SQLite macro categorization corpus.
+
+    Parameters:
+        keyword (str): The keyword to delete.
+        user: Firebase/local authentication context.
+
+    Returns:
+        Dict[str, Any]: JSON payload with 'status', 'deleted' (bool), and 'keyword'.
+
+    Exceptions / Side Effects:
+        Deletes record from SQLite macro_category_corpus table.
+
+    Usage Example:
+        DELETE /api/intelligence/corpus/keyword/obsolete_term
+    """
+    try:
+        deleted = database.delete_corpus_keyword(keyword=keyword)
+        return {
+            "status": "SUCCESS",
+            "deleted": deleted,
+            "keyword": keyword
+        }
+    except Exception as e:
+        logger.error(f"Failed to delete corpus keyword '{keyword}': {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/api/trades/staged")
 async def list_staged_trades_endpoint(

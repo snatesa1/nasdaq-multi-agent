@@ -191,6 +191,22 @@ def _init_db():
                 updated_at       TEXT NOT NULL
             )
         """)
+        # ── Macro Category Taxonomy & Dynamic Keyword Corpus ───────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS macro_category_corpus (
+                id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                category           TEXT NOT NULL,
+                keyword            TEXT NOT NULL UNIQUE,
+                weight             REAL NOT NULL DEFAULT 1.0,
+                directional_bias   TEXT NOT NULL DEFAULT 'BULLISH_CSP',
+                default_impact     INTEGER NOT NULL DEFAULT 4,
+                default_tickers    TEXT NOT NULL DEFAULT '',
+                source             TEXT NOT NULL DEFAULT 'SYSTEM_SEED',
+                updated_at         TEXT NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_corpus_category ON macro_category_corpus(category)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_corpus_keyword ON macro_category_corpus(keyword)")
         conn.commit()
 
 
@@ -991,6 +1007,398 @@ def list_all_interlink_fundamentals() -> List[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Failed to list all interlink fundamentals: {e}")
         return []
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  MACRO CATEGORY TAXONOMY & DYNAMIC KEYWORD CORPUS
+# ═══════════════════════════════════════════════════════════════════════════════
+
+DEFAULT_MACRO_TAXONOMY_SEEDS = [
+    # ── AI Semiconductors & Compute Infrastructure ───────────────────────────
+    {"category": "AI_SEMICONDUCTORS", "keyword": "ai", "weight": 1.0, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NVDA,PLTR,TSM,AMD,AVGO"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "compute", "weight": 1.0, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NVDA,PLTR,TSM,AMD,AVGO"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "nvidia", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NVDA,TSM"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "gpu", "weight": 1.2, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NVDA,AMD"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "palantir", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "PLTR"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "semiconductor", "weight": 1.2, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "TSM,AMD,AVGO,NVDA"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "blackwell", "weight": 1.8, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NVDA,TSM"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "hbm", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "MU,TSM,NVDA"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "asic", "weight": 1.4, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "AVGO,MRVL"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "datacenter", "weight": 1.2, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NVDA,MSFT,AMZN"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "accelerator", "weight": 1.2, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "NVDA,AMD,GOOGL"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "agent", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NVDA,PLTR,MSFT,GOOGL"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "agentic", "weight": 2.0, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NVDA,PLTR,MSFT"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "agentic platform", "weight": 2.5, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "PLTR,MSFT,NVDA"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "agentic app development", "weight": 3.0, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "PLTR,MSFT,GOOGL"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "autonomous agent", "weight": 2.5, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "PLTR,MSFT,NVDA"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "multi-agent", "weight": 2.5, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "MSFT,GOOGL,PLTR"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "reasoning models", "weight": 2.0, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NVDA,MSFT,GOOGL"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "llm inference", "weight": 2.0, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NVDA,AVGO,AMD"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "foundation model", "weight": 1.8, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "MSFT,GOOGL,META"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "sovereign ai", "weight": 2.0, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NVDA,TSM"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "chips", "weight": 1.0, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "TSM,NVDA,INTC"},
+    {"category": "AI_SEMICONDUCTORS", "keyword": "wafer", "weight": 1.2, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "TSM,ASML"},
+
+    # ── Fed Rates, Inflation & Macro Monetary Policy ─────────────────────────
+    {"category": "FED_RATES_INFLATION", "keyword": "fed", "weight": 1.0, "directional_bias": "NEUTRAL_CALENDAR", "default_impact": 5, "default_tickers": "TLT,QQQ,SPY,BAC"},
+    {"category": "FED_RATES_INFLATION", "keyword": "rate cut", "weight": 1.8, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "QQQ,SPY,TLT"},
+    {"category": "FED_RATES_INFLATION", "keyword": "rate hike", "weight": 1.8, "directional_bias": "DEFENSIVE_CC", "default_impact": 5, "default_tickers": "TLT,QQQ,BAC"},
+    {"category": "FED_RATES_INFLATION", "keyword": "powell", "weight": 1.5, "directional_bias": "NEUTRAL_CALENDAR", "default_impact": 5, "default_tickers": "QQQ,SPY,TLT"},
+    {"category": "FED_RATES_INFLATION", "keyword": "inflation", "weight": 1.2, "directional_bias": "DEFENSIVE_CC", "default_impact": 5, "default_tickers": "TLT,SPY"},
+    {"category": "FED_RATES_INFLATION", "keyword": "cpi", "weight": 1.5, "directional_bias": "NEUTRAL_CALENDAR", "default_impact": 5, "default_tickers": "SPY,QQQ,TLT"},
+    {"category": "FED_RATES_INFLATION", "keyword": "fomc", "weight": 1.8, "directional_bias": "NEUTRAL_CALENDAR", "default_impact": 5, "default_tickers": "SPY,QQQ,TLT"},
+    {"category": "FED_RATES_INFLATION", "keyword": "yield", "weight": 1.0, "directional_bias": "NEUTRAL_CALENDAR", "default_impact": 4, "default_tickers": "TLT,BAC"},
+    {"category": "FED_RATES_INFLATION", "keyword": "treasury", "weight": 1.2, "directional_bias": "NEUTRAL_CALENDAR", "default_impact": 4, "default_tickers": "TLT,IEF"},
+    {"category": "FED_RATES_INFLATION", "keyword": "interest rates", "weight": 1.5, "directional_bias": "NEUTRAL_CALENDAR", "default_impact": 4, "default_tickers": "TLT,QQQ,SPY"},
+    {"category": "FED_RATES_INFLATION", "keyword": "basis points", "weight": 1.5, "directional_bias": "NEUTRAL_CALENDAR", "default_impact": 4, "default_tickers": "TLT,QQQ"},
+    {"category": "FED_RATES_INFLATION", "keyword": "quantitative tightening", "weight": 2.0, "directional_bias": "DEFENSIVE_CC", "default_impact": 4, "default_tickers": "SPY,TLT"},
+
+    # ── Enterprise Software & Cloud Hyperscalers ─────────────────────────────
+    {"category": "ENTERPRISE_SOFTWARE_CLOUD", "keyword": "enterprise software", "weight": 2.0, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "MSFT,CRM,NOW"},
+    {"category": "ENTERPRISE_SOFTWARE_CLOUD", "keyword": "cloud", "weight": 1.0, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "MSFT,AMZN,GOOGL"},
+    {"category": "ENTERPRISE_SOFTWARE_CLOUD", "keyword": "saas", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "CRM,NOW,SNOW"},
+    {"category": "ENTERPRISE_SOFTWARE_CLOUD", "keyword": "hyperscaler", "weight": 1.8, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "MSFT,AMZN,GOOGL,META"},
+    {"category": "ENTERPRISE_SOFTWARE_CLOUD", "keyword": "azure", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "MSFT"},
+    {"category": "ENTERPRISE_SOFTWARE_CLOUD", "keyword": "aws", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "AMZN"},
+    {"category": "ENTERPRISE_SOFTWARE_CLOUD", "keyword": "google cloud", "weight": 1.8, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "GOOGL"},
+    {"category": "ENTERPRISE_SOFTWARE_CLOUD", "keyword": "crm", "weight": 1.2, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "CRM"},
+    {"category": "ENTERPRISE_SOFTWARE_CLOUD", "keyword": "cybersecurity", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "CRWD,PANW"},
+    {"category": "ENTERPRISE_SOFTWARE_CLOUD", "keyword": "cloud spending", "weight": 1.8, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "MSFT,AMZN,GOOGL"},
+    {"category": "ENTERPRISE_SOFTWARE_CLOUD", "keyword": "software revenue", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "MSFT,PLTR,CRM"},
+
+    # ── Energy, Nuclear Power & Datacenter Infrastructure ─────────────────────
+    {"category": "ENERGY_POWER_INFRA", "keyword": "nuclear", "weight": 1.8, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "CEG,VST,CCJ"},
+    {"category": "ENERGY_POWER_INFRA", "keyword": "smr", "weight": 2.0, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "SMR,OKLO,CEG"},
+    {"category": "ENERGY_POWER_INFRA", "keyword": "power grid", "weight": 1.8, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "NEE,GEV,ETN"},
+    {"category": "ENERGY_POWER_INFRA", "keyword": "clean energy", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "NEE,FSLR"},
+    {"category": "ENERGY_POWER_INFRA", "keyword": "electricity demand", "weight": 1.8, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "NEE,CEG,VST"},
+    {"category": "ENERGY_POWER_INFRA", "keyword": "datacenter power", "weight": 2.2, "directional_bias": "BULLISH_CSP", "default_impact": 5, "default_tickers": "NEE,CEG,GEV,ETN"},
+    {"category": "ENERGY_POWER_INFRA", "keyword": "utility", "weight": 1.2, "directional_bias": "BULLISH_CSP", "default_impact": 3, "default_tickers": "NEE,DUK,SO"},
+    {"category": "ENERGY_POWER_INFRA", "keyword": "geothermal", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 3, "default_tickers": "ORMAT,NEE"},
+    {"category": "ENERGY_POWER_INFRA", "keyword": "substation", "weight": 1.5, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "ETN,GEV"},
+    {"category": "ENERGY_POWER_INFRA", "keyword": "transmission line", "weight": 1.8, "directional_bias": "BULLISH_CSP", "default_impact": 4, "default_tickers": "NEE,PWR"},
+
+    # ── Consumer Spending, Retail & Employment ───────────────────────────────
+    {"category": "CONSUMER_EMPLOYMENT_RETAIL", "keyword": "retail sales", "weight": 1.8, "directional_bias": "HEDGED_PUT", "default_impact": 3, "default_tickers": "WMT,COST,AMZN,TGT"},
+    {"category": "CONSUMER_EMPLOYMENT_RETAIL", "keyword": "consumer spending", "weight": 1.8, "directional_bias": "HEDGED_PUT", "default_impact": 3, "default_tickers": "AMZN,COST,HD"},
+    {"category": "CONSUMER_EMPLOYMENT_RETAIL", "keyword": "unemployment", "weight": 1.5, "directional_bias": "DEFENSIVE_CC", "default_impact": 4, "default_tickers": "SPY,QQQ"},
+    {"category": "CONSUMER_EMPLOYMENT_RETAIL", "keyword": "payrolls", "weight": 1.8, "directional_bias": "NEUTRAL_CALENDAR", "default_impact": 4, "default_tickers": "SPY,QQQ"},
+    {"category": "CONSUMER_EMPLOYMENT_RETAIL", "keyword": "jobs report", "weight": 1.8, "directional_bias": "NEUTRAL_CALENDAR", "default_impact": 4, "default_tickers": "SPY,QQQ,TLT"},
+    {"category": "CONSUMER_EMPLOYMENT_RETAIL", "keyword": "credit card debt", "weight": 1.8, "directional_bias": "HEDGED_PUT", "default_impact": 3, "default_tickers": "COF,DFS,BAC,JPM"},
+    {"category": "CONSUMER_EMPLOYMENT_RETAIL", "keyword": "consumer confidence", "weight": 1.5, "directional_bias": "NEUTRAL_CALENDAR", "default_impact": 3, "default_tickers": "XLY,XLP,SPY"},
+    {"category": "CONSUMER_EMPLOYMENT_RETAIL", "keyword": "discretionary spending", "weight": 1.8, "directional_bias": "HEDGED_PUT", "default_impact": 3, "default_tickers": "NKE,SBUX,HD"},
+
+    # ── Geopolitics & Global Trade Restrictions ──────────────────────────────
+    {"category": "GEOPOLITICS_TRADE", "keyword": "tariff", "weight": 1.8, "directional_bias": "DEFENSIVE_CC", "default_impact": 4, "default_tickers": "TSM,AAPL,NVDA"},
+    {"category": "GEOPOLITICS_TRADE", "keyword": "trade war", "weight": 2.0, "directional_bias": "DEFENSIVE_CC", "default_impact": 5, "default_tickers": "SPY,TSM,AAPL"},
+    {"category": "GEOPOLITICS_TRADE", "keyword": "sanctions", "weight": 1.5, "directional_bias": "DEFENSIVE_CC", "default_impact": 4, "default_tickers": "XOM,CVX,NVDA"},
+    {"category": "GEOPOLITICS_TRADE", "keyword": "export controls", "weight": 2.0, "directional_bias": "DEFENSIVE_CC", "default_impact": 5, "default_tickers": "ASML,NVDA,KLAC"},
+    {"category": "GEOPOLITICS_TRADE", "keyword": "taiwan strait", "weight": 2.2, "directional_bias": "DEFENSIVE_CC", "default_impact": 5, "default_tickers": "TSM,NVDA,AAPL"},
+    {"category": "GEOPOLITICS_TRADE", "keyword": "geopolitics", "weight": 1.2, "directional_bias": "DEFENSIVE_CC", "default_impact": 4, "default_tickers": "SPY,GLD,USO"},
+    {"category": "GEOPOLITICS_TRADE", "keyword": "chip ban", "weight": 2.0, "directional_bias": "DEFENSIVE_CC", "default_impact": 5, "default_tickers": "NVDA,TSM,ASML"},
+    {"category": "GEOPOLITICS_TRADE", "keyword": "supply chain restriction", "weight": 2.0, "directional_bias": "DEFENSIVE_CC", "default_impact": 4, "default_tickers": "AAPL,TSM,NVDA"}
+]
+
+
+def init_macro_category_corpus() -> int:
+    """
+    Descriptive Summary:
+        Seeds the SQLite macro_category_corpus table with institutional category taxonomy,
+        directional biases, impact weights, and thematic keywords if empty.
+
+    Parameters:
+        None
+
+    Returns:
+        int: Number of default corpus keywords successfully seeded into SQLite.
+
+    Exceptions / Side Effects:
+        Executes INSERT OR IGNORE operations on 'macro_category_corpus' table.
+        Safe for concurrent executions; commits changes immediately.
+
+    Usage Example:
+        >>> count = init_macro_category_corpus()
+        >>> print(f"Corpus initialized with {count} seed keywords")
+    """
+    now_iso = datetime.now(timezone.utc).isoformat()
+    seeded = 0
+    try:
+        with _get_conn() as conn:
+            # Check if already seeded
+            count = conn.execute("SELECT COUNT(*) FROM macro_category_corpus").fetchone()[0]
+            if count > 0:
+                logger.info(f"macro_category_corpus already populated with {count} keywords.")
+                return count
+
+            for item in DEFAULT_MACRO_TAXONOMY_SEEDS:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO macro_category_corpus (
+                        category, keyword, weight, directional_bias,
+                        default_impact, default_tickers, source, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        item["category"],
+                        item["keyword"].strip().lower(),
+                        item.get("weight", 1.0),
+                        item.get("directional_bias", "BULLISH_CSP"),
+                        item.get("default_impact", 4),
+                        item.get("default_tickers", ""),
+                        "SYSTEM_SEED",
+                        now_iso,
+                    )
+                )
+                seeded += 1
+            conn.commit()
+            logger.info(f"Initialized macro_category_corpus with {seeded} seed keywords.")
+            return seeded
+    except Exception as e:
+        logger.error(f"Failed to initialize macro_category_corpus: {e}")
+        return 0
+
+
+def get_macro_category_corpus(category: Optional[str] = None) -> List[Dict[str, Any]]:
+    """
+    Descriptive Summary:
+        Retrieves active macro classification keywords, weights, and execution biases
+        from SQLite, optionally filtered by a specific category taxonomy.
+
+    Parameters:
+        category (Optional[str]): Optional category filter (e.g., 'AI_SEMICONDUCTORS').
+            Defaults to None to return all registered keywords across all categories.
+
+    Returns:
+        List[Dict[str, Any]]: List of keyword dictionary records containing:
+            - 'id' (int): Primary key identifier.
+            - 'category' (str): Macro category taxonomy key.
+            - 'keyword' (str): Normalized lower-case matching string or phrase.
+            - 'weight' (float): Matching importance multiplier (e.g., 1.0 to 3.0).
+            - 'directional_bias' (str): Strategy bias ('BULLISH_CSP', 'DEFENSIVE_CC', etc.).
+            - 'default_impact' (int): Event volatility impact scale (1-5).
+            - 'default_tickers' (str): Comma-separated associated underlying tickers.
+            - 'source' (str): Keyword origin ('SYSTEM_SEED', 'DYNAMIC_DISCOVERY', 'MANUAL').
+            - 'updated_at' (str): ISO-8601 UTC timestamp of last modification.
+
+    Exceptions / Side Effects:
+        Performs SELECT query on 'macro_category_corpus' table.
+
+    Usage Example:
+        >>> corpus = get_macro_category_corpus("AI_SEMICONDUCTORS")
+        >>> for item in corpus:
+        ...     print(item["keyword"], item["weight"])
+    """
+    try:
+        with _get_conn() as conn:
+            if category:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM macro_category_corpus
+                    WHERE category = ?
+                    ORDER BY weight DESC, keyword ASC
+                    """,
+                    (category.strip().upper(),)
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT * FROM macro_category_corpus
+                    ORDER BY category ASC, weight DESC, keyword ASC
+                    """
+                ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to retrieve macro_category_corpus: {e}")
+        return []
+
+
+def add_or_update_corpus_keyword(
+    category: str,
+    keyword: str,
+    weight: float = 1.0,
+    directional_bias: str = "BULLISH_CSP",
+    default_impact: int = 4,
+    default_tickers: str = "",
+    source: str = "MANUAL"
+) -> Dict[str, Any]:
+    """
+    Descriptive Summary:
+        Creates a new keyword entry or updates an existing entry in the SQLite
+        macro_category_corpus table, enabling dynamic vocabulary expansion.
+
+    Parameters:
+        category (str): Macro category identifier (e.g., 'AI_SEMICONDUCTORS').
+        keyword (str): Search string or phrase to match (auto-normalized to lowercase).
+        weight (float): Salience score multiplier for classification (default: 1.0).
+        directional_bias (str): Quantitative options bias (default: 'BULLISH_CSP').
+        default_impact (int): Market volatility impact rating (1 to 5, default: 4).
+        default_tickers (str): Comma-delimited list of primary ticker beneficiaries.
+        source (str): Origin marker ('MANUAL', 'SYSTEM_SEED', 'DYNAMIC_DISCOVERY').
+
+    Returns:
+        Dict[str, Any]: The upserted keyword record dictionary from SQLite.
+
+    Exceptions / Side Effects:
+        Executes INSERT ON CONFLICT DO UPDATE on 'macro_category_corpus' table.
+
+    Usage Example:
+        >>> record = add_or_update_corpus_keyword(
+        ...     category="AI_SEMICONDUCTORS",
+        ...     keyword="agentic app development",
+        ...     weight=3.0,
+        ...     directional_bias="BULLISH_CSP",
+        ...     default_tickers="NVDA,PLTR,MSFT"
+        ... )
+        >>> print(record["id"], record["keyword"])
+    """
+    clean_cat = category.strip().upper()
+    clean_kw = keyword.strip().lower()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    try:
+        with _get_conn() as conn:
+            conn.execute(
+                """
+                INSERT INTO macro_category_corpus (
+                    category, keyword, weight, directional_bias,
+                    default_impact, default_tickers, source, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(keyword) DO UPDATE SET
+                    category = excluded.category,
+                    weight = excluded.weight,
+                    directional_bias = excluded.directional_bias,
+                    default_impact = excluded.default_impact,
+                    default_tickers = excluded.default_tickers,
+                    source = excluded.source,
+                    updated_at = excluded.updated_at
+                """,
+                (
+                    clean_cat,
+                    clean_kw,
+                    float(weight),
+                    directional_bias.strip(),
+                    int(default_impact),
+                    default_tickers.strip(),
+                    source.strip(),
+                    now_iso
+                )
+            )
+            conn.commit()
+            row = conn.execute(
+                "SELECT * FROM macro_category_corpus WHERE keyword = ?",
+                (clean_kw,)
+            ).fetchone()
+            return dict(row) if row else {}
+    except Exception as e:
+        logger.error(f"Failed to upsert corpus keyword '{clean_kw}': {e}")
+        return {}
+
+
+def delete_corpus_keyword(keyword: str) -> bool:
+    """
+    Descriptive Summary:
+        Removes a keyword from the SQLite macro_category_corpus table by its exact string match.
+
+    Parameters:
+        keyword (str): The keyword or phrase to delete (case-insensitive).
+
+    Returns:
+        bool: True if a record was found and deleted; False if keyword did not exist.
+
+    Exceptions / Side Effects:
+        Executes DELETE FROM macro_category_corpus in SQLite and commits transaction.
+
+    Usage Example:
+        >>> deleted = delete_corpus_keyword("obsolete keyword")
+        >>> print(f"Deleted: {deleted}")
+    """
+    clean_kw = keyword.strip().lower()
+    try:
+        with _get_conn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM macro_category_corpus WHERE keyword = ?",
+                (clean_kw,)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+    except Exception as e:
+        logger.error(f"Failed to delete corpus keyword '{clean_kw}': {e}")
+        return False
+
+
+def bulk_upsert_corpus_keywords(records: List[Dict[str, Any]]) -> int:
+    """
+    Descriptive Summary:
+        Performs high-throughput bulk insertion and updates of novel or updated
+        vocabulary records into the SQLite macro_category_corpus table.
+
+    Parameters:
+        records (List[Dict[str, Any]]): List of dictionaries, each containing:
+            - 'category' (str): Taxonomy category.
+            - 'keyword' (str): Matching token or n-gram.
+            - Optional keys: 'weight', 'directional_bias', 'default_impact', 'default_tickers', 'source'.
+
+    Returns:
+        int: Total number of records successfully written or updated.
+
+    Exceptions / Side Effects:
+        Executes executemany transaction on SQLite database.
+
+    Usage Example:
+        >>> items = [
+        ...     {"category": "AI_SEMICONDUCTORS", "keyword": "agentic platform", "weight": 2.5},
+        ...     {"category": "AI_SEMICONDUCTORS", "keyword": "reasoning models", "weight": 2.0}
+        ... ]
+        >>> count = bulk_upsert_corpus_keywords(items)
+        >>> print(f"Upserted {count} items")
+    """
+    if not records:
+        return 0
+    now_iso = datetime.now(timezone.utc).isoformat()
+    count = 0
+    try:
+        with _get_conn() as conn:
+            for item in records:
+                cat = item.get("category", "AI_SEMICONDUCTORS").strip().upper()
+                kw = item.get("keyword", "").strip().lower()
+                if not kw:
+                    continue
+                weight = float(item.get("weight", 1.0))
+                bias = item.get("directional_bias", "BULLISH_CSP").strip()
+                impact = int(item.get("default_impact", 4))
+                tickers = item.get("default_tickers", "").strip()
+                source = item.get("source", "DYNAMIC_DISCOVERY").strip()
+
+                conn.execute(
+                    """
+                    INSERT INTO macro_category_corpus (
+                        category, keyword, weight, directional_bias,
+                        default_impact, default_tickers, source, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(keyword) DO UPDATE SET
+                        category = excluded.category,
+                        weight = excluded.weight,
+                        directional_bias = excluded.directional_bias,
+                        default_impact = excluded.default_impact,
+                        default_tickers = excluded.default_tickers,
+                        source = excluded.source,
+                        updated_at = excluded.updated_at
+                    """,
+                    (cat, kw, weight, bias, impact, tickers, source, now_iso)
+                )
+                count += 1
+            conn.commit()
+            return count
+    except Exception as e:
+        logger.error(f"Failed to bulk upsert corpus keywords: {e}")
+        return count
+
+
+# Auto-seed corpus on module load if empty
+try:
+    init_macro_category_corpus()
+except Exception as e:
+    logger.warning(f"Could not auto-seed macro_category_corpus on import: {e}")
+
 
 
 

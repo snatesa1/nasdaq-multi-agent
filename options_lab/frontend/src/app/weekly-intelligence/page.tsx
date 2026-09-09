@@ -51,7 +51,13 @@ import {
   Zap, 
   BarChart3, 
   Info, 
-  Sliders
+  Sliders,
+  Database,
+  Plus,
+  Trash2,
+  Search,
+  BookOpen,
+  Tag
 } from 'lucide-react';
 import { optionsApi } from '@/lib/api';
 import ProtectedRoute from '@/components/ProtectedRoute';
@@ -79,9 +85,85 @@ export default function WeeklyIntelligencePage() {
   const [actionLog, setActionLog] = useState<{ id: string; msg: string; time: string; type: 'success' | 'danger' | 'info'; actionUrl?: string }[]>([]);
 
   // Cockpit Tab Navigation
-  const [activeTab, setActiveTab] = useState<'blotter' | 'compass' | 'interlink' | 'scenarios' | 'briefing'>('blotter');
+  const [activeTab, setActiveTab] = useState<'blotter' | 'compass' | 'interlink' | 'scenarios' | 'briefing' | 'corpus'>('blotter');
   const [selectedScenario, setSelectedScenario] = useState<string>('60_40');
   const [selectedChallenger, setSelectedChallenger] = useState<string | null>(null);
+
+  // Dynamic Macro Corpus State
+  const [corpusList, setCorpusList] = useState<Array<{
+    id: number;
+    category: string;
+    keyword: string;
+    weight: number;
+    directional_bias: string;
+    default_impact: number;
+    default_tickers: string;
+    source: string;
+    updated_at: string;
+  }>>([]);
+  const [corpusLoading, setCorpusLoading] = useState<boolean>(false);
+  const [corpusFilterCategory, setCorpusFilterCategory] = useState<string>('ALL');
+  const [corpusSearch, setCorpusSearch] = useState<string>('');
+  const [showAddKeywordModal, setShowAddKeywordModal] = useState<boolean>(false);
+  const [newCategory, setNewCategory] = useState<string>('AI_SEMICONDUCTORS');
+  const [newKeyword, setNewKeyword] = useState<string>('');
+  const [newWeight, setNewWeight] = useState<number>(2.0);
+  const [newBias, setNewBias] = useState<string>('BULLISH_CSP');
+  const [newImpact, setNewImpact] = useState<number>(4);
+  const [newTickers, setNewTickers] = useState<string>('');
+  const [corpusSubmitting, setCorpusSubmitting] = useState<boolean>(false);
+  const [corpusMessage, setCorpusMessage] = useState<{ text: string; type: 'success' | 'error' } | null>(null);
+
+  const fetchCorpus = async (category?: string) => {
+    setCorpusLoading(true);
+    try {
+      const res = await optionsApi.getMacroCorpus(category === 'ALL' ? undefined : category);
+      if (res?.corpus) {
+        setCorpusList(res.corpus);
+      }
+    } catch (err: any) {
+      console.error('Failed to load macro corpus:', err);
+    } finally {
+      setCorpusLoading(false);
+    }
+  };
+
+  const handleAddKeyword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newKeyword.trim()) return;
+    setCorpusSubmitting(true);
+    setCorpusMessage(null);
+    try {
+      await optionsApi.addOrUpdateCorpusKeyword({
+        category: newCategory,
+        keyword: newKeyword.trim(),
+        weight: Number(newWeight),
+        directional_bias: newBias,
+        default_impact: Number(newImpact),
+        default_tickers: newTickers.trim(),
+        source: 'MANUAL'
+      });
+      setCorpusMessage({ text: `Added "${newKeyword.trim()}" to SQLite corpus!`, type: 'success' });
+      setNewKeyword('');
+      setNewTickers('');
+      setShowAddKeywordModal(false);
+      fetchCorpus(corpusFilterCategory);
+    } catch (err: any) {
+      setCorpusMessage({ text: `Failed to add keyword: ${err.message || err}`, type: 'error' });
+    } finally {
+      setCorpusSubmitting(false);
+    }
+  };
+
+  const handleDeleteKeyword = async (keyword: string) => {
+    if (!confirm(`Delete "${keyword}" from the macro categorization corpus?`)) return;
+    try {
+      await optionsApi.deleteCorpusKeyword(keyword);
+      setCorpusList(prev => prev.filter(k => k.keyword !== keyword));
+    } catch (err: any) {
+      alert(`Failed to delete keyword: ${err.message || err}`);
+    }
+  };
 
   const handleCopyBriefing = () => {
     if (!briefing?.ai_summary) return;
@@ -92,6 +174,7 @@ export default function WeeklyIntelligencePage() {
 
   useEffect(() => {
     fetchBriefing(false);
+    fetchCorpus();
     optionsApi.getBrokerAuthUrl().then(res => {
       if (res?.auth_url) setAuthUrl(res.auth_url);
     }).catch(() => null);
@@ -556,7 +639,27 @@ export default function WeeklyIntelligencePage() {
             }`}
           >
             <FileText className="h-4 w-4" />
-            <span>📰 CIO Memo &amp; Macro Calendar</span>
+            <span>📰 Senior Macro Analyst Memo &amp; Calendar</span>
+          </button>
+
+          <button
+            onClick={() => {
+              setActiveTab('corpus');
+              fetchCorpus();
+            }}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition cursor-pointer shrink-0 ${
+              activeTab === 'corpus'
+                ? 'bg-[#4051B5] text-white shadow-sm'
+                : 'bg-white text-slate-600 hover:bg-slate-50 border border-slate-200'
+            }`}
+          >
+            <Database className="h-4 w-4" />
+            <span>📚 Dynamic Macro Corpus</span>
+            <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
+              activeTab === 'corpus' ? 'bg-white/20 text-white' : 'bg-indigo-50 text-[#4051B5]'
+            }`}>
+              {corpusList.length} Terms
+            </span>
           </button>
         </div>
 
@@ -1272,6 +1375,354 @@ export default function WeeklyIntelligencePage() {
                     </div>
                   </div>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ═══════════════════════════════════════════════════════════════════ */}
+        {/* TAB 6: DYNAMIC MACRO CATEGORIZATION CORPUS & VOCABULARY STORE       */}
+        {/* ═══════════════════════════════════════════════════════════════════ */}
+        {activeTab === 'corpus' && (
+          <div className="space-y-6">
+            {/* Header Ribbon */}
+            <div className="p-6 bg-gradient-to-br from-indigo-50/60 via-white to-slate-50 border border-indigo-200/80 rounded-2xl shadow-sm">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-indigo-100 pb-4">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-[#4051B5] text-white shadow-sm">
+                    <Database className="h-6 w-6" />
+                  </div>
+                  <div>
+                    <h2 className="text-base sm:text-lg font-bold text-slate-800 flex items-center gap-2">
+                      Dynamic Macro Categorization Corpus &amp; Taxonomy Engine
+                    </h2>
+                    <p className="text-xs text-slate-500">
+                      Growing SQLite vocabulary store powering multi-word weighted phrase classification, options directional biases, and volatility ratings.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => setShowAddKeywordModal(!showAddKeywordModal)}
+                    className="px-3.5 py-2 bg-[#4051B5] text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>{showAddKeywordModal ? 'Close Form' : 'Add Thematic Keyword'}</span>
+                  </button>
+                  <button
+                    onClick={() => fetchCorpus(corpusFilterCategory)}
+                    disabled={corpusLoading}
+                    className="px-3 py-2 bg-white text-slate-600 border border-slate-200 rounded-xl text-xs font-bold hover:bg-slate-50 transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${corpusLoading ? 'animate-spin text-[#4051B5]' : ''}`} />
+                    <span>Refresh</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Corpus Metrics Stats */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pt-4">
+                <div className="bg-white/80 border border-slate-200/60 rounded-xl p-3">
+                  <span className="text-[11px] text-slate-500 font-medium">Total Registered Terms</span>
+                  <p className="text-lg font-bold text-slate-800 font-mono mt-0.5">{corpusList.length}</p>
+                </div>
+                <div className="bg-white/80 border border-slate-200/60 rounded-xl p-3">
+                  <span className="text-[11px] text-slate-500 font-medium">Active Taxonomy Tiers</span>
+                  <p className="text-lg font-bold text-[#4051B5] font-mono mt-0.5">
+                    {new Set(corpusList.map(c => c.category)).size}
+                  </p>
+                </div>
+                <div className="bg-white/80 border border-slate-200/60 rounded-xl p-3">
+                  <span className="text-[11px] text-slate-500 font-medium">Agentic &amp; AI Terms</span>
+                  <p className="text-lg font-bold text-emerald-600 font-mono mt-0.5">
+                    {corpusList.filter(c => c.category === 'AI_SEMICONDUCTORS').length}
+                  </p>
+                </div>
+                <div className="bg-white/80 border border-slate-200/60 rounded-xl p-3">
+                  <span className="text-[11px] text-slate-500 font-medium">Dynamic Discoveries</span>
+                  <p className="text-lg font-bold text-purple-600 font-mono mt-0.5">
+                    {corpusList.filter(c => c.source === 'DYNAMIC_DISCOVERY').length}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Notification Banner */}
+            {corpusMessage && (
+              <div className={`p-4 rounded-xl text-xs font-bold border flex items-center justify-between ${
+                corpusMessage.type === 'success'
+                  ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                  : 'bg-rose-50 text-rose-700 border-rose-200'
+              }`}>
+                <span>{corpusMessage.text}</span>
+                <button onClick={() => setCorpusMessage(null)} className="text-slate-400 hover:text-slate-600">×</button>
+              </div>
+            )}
+
+            {/* Add Custom Keyword Modal / Card */}
+            {showAddKeywordModal && (
+              <form onSubmit={handleAddKeyword} className="p-5 bg-white border border-indigo-200 rounded-2xl shadow-md space-y-4 animate-in fade-in duration-200">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-[#4051B5]" />
+                    Register Custom Vocabulary or Agentic Term
+                  </h3>
+                  <span className="text-[11px] text-slate-400 font-mono">SQLite Persistent Store</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Taxonomy Category</label>
+                    <select
+                      value={newCategory}
+                      onChange={(e) => setNewCategory(e.target.value)}
+                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2 font-medium focus:ring-1 focus:ring-indigo-500 outline-hidden"
+                    >
+                      <option value="AI_SEMICONDUCTORS">AI Semiconductors &amp; Agentic Compute</option>
+                      <option value="FED_RATES_INFLATION">Fed Rates, Inflation &amp; Macro Policy</option>
+                      <option value="ENTERPRISE_SOFTWARE_CLOUD">Enterprise Software &amp; Cloud</option>
+                      <option value="ENERGY_POWER_INFRA">Energy, Nuclear &amp; Datacenter Infra</option>
+                      <option value="CONSUMER_EMPLOYMENT_RETAIL">Consumer Spending &amp; Jobs</option>
+                      <option value="GEOPOLITICS_TRADE">Geopolitics &amp; Global Trade</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Keyword or Multi-Word Phrase</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. agentic app development"
+                      value={newKeyword}
+                      onChange={(e) => setNewKeyword(e.target.value)}
+                      required
+                      className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 font-mono focus:ring-1 focus:ring-indigo-500 outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Importance Weight ({newWeight}x)</label>
+                    <input
+                      type="range"
+                      min="1.0"
+                      max="3.0"
+                      step="0.1"
+                      value={newWeight}
+                      onChange={(e) => setNewWeight(parseFloat(e.target.value))}
+                      className="w-full mt-2 accent-[#4051B5]"
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Options Directional Bias</label>
+                    <select
+                      value={newBias}
+                      onChange={(e) => setNewBias(e.target.value)}
+                      className="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg p-2 font-medium focus:ring-1 focus:ring-indigo-500 outline-hidden"
+                    >
+                      <option value="BULLISH_CSP">BULLISH_CSP (Cash-Secured Puts)</option>
+                      <option value="DEFENSIVE_CC">DEFENSIVE_CC (Covered Calls)</option>
+                      <option value="NEUTRAL_CALENDAR">NEUTRAL_CALENDAR (Time Decay)</option>
+                      <option value="HEDGED_PUT">HEDGED_PUT (Downside Cushion)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Impact Scale (1 to 5)</label>
+                    <input
+                      type="number"
+                      min="1"
+                      max="5"
+                      value={newImpact}
+                      onChange={(e) => setNewImpact(parseInt(e.target.value) || 4)}
+                      className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 font-mono focus:ring-1 focus:ring-indigo-500 outline-hidden"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold text-slate-600 block mb-1">Associated Underlying Tickers</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. NVDA,PLTR,MSFT"
+                      value={newTickers}
+                      onChange={(e) => setNewTickers(e.target.value.toUpperCase())}
+                      className="w-full text-xs bg-white border border-slate-200 rounded-lg p-2 font-mono uppercase focus:ring-1 focus:ring-indigo-500 outline-hidden"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => setShowAddKeywordModal(false)}
+                    className="px-4 py-2 bg-slate-100 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-200 transition cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={corpusSubmitting}
+                    className="px-4 py-2 bg-[#4051B5] text-white rounded-xl text-xs font-bold hover:bg-indigo-700 transition flex items-center gap-1.5 shadow-sm cursor-pointer"
+                  >
+                    {corpusSubmitting ? <RefreshCw className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle2 className="h-3.5 w-3.5" />}
+                    <span>Save to SQLite Corpus</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Filter Bar & Search */}
+            <div className="bg-white border border-slate-200/80 rounded-2xl p-4 shadow-sm space-y-3">
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3">
+                {/* Category Pills */}
+                <div className="flex items-center gap-1.5 overflow-x-auto w-full sm:w-auto pb-1 sm:pb-0">
+                  {[
+                    { id: 'ALL', label: 'All Terms' },
+                    { id: 'AI_SEMICONDUCTORS', label: 'Tech & Agentic AI' },
+                    { id: 'FED_RATES_INFLATION', label: 'Fed & Rates' },
+                    { id: 'ENTERPRISE_SOFTWARE_CLOUD', label: 'Enterprise Cloud' },
+                    { id: 'ENERGY_POWER_INFRA', label: 'Energy & Nuclear' },
+                    { id: 'CONSUMER_EMPLOYMENT_RETAIL', label: 'Consumer & Jobs' },
+                    { id: 'GEOPOLITICS_TRADE', label: 'Geopolitics' }
+                  ].map((tab) => (
+                    <button
+                      key={tab.id}
+                      onClick={() => {
+                        setCorpusFilterCategory(tab.id);
+                        fetchCorpus(tab.id);
+                      }}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold transition whitespace-nowrap cursor-pointer ${
+                        corpusFilterCategory === tab.id
+                          ? 'bg-[#4051B5] text-white shadow-xs'
+                          : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                      }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Search Bar */}
+                <div className="relative w-full sm:w-64">
+                  <Search className="h-3.5 w-3.5 text-slate-400 absolute left-3 top-2.5" />
+                  <input
+                    type="text"
+                    placeholder="Search keywords or tickers..."
+                    value={corpusSearch}
+                    onChange={(e) => setCorpusSearch(e.target.value)}
+                    className="w-full text-xs pl-8 pr-3 py-2 bg-slate-50 border border-slate-200 rounded-xl focus:bg-white focus:ring-1 focus:ring-indigo-500 outline-hidden font-mono"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Keyword Data Table */}
+            <div className="bg-white border border-slate-200/80 rounded-2xl shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-slate-200 text-xs">
+                  <thead className="bg-slate-50/90 text-slate-700 font-bold">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Keyword / N-Gram</th>
+                      <th className="px-4 py-3 text-left">Category</th>
+                      <th className="px-4 py-3 text-left">Importance Weight</th>
+                      <th className="px-4 py-3 text-left">Directional Bias</th>
+                      <th className="px-4 py-3 text-left">Impact</th>
+                      <th className="px-4 py-3 text-left">Associated Tickers</th>
+                      <th className="px-4 py-3 text-center">Action</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {corpusList
+                      .filter((item) => {
+                        if (corpusFilterCategory !== 'ALL' && item.category !== corpusFilterCategory) return false;
+                        if (!corpusSearch) return true;
+                        const q = corpusSearch.toLowerCase();
+                        return (
+                          item.keyword.toLowerCase().includes(q) ||
+                          item.default_tickers.toLowerCase().includes(q) ||
+                          item.category.toLowerCase().includes(q)
+                        );
+                      })
+                      .map((item) => (
+                        <tr key={item.id || item.keyword} className="hover:bg-slate-50/70 transition">
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono font-bold text-slate-800">{item.keyword}</span>
+                              <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold ${
+                                item.source === 'DYNAMIC_DISCOVERY'
+                                  ? 'bg-purple-100 text-purple-700 border border-purple-200'
+                                  : item.source === 'MANUAL'
+                                  ? 'bg-blue-100 text-blue-700 border border-blue-200'
+                                  : 'bg-slate-100 text-slate-500'
+                              }`}>
+                                {item.source === 'DYNAMIC_DISCOVERY' ? '✨ Learned' : item.source}
+                              </span>
+                            </div>
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <span className="px-2 py-0.5 rounded-md bg-indigo-50 text-[#4051B5] font-semibold text-[11px]">
+                              {item.category}
+                            </span>
+                          </td>
+
+                          <td className="px-4 py-3 font-mono">
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-slate-700">{item.weight.toFixed(1)}x</span>
+                              <div className="w-16 h-1.5 bg-slate-100 rounded-full overflow-hidden">
+                                <div
+                                  className="h-full bg-[#4051B5] rounded-full"
+                                  style={{ width: `${Math.min(100, (item.weight / 3.0) * 100)}%` }}
+                                />
+                              </div>
+                            </div>
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <span className={`px-2 py-0.5 rounded text-[11px] font-bold font-mono ${
+                              item.directional_bias.includes('BULLISH')
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                : item.directional_bias.includes('DEFENSIVE')
+                                ? 'bg-amber-50 text-amber-700 border border-amber-200'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
+                              {item.directional_bias}
+                            </span>
+                          </td>
+
+                          <td className="px-4 py-3 font-mono font-bold text-amber-600">
+                            {'★'.repeat(item.default_impact)}
+                          </td>
+
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-1 flex-wrap">
+                              {item.default_tickers ? (
+                                item.default_tickers.split(',').map((t) => (
+                                  <span key={t} className="px-1.5 py-0.5 bg-slate-100 text-slate-700 rounded font-mono font-bold text-[10px]">
+                                    {t.trim()}
+                                  </span>
+                                ))
+                              ) : (
+                                <span className="text-slate-400 text-[10px] italic">Universal</span>
+                              )}
+                            </div>
+                          </td>
+
+                          <td className="px-4 py-3 text-center">
+                            <button
+                              onClick={() => handleDeleteKeyword(item.keyword)}
+                              className="p-1.5 rounded-lg text-slate-400 hover:text-rose-600 hover:bg-rose-50 transition cursor-pointer"
+                              title="Delete keyword"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
               </div>
             </div>
           </div>

@@ -16,7 +16,13 @@ from .trade_staging import TradeStagingEngine
 from .campaign_stitcher import CampaignStitcher
 from .universe import InstitutionalUniverseEngine, PRIMARY_GICS_SECTORS, normalize_gics_sector
 from .config import settings
-from .db import save_macro_headlines, get_weekly_macro_headlines
+from .db import (
+    save_macro_headlines,
+    get_weekly_macro_headlines,
+    get_macro_category_corpus,
+    bulk_upsert_corpus_keywords,
+    add_or_update_corpus_keyword
+)
 from engine.interlink_graph import InterlinkGraphEngine
 
 logger = logging.getLogger("weekly-intelligence")
@@ -156,6 +162,8 @@ class WeeklyIntelligenceEngine:
         self.universe_engine = InstitutionalUniverseEngine(saxo_client=self.saxo_client)
         self.symbol_sector_map: Dict[str, str] = {}
         self.focus_pool: List[Dict[str, Any]] = []
+        self._corpus_cache: Optional[List[Dict[str, Any]]] = None
+        self._corpus_cache_time: float = 0.0
 
         # Dynamic Universe Resolution: Live Saxo Holdings + Multi-Watchlists + Focus Pool (11 GICS Sectors)
         self._sync_dynamic_universe()
@@ -600,11 +608,178 @@ class WeeklyIntelligenceEngine:
 
         return sorted(list(found))
 
+    def _classify_macro_headline(self, text: str) -> Dict[str, Any]:
+        """
+        Descriptive Summary:
+            Classifies a financial headline or news synopsis against the dynamic SQLite macro_category_corpus
+            using weighted multi-word phrase matching, token salience aggregation, and directional bias resolution.
+
+        Parameters:
+            text (str): News article headline and/or summary string to analyze.
+
+        Returns:
+            Dict[str, Any]: Classification outcome dictionary containing:
+                - 'category' (str): Winning thematic category (e.g. 'Tech / AI & Semiconductors', 'Macro / Fed Policy').
+                - 'category_key' (str): Canonical taxonomy key (e.g. 'AI_SEMICONDUCTORS', 'FED_RATES_INFLATION').
+                - 'bias' (str): Quantitative options strategy bias ('BULLISH_CSP', 'NEUTRAL_CALENDAR', etc.).
+                - 'impact_score' (int): Volatility impact magnitude rating from 1 (low) to 5 (high).
+                - 'matched_keywords' (List[str]): List of matched keywords and n-grams from the corpus.
+                - 'score' (float): Total accumulated weight score.
+                - 'suggested_tickers' (List[str]): Institutional tickers associated with the matched category.
+
+        Exceptions / Side Effects:
+            Reads from SQLite macro_category_corpus (cached in-memory for 60 seconds to optimize latency).
+
+        Usage Example:
+            >>> result = engine._classify_macro_headline("Palantir launches new agentic platform for enterprise AI")
+            >>> print(result["category"], result["bias"], result["matched_keywords"])
+            Tech / AI & Semiconductors BULLISH_CSP ['agentic platform', 'agentic', 'palantir', 'ai']
+        """
+        import time
+        now = time.time()
+        if not self._corpus_cache or (now - self._corpus_cache_time) > 60.0:
+            try:
+                self._corpus_cache = get_macro_category_corpus()
+                self._corpus_cache_time = now
+            except Exception as e:
+                logger.error(f"Failed to load macro category corpus: {e}")
+                self._corpus_cache = []
+
+        text_lower = text.lower()
+        category_scores: Dict[str, float] = {}
+        category_matches: Dict[str, List[str]] = {}
+        category_meta: Dict[str, Dict[str, Any]] = {}
+
+        for item in (self._corpus_cache or []):
+            cat_key = item.get("category", "GENERAL_MACRO")
+            kw = item.get("keyword", "").lower()
+            weight = float(item.get("weight", 1.0))
+            if not kw:
+                continue
+
+            # Check if keyword or phrase is present in text
+            if kw in text_lower:
+                category_scores[cat_key] = category_scores.get(cat_key, 0.0) + weight
+                category_matches.setdefault(cat_key, []).append(kw)
+                if cat_key not in category_meta:
+                    category_meta[cat_key] = item
+
+        CATEGORY_DISPLAY_MAP = {
+            "AI_SEMICONDUCTORS": "Tech / AI & Semiconductors",
+            "FED_RATES_INFLATION": "Macro / Fed Policy",
+            "ENTERPRISE_SOFTWARE_CLOUD": "Enterprise Software & Cloud",
+            "ENERGY_POWER_INFRA": "Energy / Power & Datacenter Infra",
+            "CONSUMER_EMPLOYMENT_RETAIL": "Consumer / Retail & Jobs",
+            "GEOPOLITICS_TRADE": "Geopolitics & Global Trade",
+            "DIGITAL_ASSETS": "Digital Assets / Regulatory",
+            "EARNINGS_REVENUE": "Earnings / Guidance"
+        }
+
+        if category_scores:
+            best_cat = max(category_scores.items(), key=lambda x: x[1])[0]
+            meta = category_meta[best_cat]
+            display_name = CATEGORY_DISPLAY_MAP.get(best_cat, best_cat.replace("_", " ").title())
+            raw_tickers = meta.get("default_tickers", "")
+            suggested = [t.strip() for t in raw_tickers.split(",") if t.strip()]
+            filtered_suggested = [s for s in suggested if s in getattr(self, "scoped_universe", [])] or suggested
+
+            return {
+                "category": display_name,
+                "category_key": best_cat,
+                "bias": meta.get("directional_bias", "BULLISH_CSP"),
+                "impact_score": int(meta.get("default_impact", 4)),
+                "matched_keywords": category_matches.get(best_cat, []),
+                "score": round(category_scores[best_cat], 2),
+                "suggested_tickers": filtered_suggested[:4]
+            }
+
+        return {
+            "category": "Market Catalysts / Equities",
+            "category_key": "GENERAL_MACRO",
+            "bias": "NEUTRAL_YIELD",
+            "impact_score": 3,
+            "matched_keywords": [],
+            "score": 0.0,
+            "suggested_tickers": []
+        }
+
+    def discover_and_expand_corpus(self, headlines: List[str]) -> List[Dict[str, Any]]:
+        """
+        Descriptive Summary:
+            Scans incoming news headlines for emerging agentic, semiconductor, and macro financial n-grams
+            not yet present in the SQLite corpus, dynamically registering novel terms to expand the vocabulary.
+
+        Parameters:
+            headlines (List[str]): List of raw news titles or summary sentences.
+
+        Returns:
+            List[Dict[str, Any]]: List of newly discovered and persisted keyword dictionaries.
+
+        Exceptions / Side Effects:
+            Persists newly identified vocabulary to SQLite via bulk_upsert_corpus_keywords.
+
+        Usage Example:
+            >>> new_terms = engine.discover_and_expand_corpus(["OpenAI announces agentic app development framework"])
+            >>> print(f"Discovered {len(new_terms)} novel terms")
+        """
+        import re
+        if not headlines:
+            return []
+
+        ANCHOR_THEMES = {
+            "AI_SEMICONDUCTORS": ["agent", "agentic", "inference", "reasoning", "compute", "semiconductor", "blackwell", "asic", "gpu", "wafer", "foundry"],
+            "ENTERPRISE_SOFTWARE_CLOUD": ["hyperscaler", "saas", "cloud spending", "cybersecurity", "model deployment"],
+            "ENERGY_POWER_INFRA": ["smr", "nuclear", "datacenter power", "substation", "grid load", "clean energy"],
+            "FED_RATES_INFLATION": ["rate cut", "basis points", "cpi", "fomc", "yield curve", "quantitative tightening"],
+            "GEOPOLITICS_TRADE": ["export ban", "tariff", "trade war", "sanction", "taiwan strait"]
+        }
+
+        try:
+            existing_corpus = get_macro_category_corpus()
+            existing_keywords = {item["keyword"].lower() for item in existing_corpus}
+        except Exception:
+            existing_keywords = set()
+
+        novel_records = []
+        for text in headlines:
+            text_clean = re.sub(r"[^\w\s-]", " ", text).lower()
+            words = text_clean.split()
+            for n in (2, 3):
+                for i in range(len(words) - n + 1):
+                    ngram = " ".join(words[i:i+n]).strip()
+                    if len(ngram) < 5 or ngram in existing_keywords:
+                        continue
+
+                    for cat, anchors in ANCHOR_THEMES.items():
+                        if any(a in ngram for a in anchors):
+                            record = {
+                                "category": cat,
+                                "keyword": ngram,
+                                "weight": 2.0 if n == 2 else 2.5,
+                                "directional_bias": "BULLISH_CSP" if ("AI" in cat or "CLOUD" in cat or "ENERGY" in cat) else "NEUTRAL_CALENDAR",
+                                "default_impact": 4,
+                                "default_tickers": "NVDA,PLTR,MSFT" if "AI" in cat else "",
+                                "source": "DYNAMIC_DISCOVERY"
+                            }
+                            novel_records.append(record)
+                            existing_keywords.add(ngram)
+                            break
+
+        if novel_records:
+            try:
+                bulk_upsert_corpus_keywords(novel_records)
+                logger.info(f"Dynamically discovered and added {len(novel_records)} novel keywords to macro corpus.")
+                self._corpus_cache = None  # Invalidate cache
+            except Exception as e:
+                logger.error(f"Failed to persist discovered corpus keywords: {e}")
+
+        return novel_records
+
     def _extract_dynamic_macro_events(self, news_items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
         Descriptive Summary:
-            Filters and maps raw news feeds into 4-6 high-impact Macro Catalyst Cards classified
-            by institutional themes (Monetary Policy, AI & Semis, Regulatory, Earnings, Commodities).
+            Filters and maps raw news feeds into 4-6 high-impact Macro Catalyst Cards dynamically
+            classified against the SQLite macro_category_corpus (including AI agentic, semiconductor, and macro monetary themes).
 
         Parameters:
             news_items (List[Dict[str, Any]]): Raw news items collected from live feeds.
@@ -613,22 +788,28 @@ class WeeklyIntelligenceEngine:
             List[Dict[str, Any]]: List of structured macro catalyst event dictionaries containing:
                 - 'event_id' (str): Unique sequential identifier ('EVT-01', etc.).
                 - 'title' (str): Cleaned headline.
-                - 'category' (str): Macro classification theme.
+                - 'category' (str): Macro classification theme from dynamic SQLite taxonomy.
                 - 'impact_score' (int): Priority impact rating (1-5).
                 - 'affected_tickers' (List[str]): Up to 4 impacted underlying symbols.
                 - 'summary' (str): Context synopsis.
-                - 'bias' (str): Options directional stance ('BULLISH_CSP', 'NEUTRAL_ACCUMULATION').
+                - 'bias' (str): Options directional stance ('BULLISH_CSP', 'NEUTRAL_CALENDAR').
                 - 'date' (str): Publication date string.
+                - 'matched_keywords' (List[str]): Matched vocabulary items from SQLite corpus.
 
         Exceptions / Side Effects:
             Provides deterministic fallback catalyst cards if incoming news feed is empty.
+            Auto-triggers discover_and_expand_corpus() to learn novel industry n-grams.
 
         Usage Example:
             >>> cards = engine._extract_dynamic_macro_events(news_items)
-            >>> print(cards[0]["title"], cards[0]["bias"])
+            >>> print(cards[0]["title"], cards[0]["bias"], cards[0]["matched_keywords"])
         """
         events = []
         seen_titles = set()
+
+        # Dynamically discover and expand corpus from incoming headlines
+        all_text = [f"{item.get('Headline') or item.get('headline') or ''} {item.get('Summary') or item.get('summary') or ''}" for item in news_items]
+        self.discover_and_expand_corpus(all_text)
 
         for item in news_items:
             headline = item.get("Headline") or item.get("headline") or item.get("title", "")
@@ -640,45 +821,17 @@ class WeeklyIntelligenceEngine:
 
             summary = item.get("Summary") or item.get("summary") or clean_title
             source = item.get("Source") or item.get("source", "Saxo Wire")
-            raw_cat = item.get("Category") or item.get("category", "")
-            
+
             # Extract mentioned tickers
             affected = self._extract_tickers_from_text(f"{clean_title} {summary}")
 
-            # Categorize dynamically
-            h_lower = f"{clean_title} {summary}".lower()
-            if any(k in h_lower for k in ["fed", "rate", "treasury", "inflation", "cpi", "powell", "fomc", "yield"]):
-                cat = "Macro / Fed Policy"
-                bias = "NEUTRAL_ACCUMULATION"
-                impact = 5
-                if not affected:
-                    affected = [s for s in ["BAC", "GS", "IBM"] if s in self.scoped_universe] or ["BAC"]
-            elif any(k in h_lower for k in ["ai", "compute", "nvidia", "gpu", "palantir", "cloud", "semiconductor", "chip", "intel", "amd"]):
-                cat = "Tech / AI & Semiconductors"
-                bias = "BULLISH_CSP"
-                impact = 5 if ("nvidia" in h_lower or "ai" in h_lower) else 4
-                if not affected:
-                    affected = [s for s in ["NVDA", "INTC", "AAPL", "PLTR"] if s in self.scoped_universe] or ["NVDA"]
-            elif any(k in h_lower for k in ["crypto", "coinbase", "bitcoin", "stablecoin", "sec", "clarity", "etf"]):
-                cat = "Digital Assets / Regulatory"
-                bias = "BULLISH_IV_SPIKE"
-                impact = 5
-                if not affected:
-                    affected = ["COIN"]
-            elif any(k in h_lower for k in ["earn", "revenue", "guidance", "profit", "q3", "q4", "quarter", "report"]):
-                cat = "Earnings / Guidance"
-                bias = "EARNINGS_VOL_HARVEST"
-                impact = 5
-            elif any(k in h_lower for k in ["oil", "crude", "energy", "chevron", "petroleum", "opec"]):
-                cat = "Commodities / Energy"
-                bias = "NEUTRAL_YIELD"
-                impact = 3
-                if not affected:
-                    affected = [s for s in ["CVX", "COP"] if s in self.scoped_universe] or ["CVX"]
-            else:
-                cat = raw_cat or "Market Catalysts / Equities"
-                bias = "NEUTRAL_YIELD"
-                impact = 3
+            # Dynamic categorization via SQLite macro_category_corpus
+            classification = self._classify_macro_headline(f"{clean_title} {summary}")
+            cat = classification["category"]
+            bias = classification["bias"]
+            impact = classification["impact_score"]
+            if not affected and classification.get("suggested_tickers"):
+                affected = classification["suggested_tickers"]
 
             seen_titles.add(clean_title)
             events.append({
@@ -689,7 +842,8 @@ class WeeklyIntelligenceEngine:
                 "affected_tickers": affected[:4],
                 "summary": summary if len(summary) > 20 else f"Real-time market catalyst reported via {source} influencing sector volatility and options skew.",
                 "bias": bias,
-                "date": datetime.now().strftime("%Y-%m-%d")
+                "date": datetime.now().strftime("%Y-%m-%d"),
+                "matched_keywords": classification.get("matched_keywords", [])
             })
 
             if len(events) >= 6:
@@ -1230,7 +1384,7 @@ class WeeklyIntelligenceEngine:
         raw_news_feed_str = "\n\n".join(formatted_news_feed) if formatted_news_feed else "No raw news feed provided. Sourcing latest market macro developments from knowledge base."
         watchlist_str = ", ".join(self.scoped_universe)
 
-        prompt = f"""You are a senior macroeconomic analyst and research desk assistant embedded within a multi-asset investment team. Your sole function each morning is to produce a finance-oriented daily/weekly briefing on the most impactful market and economic news stories for {current_date_str} ({week_label}).
+        prompt = f"""You are a senior macroeconomic analyst and research desk assistant embedded within a multi-asset investment team. Produce a finance-oriented daily/weekly briefing on the most impactful market and economic news stories for {current_date_str} ({week_label}).
 
 ────────────────────────────────────────────
 INPUTS

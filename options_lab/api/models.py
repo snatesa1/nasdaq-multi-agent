@@ -298,6 +298,41 @@ class WheelBacktestResponse(BaseModel):
     equity_curves: List[EquityCurvePoint]
     monthly_matrix: List[MonthlyReturnMatrixRow]
     trade_log: List[WheelTradeLogItem]
-    report_id: str
     generated_at: str
+
+
+# ── Macro Category Taxonomy & Corpus Models ──────────────────────────────
+class CorpusKeywordRequest(BaseModel):
+    """
+    Descriptive Summary:
+        Encapsulates user or automated API request payloads for creating or modifying
+        the dynamic macro categorization corpus in SQLite.
+
+    Encapsulated Fields:
+        - category (str): The macro category identifier (e.g. 'AI_SEMICONDUCTORS', 'FED_RATES_INFLATION').
+        - keyword (str): Search token or multi-word phrase to match against news feeds.
+        - weight (float): Importance multiplier for scoring (default: 1.0).
+        - directional_bias (str): Quantitative options bias ('BULLISH_CSP', 'DEFENSIVE_CC', etc.).
+        - default_impact (int): Market volatility impact rating from 1 to 5 (default: 4).
+        - default_tickers (str): Comma-separated underlying tickers associated with the theme.
+        - source (str): Origin marker ('MANUAL', 'SYSTEM_SEED', 'DYNAMIC_DISCOVERY').
+
+    Usage Example:
+        >>> req = CorpusKeywordRequest(
+        ...     category="AI_SEMICONDUCTORS",
+        ...     keyword="agentic platform",
+        ...     weight=2.5,
+        ...     directional_bias="BULLISH_CSP",
+        ...     default_tickers="PLTR,MSFT,NVDA"
+        ... )
+        >>> assert req.keyword == "agentic platform"
+    """
+    category: str = Field("AI_SEMICONDUCTORS", description="Macro category identifier")
+    keyword: str = Field(..., description="Unique search token or n-gram")
+    weight: float = Field(1.0, description="Salience weight multiplier (e.g. 1.0 - 3.0)")
+    directional_bias: str = Field("BULLISH_CSP", description="Quantitative options strategy bias")
+    default_impact: int = Field(4, description="Volatility impact scale (1-5)")
+    default_tickers: str = Field("", description="Comma-separated ticker beneficiaries")
+    source: str = Field("MANUAL", description="Source of keyword entry")
+
 
