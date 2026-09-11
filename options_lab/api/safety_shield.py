@@ -19,8 +19,8 @@ class BehavioralSafetyShield:
 
     def __init__(self):
         self.max_single_ticker_exposure_pct = 15.0  # Max 15% of equity per stock
-        self.min_dte_entry = 21                     # No selling options < 21 DTE (Gamma guard)
-        self.max_dte_wheel = 32                     # Strict 30-32 DTE cap for Wheel CSP & CC
+        self.min_dte_entry = 28                     # Hard floor: No selling options < 28 DTE (Gamma & illiquid weekly guard)
+        self.max_dte_wheel = 42                     # Standard 28-42 DTE window for Wheel CSP & CC (Target ~35 DTE monthly)
         self.max_delta_high_beta = 0.18             # Max delta on growth/momentum
         self.revenge_cooldown_hours = 24            # Lockout period after major loss
         self.max_margin_utilization_pct = 15.0      # Hard 10-15% margin utilization cap
@@ -65,15 +65,15 @@ class BehavioralSafetyShield:
                     f"REVENGE TRADING COOLDOWN: Major loss of ${recent_loss_amount:,.2f} recorded. Execution locked for {remaining_hrs} more hours to prevent emotional sizing."
                 )
 
-        # 2. Gamma Expiration & Strict 30-32 DTE Wheel Guard
+        # 2. Gamma Expiration & Standard 28-42 DTE Wheel Guard
         if ("Option" in asset_type or option_type) and buy_sell.upper() == "SELL" and dte is not None:
             if dte < self.min_dte_entry:
                 infractions.append(
-                    f"GAMMA RISK VIOLATION: Selling options with {dte} DTE is prohibited (Minimum requirement: {self.min_dte_entry} DTE)."
+                    f"GAMMA & ILLIQUIDITY VIOLATION: Selling options with {dte} DTE is prohibited (Minimum entry requirement: {self.min_dte_entry} DTE)."
                 )
             elif dte > self.max_dte_wheel:
                 infractions.append(
-                    f"MAX DTE VIOLATION: Selling options with {dte} DTE exceeds strict 30-32 DTE limit (Maximum allowed: {self.max_dte_wheel} DTE)."
+                    f"MAX DTE VIOLATION: Selling options with {dte} DTE exceeds 28-42 DTE limit (Maximum allowed: {self.max_dte_wheel} DTE)."
                 )
 
         # 3. High-Beta / High-Volatility Call Drag Guard (Dynamic Market Risk Classification)

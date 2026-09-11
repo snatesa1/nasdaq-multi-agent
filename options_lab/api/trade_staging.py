@@ -120,13 +120,24 @@ class TradeStagingEngine:
             "pillars": rec.get("pillars", {}),
             "margin_check_result": json.dumps(margin_eval),
             "safety_check_result": json.dumps(safety_eval),
-            "status": "PROPOSED",
+            "status": rec.get("status", "PROPOSED"),
             "saxo_order_id": None,
             "saxo_order_response": None,
             "proposed_at": now_iso,
             "approved_at": None,
             "executed_at": None,
-            "week_label": week_label
+            "week_label": week_label,
+            "seasonality_bias": rec.get("seasonality_bias"),
+            "seasonality_win_rate_pct": rec.get("seasonality_win_rate_pct"),
+            "seasonality_median_return_pct": rec.get("seasonality_median_return_pct"),
+            "worst_historical_drawdown_pct": rec.get("worst_historical_drawdown_pct"),
+            "iv_rank_pct": rec.get("iv_rank_pct"),
+            "volatility_regime": rec.get("volatility_regime"),
+            "has_earnings_blackout": rec.get("has_earnings_blackout"),
+            "next_earnings_date": rec.get("next_earnings_date"),
+            "buffer_rationale": rec.get("buffer_rationale"),
+            "recommended_otm_buffer_pct": rec.get("recommended_otm_buffer_pct"),
+            "rejection_reason": rec.get("rejection_reason")
         }
 
         # Persist to SQLite database via db helper

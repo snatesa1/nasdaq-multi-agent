@@ -1301,23 +1301,44 @@ class SaxoClient:
             if not option_spaces:
                 return None
             
-            # Sort spaces by closeness to target dte
+            # 1. Filter spaces for standard 28 to 45 DTE window (hard floor >= 28 DTE to prevent illiquid weeklies and gamma cliff)
             target_pc = option_type.lower()
-            sorted_spaces = sorted(option_spaces, key=lambda sp: abs(sp.get("DisplayDaysToExpiry", 30) - dte))
-            
+            valid_spaces = [sp for sp in option_spaces if 28 <= sp.get("DisplayDaysToExpiry", 0) <= 45]
+            if not valid_spaces:
+                # Fallback to spaces >= 25 DTE if none strictly in 28-45
+                valid_spaces = [sp for sp in option_spaces if sp.get("DisplayDaysToExpiry", 0) >= 25] or option_spaces
+
+            # 2. Prioritize standard monthly third Friday (day of month 15-21 and Friday)
+            best_space = None
+            for sp in valid_spaces:
+                expiry_str = sp.get("Expiry") or sp.get("ExpiryDate") or ""
+                try:
+                    clean_date = expiry_str.split("T")[0]
+                    dt = datetime.strptime(clean_date, "%Y-%m-%d")
+                    if dt.weekday() == 4 and 15 <= dt.day <= 21:
+                        best_space = sp
+                        break
+                except Exception:
+                    pass
+
+            # 3. If no standard monthly third Friday found, pick closest to target dte (target ~35 DTE)
+            if not best_space:
+                target_dte = dte if dte >= 28 else 35
+                best_space = min(valid_spaces, key=lambda sp: abs(sp.get("DisplayDaysToExpiry", 35) - target_dte))
+
+            # 4. In the chosen best expiration space ONLY, match closest strike
             best_uic = None
             min_diff = float("inf")
 
-            for sp in sorted_spaces:
-                for opt in sp.get("SpecificOptions", []):
-                    if opt.get("PutCall", "").lower() == target_pc:
-                        opt_strike = float(opt.get("StrikePrice", opt.get("Strike", 0.0)))
-                        opt_uic = int(opt.get("Uic", 0))
-                        if opt_uic > 0:
-                            diff = abs(opt_strike - strike)
-                            if diff < min_diff:
-                                min_diff = diff
-                                best_uic = opt_uic
+            for opt in best_space.get("SpecificOptions", []):
+                if opt.get("PutCall", "").lower() == target_pc:
+                    opt_strike = float(opt.get("StrikePrice", opt.get("Strike", 0.0)))
+                    opt_uic = int(opt.get("Uic", 0))
+                    if opt_uic > 0:
+                        diff = abs(opt_strike - strike)
+                        if diff < min_diff:
+                            min_diff = diff
+                            best_uic = opt_uic
             if best_uic:
                 return best_uic
         except Exception as e:

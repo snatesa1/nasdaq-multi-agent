@@ -351,6 +351,170 @@ def get_simulated_market_data(symbol: str) -> Dict[str, Any]:
     }
 
 
+def fetch_alpaca_option_quote(
+    symbol: str,
+    strike: float,
+    option_type: str = "put",
+    dte: int = 35,
+    target_date_str: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    Descriptive Summary:
+        Fetches authentic live market Bid, Ask, Mid, and spread quotes from the Alpaca Options API
+        (Indicative Feed) with automatic standard monthly cycle prioritization (28-42 DTE window)
+        and wide-spread liquidity risk detection.
+
+    Parameters:
+        symbol (str): Underlying stock ticker (e.g. 'GOOGL', 'IBM', 'NVDA').
+        strike (float): Target option strike price.
+        option_type (str, optional): 'put' or 'call'. Defaults to 'put'.
+        dte (int, optional): Target Days To Expiration. Defaults to 35.
+        target_date_str (Optional[str], optional): Specific expiration date 'YYYY-MM-DD' if known.
+
+    Returns:
+        Optional[Dict[str, Any]]: Live option quote dictionary containing:
+            - 'source' (str): 'ALPACA_LIVE'
+            - 'bid' (float): Best exchange bid.
+            - 'ask' (float): Best exchange ask.
+            - 'mid' (float): Calculated midpoint.
+            - 'spread' (float): Bid-Ask spread width.
+            - 'spread_pct' (float): Spread as a percentage of mid.
+            - 'is_wide_spread' (bool): True if spread > $0.40 or spread_pct > 25%.
+            - 'spread_warning' (Optional[str]): Actionable warning text if spread is wide.
+            - 'contract_symbol' (str): OCC standardized contract symbol.
+            - 'expiry' (str): Expiration date 'YYYY-MM-DD'.
+            - 'actual_strike' (float): Resolved strike price.
+            - 'bid_size' (int): Available contracts on the bid.
+            - 'ask_size' (int): Available contracts on the ask.
+            - 'is_real_quote' (bool): True
+
+    Exceptions / Side Effects:
+        Makes HTTP requests to Alpaca Market Data and Paper APIs. Logs warnings on network failures.
+
+    Usage Example:
+        >>> quote = fetch_alpaca_option_quote("IBM", strike=210.0, option_type="put", dte=35)
+        >>> if quote and not quote["is_wide_spread"]:
+        ...     print(f"Staging at mid: ${quote['mid']:.2f}")
+    """
+    api_key = settings.ALPACA_API_KEY
+    secret_key = settings.ALPACA_SECRET_KEY
+    if not api_key or not secret_key:
+        return None
+
+    symbol_clean = normalize_canonical_ticker(symbol)
+    opt_type_lower = option_type.lower()
+    is_put = "put" in opt_type_lower or opt_type_lower == "p"
+    alpaca_type = "put" if is_put else "call"
+
+    headers = {
+        "APCA-API-KEY-ID": api_key,
+        "APCA-API-SECRET-KEY": secret_key,
+        "accept": "application/json"
+    }
+
+    now = datetime.now()
+    if target_date_str:
+        start_exp = target_date_str
+        end_exp = target_date_str
+    else:
+        # 28-42 DTE window (centered at 35 DTE)
+        start_exp = (now + timedelta(days=max(20, dte - 14))).strftime("%Y-%m-%d")
+        end_exp = (now + timedelta(days=dte + 20)).strftime("%Y-%m-%d")
+
+    url = "https://paper-api.alpaca.markets/v2/options/contracts"
+    params = {
+        "underlying_symbols": symbol_clean,
+        "status": "active",
+        "type": alpaca_type,
+        "expiration_date_gte": start_exp,
+        "expiration_date_lte": end_exp,
+        "limit": 100
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=5)
+        if resp.status_code != 200:
+            logger.debug(f"Alpaca contracts endpoint status {resp.status_code}: {resp.text}")
+            return None
+
+        contracts = resp.json().get("option_contracts", [])
+        if not contracts:
+            return None
+
+        # Group by expiration date
+        by_exp: Dict[str, list] = {}
+        for c in contracts:
+            by_exp.setdefault(c["expiration_date"], []).append(c)
+
+        # 1. Prioritize standard monthly third Friday (day 15-21 and weekday 4)
+        chosen_exp = None
+        for exp_str in sorted(by_exp.keys()):
+            try:
+                dt = datetime.strptime(exp_str, "%Y-%m-%d")
+                if dt.weekday() == 4 and 15 <= dt.day <= 21:
+                    chosen_exp = exp_str
+                    break
+            except Exception:
+                pass
+
+        # 2. Fallback to closest expiration to target dte
+        if not chosen_exp:
+            chosen_exp = min(
+                by_exp.keys(),
+                key=lambda e: abs((datetime.strptime(e, "%Y-%m-%d") - now).days - dte)
+            )
+
+        contracts_in_exp = by_exp[chosen_exp]
+        best_contract = min(
+            contracts_in_exp,
+            key=lambda c: abs(float(c.get("strike_price", 0.0)) - strike)
+        )
+        contract_sym = best_contract["symbol"]
+        actual_strike = float(best_contract.get("strike_price", strike))
+
+        # Query latest real-time indicative quote
+        q_url = "https://data.alpaca.markets/v1beta1/options/quotes/latest"
+        q_res = requests.get(q_url, headers=headers, params={"symbols": contract_sym, "feed": "indicative"}, timeout=5)
+        if q_res.status_code != 200:
+            return None
+
+        quote_data = q_res.json().get("quotes", {}).get(contract_sym, {})
+        bp = float(quote_data.get("bp", 0.0) or 0.0)
+        ap = float(quote_data.get("ap", 0.0) or 0.0)
+        bs = int(quote_data.get("bs", 0) or 0)
+        as_ = int(quote_data.get("as", 0) or 0)
+        t = quote_data.get("t")
+
+        if bp > 0 or ap > 0:
+            spread = round(max(0.0, ap - bp), 2)
+            mid = round((ap + bp) / 2.0, 2) if (bp > 0 and ap > 0) else max(bp, ap)
+            spread_pct = round((spread / mid) * 100.0, 1) if mid > 0 else 0.0
+            is_wide = bool(spread > 0.40 or (spread_pct > 25.0 and mid > 0.50))
+            spread_warn = f"WIDE SPREAD: ${spread:.2f} ({spread_pct:.1f}% of mid)" if is_wide else None
+
+            return {
+                "source": "ALPACA_LIVE",
+                "bid": bp,
+                "ask": ap,
+                "mid": mid,
+                "spread": spread,
+                "spread_pct": spread_pct,
+                "is_wide_spread": is_wide,
+                "spread_warning": spread_warn,
+                "contract_symbol": contract_sym,
+                "expiry": chosen_exp,
+                "actual_strike": actual_strike,
+                "bid_size": bs,
+                "ask_size": as_,
+                "quote_time": t,
+                "is_real_quote": True
+            }
+    except Exception as e:
+        logger.debug(f"fetch_alpaca_option_quote failed for {symbol}: {e}")
+
+    return None
+
+
 def fetch_option_market_quote(
     symbol: str,
     strike: float,
@@ -373,7 +537,7 @@ def fetch_option_market_quote(
 
     Returns:
         Dict[str, Any]: Live option quote payload containing:
-            - 'source' (str): 'SAXO_LIVE', 'OPRA_LIVE', or 'THEORETICAL_MODEL'.
+            - 'source' (str): 'SAXO_LIVE', 'ALPACA_LIVE', 'OPRA_LIVE', or 'THEORETICAL_MODEL'.
             - 'bid' (float): Best exchange bid price.
             - 'ask' (float): Best exchange ask price.
             - 'mid' (float): Midpoint quote (quantized to exchange tick size).
@@ -383,12 +547,12 @@ def fetch_option_market_quote(
             - 'is_real_quote' (bool): True if verified from real exchange stream.
 
     Exceptions / Side Effects:
-        Makes network calls to Saxo OpenAPI or yfinance OPRA feeds. Logs fallbacks.
+        Makes network calls to Saxo OpenAPI, Alpaca Options API, or yfinance OPRA feeds. Logs fallbacks.
 
     Usage Example:
         >>> quote = fetch_option_market_quote("NVDA", strike=115.0, option_type="put", dte=30)
         >>> print(quote["bid"], quote["ask"], quote["mid"], quote["source"])
-        2.40 2.60 2.50 OPRA_LIVE
+        2.40 2.60 2.50 ALPACA_LIVE
     """
     symbol_clean = normalize_canonical_ticker(symbol)
     opt_type_lower = option_type.lower()
@@ -419,20 +583,41 @@ def fetch_option_market_quote(
                         mid = round((bid + ask) / 2.0, 2) if (bid > 0 and ask > 0) else max(bid, ask)
                         if hasattr(saxo_client, "quantize_order_price"):
                             mid = saxo_client.quantize_order_price(mid, uic=uic, asset_type="StockOption")
+                        spread = round(max(0.0, ask - bid), 2)
+                        spread_pct = round((spread / mid) * 100.0, 1) if mid > 0 else 0.0
+                        is_wide = bool(spread > 0.40 or (spread_pct > 25.0 and mid > 0.50))
                         return {
                             "source": "SAXO_LIVE",
                             "bid": bid,
                             "ask": ask,
                             "mid": mid,
                             "last": float(quote.get("LastTraded", 0.0) or 0.0),
-                            "spread": round(max(0.0, ask - bid), 2),
+                            "spread": spread,
+                            "spread_pct": spread_pct,
+                            "is_wide_spread": is_wide,
+                            "spread_warning": f"WIDE SPREAD: ${spread:.2f} ({spread_pct:.1f}% of mid)" if is_wide else None,
                             "uic": uic,
                             "is_real_quote": True
                         }
         except Exception as e:
             logger.debug(f"Saxo infoprices non-critical fallback: {e}")
 
-    # 2. Secondary: Real-Time OPRA Exchange Option Chain (yfinance/OCC)
+    # 2. Secondary: Alpaca Options Indicative Live Feed (Authentic Exchange Order Book)
+    try:
+        alpaca_quote = fetch_alpaca_option_quote(symbol_clean, strike=strike, option_type=option_type, dte=dte)
+        if alpaca_quote and alpaca_quote.get("is_real_quote"):
+            mid = alpaca_quote["mid"]
+            if saxo_client and hasattr(saxo_client, "quantize_order_price"):
+                mid = saxo_client.quantize_order_price(mid, uic=uic, asset_type="StockOption")
+            else:
+                mid = round(round(mid / 0.05) * 0.05, 2)
+            alpaca_quote["mid"] = mid
+            alpaca_quote["uic"] = uic
+            return alpaca_quote
+    except Exception as e:
+        logger.debug(f"Alpaca option quote non-critical fallback: {e}")
+
+    # 3. Tertiary: Real-Time OPRA Exchange Option Chain (yfinance/OCC)
     try:
         ticker = yf.Ticker(symbol_clean)
         expiries = ticker.options

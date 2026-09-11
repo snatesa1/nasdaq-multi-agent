@@ -11,7 +11,8 @@ if _options_lab_dir not in sys.path:
     sys.path.insert(0, _options_lab_dir)
 
 from .saxo_client import SaxoClient, normalize_canonical_ticker
-from .margin_guardian import MarginGuardian
+from .margin_guardian import MarginGuardian, resolve_account_balances
+from .seasonality_engine import SeasonalityEngine
 from .trade_staging import TradeStagingEngine
 from .campaign_stitcher import CampaignStitcher
 from .universe import InstitutionalUniverseEngine, PRIMARY_GICS_SECTORS, normalize_gics_sector
@@ -161,6 +162,7 @@ class WeeklyIntelligenceEngine:
         self.trade_staging = trade_staging or TradeStagingEngine(saxo_client=self.saxo_client, margin_guardian=self.margin_guardian)
         self.campaign_stitcher = CampaignStitcher()
         self.universe_engine = InstitutionalUniverseEngine(saxo_client=self.saxo_client)
+        self.seasonality_engine = SeasonalityEngine()
         self.symbol_sector_map: Dict[str, str] = {}
         self.focus_pool: List[Dict[str, Any]] = []
         self._corpus_cache: Optional[List[Dict[str, Any]]] = None
@@ -262,7 +264,7 @@ class WeeklyIntelligenceEngine:
         strategy: str = "CSP",
         thesis: str = "",
         edge_source: str = "",
-        dte: int = 30,
+        dte: int = 35,
         risk_rating: int = 4,
         positions_list: Optional[List[Dict[str, Any]]] = None,
         margin_status: Optional[Dict[str, Any]] = None
@@ -325,10 +327,19 @@ class WeeklyIntelligenceEngine:
         else:
             step = 10.0
 
+        # Quantitative Seasonality, 52W IV/HV Rank & Earnings Blackout Assessment
+        seasonality_eval = self.seasonality_engine.evaluate_symbol_seasonality(
+            symbol=symbol,
+            current_spot=spot_price,
+            current_iv=volatility,
+            dte=dte
+        )
+        recommended_buffer_pct = seasonality_eval.get("recommended_otm_buffer_pct", 10.0)
+
         is_put = "CSP" in strategy.upper() or "PUT" in strategy.upper()
         if is_put:
-            # Target ~10% Out-Of-The-Money Put
-            raw_strike = spot_price * 0.90
+            # Dynamically tuned OTM Put based on Seasonality, IV Rank, and Earnings Shield
+            raw_strike = spot_price * (1.0 - (recommended_buffer_pct / 100.0))
             strike = round(raw_strike / step) * step
             if strike >= spot_price:
                 strike = spot_price - step
@@ -473,13 +484,23 @@ class WeeklyIntelligenceEngine:
             "precheck_margin_impact": precheck_impact,
             "edge_source": edge_source,
             "thesis": thesis,
+            "seasonality_bias": seasonality_eval.get("seasonality_bias", "NEUTRAL_SEASONAL"),
+            "seasonality_win_rate_pct": seasonality_eval.get("win_rate_pct", 50.0),
+            "seasonality_median_return_pct": seasonality_eval.get("median_return_pct", 0.0),
+            "worst_historical_drawdown_pct": seasonality_eval.get("worst_drawdown_pct", -10.0),
+            "iv_rank_pct": seasonality_eval.get("iv_rank_pct", 40.0),
+            "volatility_regime": seasonality_eval.get("volatility_regime", "ELEVATED_PREMIUM_SWEETSPOT"),
+            "has_earnings_blackout": seasonality_eval.get("has_earnings_blackout", False),
+            "next_earnings_date": seasonality_eval.get("next_earnings_date"),
+            "buffer_rationale": seasonality_eval.get("buffer_rationale", ""),
+            "recommended_otm_buffer_pct": recommended_buffer_pct,
             "margin_impact_pct": margin_eval.get("estimated_margin_impact", 1.5),
             "projected_total_margin_pct": margin_eval.get("projected_margin_util_pct", 8.0),
             "risk_rating": risk_rating,
             "safety_check": "PASSED" if margin_eval.get("is_valid", True) else "WARNING",
             "pillars": {
                 "watchlist_status": f"{sector} Pillar",
-                "trade_history_profile": f"Dynamic {strategy} setup with {volatility*100:.1f}% realized volatility",
+                "trade_history_profile": f"Dynamic {strategy} setup ({seasonality_eval.get('seasonality_bias')}) with {volatility*100:.1f}% realized vol (IV Rank: {seasonality_eval.get('iv_rank_pct')}%)",
                 "margin_status": "Within 15% Max Limit" if margin_eval.get("is_valid", True) else "Margin Constrained"
             }
         }
@@ -1018,7 +1039,7 @@ class WeeklyIntelligenceEngine:
                 strategy="CSP",
                 thesis=thesis,
                 edge_source=edge_source,
-                dte=30,
+                dte=35,
                 risk_rating=4,
                 positions_list=positions_list,
                 margin_status=margin_status
@@ -1030,42 +1051,78 @@ class WeeklyIntelligenceEngine:
                     potential_trades.append(cand)
                     staged_sectors[sec] = staged_sectors.get(sec, 0) + 1
 
-        # 🎯 $1,000/Month Systematic Wheel Harvest Filtering Constraint:
+        # 🎯 $1,000/Month Systematic Wheel Harvest Filtering & Cumulative Basket Risk Policy:
         # 1. Target Sweet Spot: strictly $2.00 to $3.00 ($200 to $300 per contract)
-        # 2. Select strictly 3 to 4 trade candidates with max sector balance
+        # 2. Enforce Cumulative Basket Collateral Cap: <= 50.0% of available cash (~$35,992 on $71,984 cash)
+        # 3. Enforce Cumulative Margin Cap: <= 15.0% of total account equity (~$15,328 on $102,192 equity)
+        # 4. Enforce Active Staged Trades Ceiling: strictly 3 to 4 trades max with cross-sector diversification
         sweet_spot_trades = [t for t in potential_trades if 2.00 <= t.get("premium_estimate", 0.0) <= 3.00]
         other_valid_trades = [t for t in potential_trades if t not in sweet_spot_trades]
 
-        # Sort sweet-spot trades by proximity to the $2.50 center, followed by outer band
+        # Prioritize sweet-spot trades closest to $2.50 center, followed by outer band
         sorted_candidates = sorted(sweet_spot_trades, key=lambda t: abs(t.get("premium_estimate", 0.0) - 2.50)) + \
                             sorted(other_valid_trades, key=lambda t: abs(t.get("premium_estimate", 0.0) - 2.50))
 
-        wheel_candidates = []
+        active_staged = []
+        bench_candidates = []
         selected_sectors = set()
+
         for cand in sorted_candidates:
-            if len(wheel_candidates) >= 4:
-                break
+            if len(active_staged) >= 4:
+                cand["status"] = "BENCH_RESERVE"
+                bench_candidates.append(cand)
+                continue
+
             sec = cand.get("sector")
-            if sec not in selected_sectors or len(selected_sectors) >= len(sorted_candidates):
-                wheel_candidates.append(cand)
+            # Prefer 1 trade per sector initially unless candidate pool is limited
+            if sec in selected_sectors and len(selected_sectors) < min(3, len(sorted_candidates)):
+                cand["status"] = "BENCH_RESERVE"
+                bench_candidates.append(cand)
+                continue
+
+            # Audit cumulative basket risk (<= 50% available cash, <= 15% margin)
+            basket_audit = self.margin_guardian.validate_cumulative_basket(
+                staged_candidates=active_staged,
+                new_candidate=cand,
+                current_status=margin_status
+            )
+            if basket_audit["approved"]:
+                active_staged.append(cand)
                 selected_sectors.add(sec)
+            else:
+                cand["status"] = "BENCH_RESERVE"
+                cand["rejection_reason"] = basket_audit.get("reasons", ["Cumulative basket limit exceeded"])[0]
+                bench_candidates.append(cand)
 
-        # Ensure we have at least 3 candidates if available in the pool
-        if len(wheel_candidates) < 3 and sorted_candidates:
-            for cand in sorted_candidates:
-                if cand not in wheel_candidates:
-                    wheel_candidates.append(cand)
-                    if len(wheel_candidates) >= 3:
-                        break
+        # If sector constraint resulted in fewer than 3 trades, fill from bench candidates that fit within limits
+        if len(active_staged) < 3 and bench_candidates:
+            for cand in list(bench_candidates):
+                if len(active_staged) >= 3:
+                    break
+                basket_audit = self.margin_guardian.validate_cumulative_basket(
+                    staged_candidates=active_staged,
+                    new_candidate=cand,
+                    current_status=margin_status
+                )
+                if basket_audit["approved"]:
+                    cand["status"] = "PROPOSED"
+                    active_staged.append(cand)
+                    bench_candidates.remove(cand)
 
-        # Fallback to potential_trades if wheel_candidates is empty
-        final_selection = wheel_candidates if wheel_candidates else potential_trades[:4]
-
-        # Stage the selected 3-4 trades into DB for user approval
+        # Stage the selected 3-4 active trades into DB as PROPOSED for user approval
         staged_trades = []
-        for trade in final_selection:
+        for trade in active_staged:
+            trade["status"] = "PROPOSED"
             staged = self.trade_staging.stage_recommendation(trade, week_label=week_label)
             staged_trades.append(staged)
+
+        # Stage reserve candidates as BENCH_RESERVE for transparency
+        for trade in bench_candidates[:4]:
+            trade["status"] = "BENCH_RESERVE"
+            try:
+                self.trade_staging.stage_recommendation(trade, week_label=week_label)
+            except Exception:
+                pass
 
         return staged_trades
 
@@ -1215,103 +1272,7 @@ class WeeklyIntelligenceEngine:
             >>> print(balances['balance_source'], balances['total_equity'], balances['is_simulated'])
             HISTORICAL_REPORT 102192.51 False
         """
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        # ── Tier 1: Live Saxo OpenAPI ─────────────────────────────────────────
-        try:
-            if self.saxo_client:
-                live_bal = self.saxo_client.get_account_balances()
-                if live_bal and isinstance(live_bal, dict):
-                    equity = float(live_bal.get("total_equity") or live_bal.get("TotalEquity") or 0.0)
-                    cash = float(live_bal.get("cash_available") or live_bal.get("CashAvailable") or 0.0)
-                    if equity > 0.0:
-                        database.set_saxo_cache("account_summary", live_bal)
-                        return {
-                            "total_equity": round(equity, 2),
-                            "cash_available": round(cash if cash > 0.0 else equity * 0.70, 2),
-                            "balance_source": "LIVE_BROKER",
-                            "is_simulated": False,
-                            "account_id": str(live_bal.get("account_id", "SAXO-LIVE")),
-                            "currency": str(live_bal.get("currency", "USD")),
-                            "as_of": now_iso,
-                            "details": "Real-time authentic Saxo OpenAPI balance feed (/port/v1/balances/me)."
-                        }
-        except Exception as e:
-            logger.debug(f"Tier 1 (Live Saxo OpenAPI) unavailable: {e}")
-
-        # ── Tier 2: SQLite Persistent Cache (account_summary / balances) ──────
-        try:
-            cached_bal = database.get_saxo_cache("account_summary") or database.get_saxo_cache("balances")
-            if cached_bal and isinstance(cached_bal, dict):
-                equity = float(cached_bal.get("total_equity") or cached_bal.get("TotalEquity") or 0.0)
-                cash = float(cached_bal.get("cash_available") or cached_bal.get("CashAvailable") or 0.0)
-                if equity > 0.0:
-                    return {
-                        "total_equity": round(equity, 2),
-                        "cash_available": round(cash if cash > 0.0 else equity * 0.70, 2),
-                        "balance_source": "CACHED_BROKER",
-                        "is_simulated": False,
-                        "account_id": str(cached_bal.get("account_id", "SAXO-CACHED")),
-                        "currency": str(cached_bal.get("currency", "USD")),
-                        "as_of": str(cached_bal.get("updated_at", now_iso)),
-                        "details": "Persistent SQLite broker cache from prior authenticated session."
-                    }
-        except Exception as e:
-            logger.debug(f"Tier 2 (SQLite Persistent Cache) unavailable: {e}")
-
-        # ── Tier 3: Authentic Ingested Statement Report (saxo_reports) ────────
-        try:
-            report = database.get_latest_saxo_report()
-            if report and isinstance(report, dict):
-                final_val = float(report.get("final_value") or 0.0)
-                cash_val = float(report.get("cash_balance") or 0.0)
-                if final_val > 0.0:
-                    return {
-                        "total_equity": round(final_val, 2),
-                        "cash_available": round(cash_val if cash_val > 0.0 else final_val * 0.70, 2),
-                        "balance_source": "HISTORICAL_REPORT",
-                        "is_simulated": False,
-                        "account_id": str(report.get("account_id", "REP-STATEMENT")),
-                        "currency": str(report.get("currency", "USD")),
-                        "as_of": str(report.get("to_date") or report.get("created_at", now_iso)),
-                        "details": f"Authentic Saxo account statement ({report.get('report_id', 'REP')}) for {report.get('client_name', 'Client')}."
-                    }
-        except Exception as e:
-            logger.debug(f"Tier 3 (Authentic Statement Report) unavailable: {e}")
-
-        # ── Tier 4: Recorded Portfolio Holdings Valuation ─────────────────────
-        try:
-            holdings_val = database.get_portfolio_holdings_valuation()
-            tot_h_val = float(holdings_val.get("total_holdings_value") or 0.0)
-            if tot_h_val > 0.0:
-                est_equity = tot_h_val * 2.0
-                est_cash = tot_h_val
-                return {
-                    "total_equity": round(est_equity, 2),
-                    "cash_available": round(est_cash, 2),
-                    "balance_source": "PORTFOLIO_HOLDINGS",
-                    "is_simulated": False,
-                    "account_id": "PORTFOLIO-LOCAL",
-                    "currency": "USD",
-                    "as_of": now_iso,
-                    "details": f"Derived from {holdings_val.get('positions_count', 0)} recorded portfolio holdings (${tot_h_val:,.2f} equity)."
-                }
-        except Exception as e:
-            logger.debug(f"Tier 4 (Holdings Valuation) unavailable: {e}")
-
-        # ── Tier 5: Configurable Simulation Benchmark Reference Model ─────────
-        default_equity = float(os.getenv("DEFAULT_PORTFOLIO_EQUITY", "100000.0"))
-        default_cash = float(os.getenv("DEFAULT_PORTFOLIO_CASH", "70000.0"))
-        return {
-            "total_equity": round(default_equity, 2),
-            "cash_available": round(default_cash, 2),
-            "balance_source": "SIMULATED_BENCHMARK",
-            "is_simulated": True,
-            "account_id": "BENCHMARK-100K",
-            "currency": "USD",
-            "as_of": now_iso,
-            "details": "Standardized $100,000 reference model. Connect live Saxo OpenAPI to calibrate to authentic funds."
-        }
+        return resolve_account_balances(self.saxo_client)
 
     def calculate_capital_allocation_scenarios(
         self,
@@ -1687,6 +1648,8 @@ The macro landscape for **{current_date_str}** reflects steady equity consolidat
             if staged_trades else 0.0
         )
         total_collateral = sum(t.get("collateral_required", 0.0) for t in staged_trades)
+        max_allowed_collat = round(margin_status.get("max_allowed_collateral", account_balances["cash_available"] * 0.50), 2)
+        collat_util_pct = round((total_collateral / account_balances["cash_available"] * 100.0), 1) if account_balances.get("cash_available") else 0.0
 
         wheel_harvest_blotter = {
             "monthly_harvest_target": 1000.0,
@@ -1696,6 +1659,9 @@ The macro landscape for **{current_date_str}** reflects steady equity consolidat
             "target_achievement_pct": round((total_monthly_harvest_dollars / 1000.0) * 100.0, 1) if total_monthly_harvest_dollars else 0.0,
             "average_pop_percent": avg_pop,
             "total_collateral_required": total_collateral,
+            "cash_collateral_cap_dollars": max_allowed_collat,
+            "cash_collateral_utilization_pct": collat_util_pct,
+            "is_within_collateral_cap": total_collateral <= max_allowed_collat,
             "candidates": staged_trades
         }
 

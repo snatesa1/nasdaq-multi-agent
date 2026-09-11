@@ -51,8 +51,9 @@ class WheelEngine:
     MAX_PORTFOLIO_ALLOCATION_PCT = 0.05   # 5% max capital per underlying
     PROFIT_TARGET_PCT = 0.50             # 50% profit-taking target
     GAMMA_DTE_THRESHOLD = 21             # 21 DTE roll threshold
-    TARGET_ENTRY_DTE = 30                # Strict 30 DTE baseline target
-    MAX_ENTRY_DTE = 32                   # Strict 32 DTE hard maximum ceiling
+    MIN_ENTRY_DTE = 28                   # Hard floor: 28 DTE minimum (no illiquid weeklies / immediate gamma)
+    TARGET_ENTRY_DTE = 35                # Standard monthly baseline target (~35 DTE)
+    MAX_ENTRY_DTE = 42                   # 42 DTE hard maximum ceiling
     EARNINGS_BUFFER_DAYS = 7             # Exclude expiries +-7 days from earnings
 
     def __init__(self):
@@ -167,15 +168,15 @@ class WheelEngine:
         if signal_score < 0.55:
             violations.append(f"Signal score ({signal_score:.2f}) is below minimum threshold (0.55).")
 
-        # 4. Strict 30-32 DTE check (No 35+ DTE allowed)
+        # 4. Standard 28-42 DTE check (Hard 28 DTE floor to avoid illiquid weeklies and gamma cliff)
         if proposed_dte is not None:
             if proposed_dte > self.MAX_ENTRY_DTE:
                 violations.append(
-                    f"Proposed DTE ({proposed_dte}d) exceeds strict maximum {self.MAX_ENTRY_DTE} DTE threshold (allowed 30-32 DTE)."
+                    f"Proposed DTE ({proposed_dte}d) exceeds maximum {self.MAX_ENTRY_DTE} DTE threshold (allowed 28-42 DTE)."
                 )
-            elif proposed_dte < self.GAMMA_DTE_THRESHOLD:
+            elif proposed_dte < self.MIN_ENTRY_DTE:
                 violations.append(
-                    f"Proposed DTE ({proposed_dte}d) violates minimum {self.GAMMA_DTE_THRESHOLD} DTE Gamma threshold."
+                    f"Proposed DTE ({proposed_dte}d) violates minimum {self.MIN_ENTRY_DTE} DTE floor (preventing illiquid weekly cycles and gamma cliff)."
                 )
 
         # 5. Covered Call strike safety
