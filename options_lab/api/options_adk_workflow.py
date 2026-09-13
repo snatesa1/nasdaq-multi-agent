@@ -246,12 +246,14 @@ def fundamental_conviction_node(state: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-@node(name="options_greeks_pricing", timeout=30.0)
+@node(name="options_greeks_pricing", timeout=20.0)
 def options_greeks_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Tier 2C Node: Computes 30-DTE Out-of-The-Money strike, Black-Scholes pricing, and Greeks.
+    Optimized with fast analytical Black-Scholes baseline and bounded worker timeouts.
     """
     tech_data = state.get("tech_data", {})
+    saxo_client = state.get("saxo_client")
     options_data: Dict[str, Dict[str, Any]] = {}
 
     def _fetch_opt_worker(sym: str, t: Dict[str, Any]):
@@ -264,27 +266,34 @@ def options_greeks_node(state: Dict[str, Any]) -> Dict[str, Any]:
             if strike >= spot:
                 strike = spot - step
 
-            # Fetch authentic live market quote (Saxo OpenAPI -> OPRA Option Chain)
-            quote = fetch_option_market_quote(sym, strike=strike, option_type="put", dte=30)
-            bid = quote.get("bid", 0.0)
-            ask = quote.get("ask", 0.0)
-            mid = quote.get("mid", 0.0)
-            spread = quote.get("spread", 0.0)
-            source = quote.get("source", "OPRA_LIVE")
+            # Pre-compute analytical Black-Scholes baseline immediately
+            T = 30.0 / 365.0
+            r = 0.045
+            bs_premium = black_scholes_price(S=spot, K=strike, T=T, r=r, sigma=vol, option_type="put")
+            bs_premium = max(0.25, round(round(bs_premium / 0.05) * 0.05, 2))
 
-            if quote.get("is_real_quote") and mid > 0:
-                premium = mid
+            # Attempt fast market quote with quick failover
+            quote = None
+            try:
+                quote = fetch_option_market_quote(sym, strike=strike, option_type="put", dte=30, saxo_client=saxo_client)
+            except Exception as e_q:
+                logger.debug(f"Option quote query non-critical for {sym}: {e_q}")
+
+            if quote and quote.get("is_real_quote") and quote.get("mid", 0.0) > 0:
+                premium = quote["mid"]
+                bid = quote.get("bid", 0.0)
+                ask = quote.get("ask", 0.0)
+                spread = quote.get("spread", 0.0)
+                source = quote.get("source", "OPRA_LIVE")
                 if quote.get("implied_volatility") and quote["implied_volatility"] > 0:
                     vol = quote["implied_volatility"]
             else:
-                T = 30.0 / 365.0
-                r = 0.045
-                premium = black_scholes_price(S=spot, K=strike, T=T, r=r, sigma=vol, option_type="put")
-                premium = max(0.25, round(round(premium / 0.05) * 0.05, 2))
+                premium = bs_premium
+                bid = max(0.05, round(bs_premium - 0.05, 2))
+                ask = round(bs_premium + 0.05, 2)
+                spread = round(ask - bid, 2)
                 source = "THEORETICAL_BS_MODEL"
 
-            T = 30.0 / 365.0
-            r = 0.045
             greeks = black_scholes_greeks(S=spot, K=strike, T=T, r=r, sigma=vol, option_type="put")
             delta = round(greeks.get("delta", -0.20), 2)
             annualized_roc = round((premium / strike) * (365.0 / 30.0) * 100.0, 1) if strike > 0 else 0.0
@@ -304,15 +313,17 @@ def options_greeks_node(state: Dict[str, Any]) -> Dict[str, Any]:
             logger.warning(f"Option worker error for {sym}: {err}")
             return sym, None
 
+    # Focus on top 8 candidates to eliminate redundant Alpaca chain queries
+    top_candidates = list(tech_data.items())[:8]
     with ThreadPoolExecutor(max_workers=6) as executor:
-        futures = [executor.submit(_fetch_opt_worker, sym, t) for sym, t in tech_data.items()]
+        futures = [executor.submit(_fetch_opt_worker, sym, t) for sym, t in top_candidates]
         for f in as_completed(futures):
             try:
-                res = f.result(timeout=6.0)
+                res = f.result(timeout=3.0)
                 if res and res[1]:
                     options_data[res[0]] = res[1]
             except Exception as e:
-                logger.warning(f"Parallel option worker non-critical: {e}")
+                logger.debug(f"Parallel option worker non-critical: {e}")
 
     return {
         **state,

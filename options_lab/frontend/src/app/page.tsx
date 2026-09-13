@@ -643,7 +643,7 @@ export default function Dashboard() {
                           <span className={`inline-flex items-center text-[10px] font-bold px-1.5 py-0.5 rounded ${
                             side === 'Long' ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
                           }`}>
-                            {side}
+                            {isOption ? (amt < 0 ? 'Short (Sell)' : 'Long (Buy)') : side}
                           </span>
                         </td>
                         <td className="py-3 px-3 text-right font-mono font-bold text-slate-800">

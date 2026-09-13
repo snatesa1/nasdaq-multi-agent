@@ -246,7 +246,7 @@ export const optionsApi = {
   checkHandshake: (timeoutMs: number = 3000) => checkBackendHandshake(timeoutMs),
 
   // ── Weekly Intelligence & Trade Approval ─────────────────────────────────
-  getWeeklyBriefing: (weekLabel?: string, forceRefresh?: boolean, timeoutMs: number = 40000) => {
+  getWeeklyBriefing: (weekLabel?: string, forceRefresh?: boolean, timeoutMs: number = 75000) => {
     const params = new URLSearchParams();
     if (weekLabel) params.append('week_label', weekLabel);
     if (forceRefresh) params.append('force_refresh', 'true');

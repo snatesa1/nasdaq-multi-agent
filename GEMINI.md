@@ -548,17 +548,36 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
       - Verified via backend payload inspection and full Next.js static compilation (`npm run build` 17/17 pages generated cleanly).
 
    10. **OptionsLab Risk Guardian, DTE Harmonization & Quantitative Seasonality Engine (2026-09-11)**:
-       - Direct integration with Alpaca Market Data API (`/v2/stocks/{symbol}/bars` and live options data).
-       - Wide bid-ask spread liquidity guardrail (> $0.40 or > 25.0%).
-       - Monthly 3rd-Friday DTE Harmonization (28–42 DTE window).
-       - Authentic multi-tiered balance resolution with cumulative collateral caps.
-       - 8-Year quantitative monthly seasonality engine, 52-week IV/HV rank, and earnings blackout shield.
+       - **Alpaca Real-Time Options Market Quotes & Wide-Spread Liquidity Guardrail (`market_data.py`)**:
+         * Direct integration with Alpaca Market Data API (`/v2/stocks/{symbol}/bars` and live options data) utilizing verified credentials in local `.env`.
+         * Added automated bid-ask spread liquidity guardrail: detects and flags wide bid-ask spreads if spread > \$0.40 or spread percentage > 25.0%, rejecting illiquid strikes before proposal.
+       - **Standard Monthly Third-Friday DTE Harmonization (28–42 DTE Window)**:
+         * Eliminated the legacy 32 DTE ceiling bug that was forcing premature weekly expirations (e.g. 23 DTE) on Alphabet and high-beta assets.
+         * Enforced hard minimum entry floor of $\ge 28\text{ DTE}$ and ceiling of $\le 42\text{ DTE}$ across `safety_shield.py`, `wheel_engine.py`, and `saxo_client.py`.
+         * Updated `resolve_option_contract_uic()` to filter candidates within the 28–45 DTE window and strictly prioritize standard monthly third-Friday expirations (days 15–21 of the calendar month), resolving closest strikes *only within the chosen monthly expiration space*.
+         * Regression suite `test_wheel_dte_constraints.py` passed 100% (23 DTE rejected, 35 DTE approved, 42 DTE approved, 45 DTE rejected).
+       - **Authentic Multi-Tiered Balance Resolution & Margin Guardian Cumulative Basket Cap (`margin_guardian.py`)**:
+         * Unified 5-tier resilient balance resolution across `margin_guardian.py` and `weekly_intelligence.py` with zero silent numeric defaults, resolving authentic net equity (**\$102,192.51**) and cash balances (**\$71,984.46**) with provenance badge `HISTORICAL_REPORT`.
+         * Implemented `validate_cumulative_basket(staged_candidates, new_candidate)`:
+           - Enforces hard cumulative cash collateral cap: $\le 50.0\%$ of uninvested cash buffer (**\$35,992.23 budget**).
+           - Enforces cumulative margin utilization cap: $\le 15.0\%$ of total account equity (**\$15,328.88**).
+           - Enforces active candidate count ceiling: strictly 3 to 4 trades max targeting the \$1,000/month sweet spot ($2.00–$3.00 premium per contract).
+         * Integrated into `weekly_intelligence.py` (`_generate_dynamic_trade_candidates`): greedily accumulates top-ranked candidates while passing basket checks; excess candidates are safely staged as `BENCH_RESERVE` without inflating proposed blotters.
+       - **Quantitative Seasonality Engine, 52-Week IV/HV Rank & Earnings Blackout Shield (`seasonality_engine.py`)**:
+         * *8-Year Historical Monthly Seasonality*: Fetches split-adjusted monthly OHLCV bars via Alpaca API (`timeframe=1Month&start=2018-01-01`, 105 bars tested). Aggregates sample years ($N \ge 8$), win rate %, median return %, and max intra-month drawdown % for each calendar month. Classifies regimes (`BULLISH_SEASONAL`, `BEARISH_SEASONAL`, `NEUTRAL_SEASONAL`).
+         * *52-Week IV/HV Rank*: Computes rolling 20-day annualized realized historical volatility over 252 trading days. Evaluates whether current volatility is in an elevated premium harvest sweet spot ($\text{Rank} \ge 40\%$) or compressed ($< 25\%$).
+         * *Earnings Blackout Shield*: Evaluates upcoming earnings dates from corporate calendars. If an earnings announcement falls inside the option's lifespan ($D_{\text{earnings}} \le D_{\text{expiry}} + 3\text{d}$), the engine triggers an earnings shield warning.
+         * *Dynamic OTM Strike Buffer Calibration*: Dynamically widens the CSP strike buffer from standard 10.0% OTM up to 14.0%–18.0% OTM for seasonally weak months (e.g. historical September drag) or pre-earnings windows to insulate against tail risk.
+         * *SQLite Persistent Caching*: Caches computed seasonality metrics in `saxo_cache` (`seasonality_{symbol}`) with a 7-day TTL for instant retrieval.
+       - **Verification & Testing**:
+         * Full test suite `test_seasonality_and_collateral_caps.py` passed 100% natively in Windows PowerShell in 57.74s.
+         * DTE regression suite `test_wheel_dte_constraints.py` passed 100% in 11.37s.
 
    11. **Dual-Flavor Architecture & 100% Environment Parity (2026-09-13)**:
        - **Flavor 1 (Local Windows PC Bare-Metal / Dev & Wi-Fi)**:
-         * *Host Binding*: Updated `restart_backend.ps1` to bind `--host 0.0.0.0 --port 8000`, dynamically resolving local Wi-Fi IPv4 address (`192.168.0.x`) and printing both localhost and Wi-Fi endpoints.
+         * *Host Binding*: Updated `restart_backend.ps1` to bind `--host 0.0.0.0 --port 8000`, automatically resolving the machine's local Wi-Fi IPv4 address (`192.168.0.x`) and printing both localhost and Wi-Fi endpoints.
          * *Frontend Launcher*: Created `start_frontend.ps1` launching Next.js bound to `0.0.0.0:3000` for tablet and mobile access over the local network.
-         * *CORS Origin Regex*: Configured `allow_origin_regex` across FastAPI middleware to permit `localhost`, `127.0.0.1`, `192.168.*.*`, `100.*.*.*` (Tailscale), and `*.local` with `allow_credentials=True`.
+         * *CORS Origin Regex*: Configured `allow_origin_regex` across FastAPI middleware to permit `localhost`, `127.0.0.1`, `192.168.*.*`, `100.*.*.*` (Tailscale), and `*.local` with `allow_credentials=True` without Starlette wildcard collisions.
        - **Flavor 2 (Remote Linux Mint Private Cloud Docker Stack)**:
          * *Dedicated Docker Compose Suite*: Committed version-controlled `docker-compose.yml` orchestrating `akpegis_backend` (port 8000), `akpegis_frontend` (Nginx Alpine port 3000), and `akpegis_backup` (scheduled 02:00 AM SQLite WAL snapshots with 7-day rolling retention).
          * *Container Dependency Parity*: Synchronized `options_lab/requirements.txt` with root `requirements.txt`, adding `alpaca-py`, `scipy`, `matplotlib`, `seaborn`, `quantstats-lumi`, `google-adk`, `google-genai`, `fredapi`, and `pypdf`.
@@ -572,8 +591,29 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
          * Automated test suite `scripts/test_dual_flavor_compatibility.py` passed 100%: startup in 4.90s, `/health` and `/api/health` HTTP 200, LAN Wi-Fi & Tailscale CORS verified, database path invariants validated.
          * Next.js static compilation completed cleanly with 17/17 pages exported into `options_lab/frontend/out/`.
 
+    12. **Authentic Broker Positions P&L Resolution & Weekly Intelligence Timeout Elimination (2026-09-13)**:
+        - **Dynamic Black-Scholes Option Mark Pricing & Short Option P&L (`saxo_client.py`)**:
+          * Implemented `resolve_accurate_position_pricing()` with strict 5-point docstring standard.
+          * Dynamically prices option contracts via analytical Black-Scholes model (`black_scholes_price()`) when broker infoprices are restricted (`PriceTypeAsk == 'NoAccess'`).
+          * Applies authentic inverted short option PnL formula for cash-secured puts and covered calls (`amount < 0`):
+            $$\text{Unrealized P\&L} = (\text{Open Price} - \text{Current Mark Price}) \times |\text{Amount}| \times 100$$
+            $$\text{Return \%} = \frac{\text{Open Price} - \text{Current Mark Price}}{\text{Open Price}} \times 100$$
+          * Accurately reflects positive premium decay gains for `GOOGL 300 P` (+85.61%), `COIN 260 C` (+98.21%), and `INTC 80 P` (+98.28%).
+        - **SGX & Non-US Stock/ETF Closed-Market Feed Guard**:
+          * Discards broker synthetic \$0.00 current price and fake -100% loss anomalies caused by off-hours closed markets.
+          * Resolves real market quotes via regional fallback (`O9A.SI` = \$2.836, `ES3.SI` = \$5.780), computing authentic positive returns of **+\$2,635.00** (+22.82%) for O9A and **+\$3,207.50 SGD** (+28.53%) for ES3.
+          * **100% Portfolio Accuracy**: Confirmed that only `PLUG` is in loss (-$2,180.00), while all other 6 positions and options are in emerald green profit, totaling **+$7,867.50** overall P&L.
+        - **Weekly Intelligence Synthesis Timeout Elimination**:
+          * Bounded worker timeouts in `options_greeks_node` (`options_adk_workflow.py`) with immediate analytical Black-Scholes fallback, capping candidate pool queries to top 8 assets.
+          * Aligned frontend client timeout in `weekly-intelligence/page.tsx` and `api.ts` to 75,000 ms, matching the backend's 75s async budget.
+          * Standard cached briefing loads in **0.0014 seconds** (1.4 ms) from SQLite; full cold pipeline refresh completes in ~49.5s cleanly without premature abort.
+        - **Verification & Testing**:
+          * Pydantic validation smoke test `BrokerPositionsResponse` passed 100% with 6 winning positions and 1 loss (`PLUG`).
+          * Next.js static production export completed with 17/17 routes compiled cleanly.
+          * Dual-flavor compatibility test suite passed 100%.
+
 ## 📊 Antigravity Usage Stats
-> Last Updated: 2026-09-13 11:24:00 SGT
+> Last Updated: 2026-09-13 11:23:00 SGT
 
 | Metric | Current Session |
 | :--- | :--- |

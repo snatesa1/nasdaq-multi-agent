@@ -301,7 +301,7 @@ export default function WeeklyIntelligencePage() {
     }
 
     try {
-      const data = await optionsApi.getWeeklyBriefing(undefined, forceRefresh, 35000);
+      const data = await optionsApi.getWeeklyBriefing(undefined, forceRefresh, 75000);
       setBriefing(data);
       const nowStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
       setLastRefreshedAt(nowStr);
@@ -322,7 +322,7 @@ export default function WeeklyIntelligencePage() {
         setHandshakeError(`Connection dropped: OptionsLab backend server on ${targetHost} became unreachable.`);
         setError(`🔌 Backend Handshake Disconnected: Unable to reach ${targetHost}.`);
       } else if (isTimeout) {
-        setError('⏳ Synthesis Timed Out: The background engine took longer than 35s. Please click "Refresh Intelligence" to retry.');
+        setError('⏳ Synthesis Timed Out: The background engine took longer than 75s. Please click "Refresh Intelligence" to retry.');
       } else {
         setError(err.message || 'Failed to generate weekly macro intelligence briefing.');
       }

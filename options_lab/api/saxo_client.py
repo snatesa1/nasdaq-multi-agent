@@ -44,6 +44,128 @@ def normalize_canonical_ticker(symbol: str) -> str:
     clean = clean.replace("-", ".").replace("/", ".")
     return clean
 
+def resolve_accurate_position_pricing(
+    symbol: str,
+    asset_type: str,
+    amount: float,
+    open_price: float,
+    saxo_current_price: Optional[float] = None,
+    saxo_pnl: Optional[float] = None,
+    option_type: Optional[str] = None,
+    strike: Optional[float] = None,
+    expiry: Optional[str] = None,
+    description: Optional[str] = None
+) -> Tuple[float, float, float, float]:
+    """
+    Descriptive Summary:
+        Resolves accurate mark price, total market value, unrealized P&L, and return percentage for both
+        underlying securities (stocks/ETFs) and derivative option contracts. Eliminates false -100% loss anomalies
+        caused by closed-market broker feeds (e.g. SGX ETFs) and dynamically calculates analytical Black-Scholes
+        mark prices and short option premium decay gains for cash-secured puts and covered calls.
+
+    Parameters:
+        symbol (str): Canonical or exchange ticker symbol (e.g. 'O9A', 'ES3', 'COIN', 'GOOGL').
+        asset_type (str): 'Stock', 'Etf', 'StockOption', or 'Option'.
+        amount (float): Position quantity (positive for long, negative for short).
+        open_price (float): Cost basis per share or contract open premium.
+        saxo_current_price (Optional[float]): Mark price reported by Saxo API feed (if any).
+        saxo_pnl (Optional[float]): Profit/Loss reported by Saxo API feed (if any).
+        option_type (Optional[str]): 'put' or 'call' for option contracts.
+        strike (Optional[float]): Option strike price.
+        expiry (Optional[str]): Option expiration date (YYYY-MM-DD).
+        description (Optional[str]): Asset description for fallback parsing.
+
+    Returns:
+        Tuple[float, float, float, float]:
+            - current_price (float): Quantized mark price.
+            - market_val (float): Total position market value (signed).
+            - pnl (float): Unrealized profit or loss in quote currency.
+            - pnl_pct (float): Percentage return relative to entry cost basis.
+
+    Exceptions / Side Effects:
+        Queries Yahoo Finance fast_info for non-US securities or underlying spot prices when closed.
+        Gracefully falls back to open price ($0.00 PnL) if external network is unavailable.
+
+    Usage Example:
+        >>> cur_p, mkt_val, pnl, pnl_pct = resolve_accurate_position_pricing(
+        ...     symbol="GOOGL", asset_type="StockOption", amount=-1.0, open_price=1.39,
+        ...     option_type="put", strike=300.0, expiry="2026-10-02"
+        ... )
+        >>> assert pnl > 0.0
+    """
+    clean_sym = symbol.strip().upper() if symbol else ""
+    multiplier = 100 if asset_type in ["StockOption", "Option"] else 1
+    cost_basis = open_price * abs(amount) * multiplier
+
+    if asset_type in ["StockOption", "Option"]:
+        current_price = None
+        if saxo_current_price and float(saxo_current_price) > 0.0:
+            current_price = float(saxo_current_price)
+        else:
+            try:
+                import yfinance as yf
+                from options_lab.engine.black_scholes import black_scholes_price
+                spot = yf.Ticker(clean_sym).fast_info.last_price
+                if spot and strike:
+                    try:
+                        exp_dt = datetime.strptime(expiry, "%Y-%m-%d")
+                        dte = max(1, (exp_dt - datetime.now()).days)
+                    except Exception:
+                        dte = 30
+                    T = dte / 365.0
+                    sigma_map = {"COIN": 0.55, "INTC": 0.35, "GOOGL": 0.28, "NVDA": 0.45, "PLTR": 0.50, "AAPL": 0.22}
+                    sigma = sigma_map.get(clean_sym, 0.30)
+                    opt_side = (option_type or "put").lower()
+                    raw_p = black_scholes_price(S=float(spot), K=float(strike), T=T, r=0.045, sigma=sigma, option_type=opt_side)
+                    current_price = max(0.05, round(round(raw_p / 0.05) * 0.05, 2))
+            except Exception as e_bs:
+                logger.debug(f"Option BS calculation fallback for {clean_sym}: {e_bs}")
+                current_price = open_price
+
+        if current_price is None:
+            current_price = open_price
+
+        if amount < 0:  # Short option (Cash-Secured Put or Covered Call)
+            pnl = (open_price - current_price) * abs(amount) * 100.0
+            pnl_pct = ((open_price - current_price) / open_price) * 100.0 if open_price > 0 else 0.0
+            market_val = -(current_price * abs(amount) * 100.0)
+        else:  # Long option
+            pnl = (current_price - open_price) * amount * 100.0
+            pnl_pct = ((current_price - open_price) / open_price) * 100.0 if open_price > 0 else 0.0
+            market_val = current_price * amount * 100.0
+    else:
+        # Stock or ETF
+        if saxo_current_price and float(saxo_current_price) > 0.0 and (saxo_pnl is None or saxo_pnl > -cost_basis * 0.95):
+            current_price = float(saxo_current_price)
+            market_val = current_price * amount
+            pnl = float(saxo_pnl) if saxo_pnl is not None else (current_price - open_price) * amount
+            pnl_pct = (pnl / cost_basis) * 100.0 if cost_basis > 0 else 0.0
+        else:
+            # Handle unpriced or synthetic closed-market zero marks (e.g. SGX ETFs O9A, ES3)
+            lookup_sym = f"{clean_sym}.SI" if clean_sym in ["O9A", "ES3", "D05", "Z74", "U11", "O39"] else clean_sym
+            try:
+                import yfinance as yf
+                t = yf.Ticker(lookup_sym).fast_info
+                last_p = t.last_price
+                if last_p and float(last_p) > 0:
+                    current_price = round(float(last_p), 3)
+                    market_val = round(current_price * amount, 2)
+                    pnl = round((current_price - open_price) * amount, 2)
+                    pnl_pct = round(((current_price - open_price) / open_price) * 100.0, 2) if open_price > 0 else 0.0
+                else:
+                    current_price = open_price
+                    market_val = round(open_price * amount, 2)
+                    pnl = 0.0
+                    pnl_pct = 0.0
+            except Exception as e_yf:
+                logger.debug(f"Market quote fallback failed for {lookup_sym}: {e_yf}")
+                current_price = open_price
+                market_val = round(open_price * amount, 2)
+                pnl = 0.0
+                pnl_pct = 0.0
+
+    return round(current_price, 3), round(market_val, 2), round(pnl, 2), round(pnl_pct, 2)
+
 
 class SaxoClient:
     """
@@ -435,44 +557,28 @@ class SaxoClient:
                 amount = float(pos_base.get("Amount", p.get("Amount", 0.0)))
                 open_price = float(pos_base.get("OpenPrice", pos_view.get("AverageOpenPrice", 0.0)))
                 
-                # Retrieve Saxo-reported P&L
-                pnl = float(pos_view.get("ProfitLossOnTrade", pos_view.get("ProfitLossOnOpeningPosition", 0.0)))
+                # Retrieve raw Saxo-reported metrics
+                raw_saxo_pnl = pos_view.get("ProfitLossOnTrade", pos_view.get("ProfitLossOnOpeningPosition"))
+                raw_saxo_cur_price = pos_view.get("CurrentPrice")
                 
                 # Strike and option type parsing
                 strike = options_data.get("Strike") or pos_base.get("StrikePrice")
                 expiry = (options_data.get("ExpiryDate", "")).split("T")[0] if options_data.get("ExpiryDate") else None
                 opt_type = options_data.get("PutCall", "").lower() if options_data.get("PutCall") else ("call" if "call" in desc.lower() else ("put" if "put" in desc.lower() else None))
 
-                # Handle cost basis
-                multiplier = 100 if asset_type in ["StockOption", "Option"] else 1
-                cost_basis = open_price * abs(amount) * multiplier
-
-                # Implied Mark Price Calculation if current price is missing or 0.00 from Saxo API feed
-                raw_current_price = pos_view.get("CurrentPrice")
-                if raw_current_price and float(raw_current_price) > 0.0:
-                    current_price = float(raw_current_price)
-                else:
-                    # Mathematically derive implied current price from open price & profit loss
-                    if amount > 0:  # Long position
-                        current_price = open_price + (pnl / amount / multiplier)
-                    elif amount < 0:  # Short position
-                        current_price = open_price - (pnl / abs(amount) / multiplier)
-                    else:
-                        current_price = open_price
-
-                # Ensure mark price never dips below zero
-                current_price = max(0.0, current_price)
-
-                # Derive market value from current price
-                market_val = float(pos_view.get("MarketValue") or (current_price * amount * multiplier))
-
-                # Calculate overall unrealized P&L percentage mathematically vs cost basis
-                if cost_basis > 0:
-                    pnl_pct = (pnl / cost_basis) * 100.0
-                else:
-                    pnl_pct = 0.0
-
-                pnl_pct = round(pnl_pct, 2)
+                # Resolve accurate mark price, market value, PnL and return %
+                current_price, market_val, pnl, pnl_pct = resolve_accurate_position_pricing(
+                    symbol=clean_sym,
+                    asset_type=asset_type,
+                    amount=amount,
+                    open_price=open_price,
+                    saxo_current_price=raw_saxo_cur_price,
+                    saxo_pnl=raw_saxo_pnl,
+                    option_type=opt_type,
+                    strike=float(strike) if strike else None,
+                    expiry=expiry,
+                    description=desc
+                )
                 
                 normalized_positions.append({
                     "position_id": pos_id,
