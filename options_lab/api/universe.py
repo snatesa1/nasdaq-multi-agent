@@ -626,7 +626,8 @@ class InstitutionalUniverseEngine:
     def build_stratified_focus_pool(
         self,
         max_per_sector: int = 4,
-        force_refresh: bool = False
+        force_refresh: bool = False,
+        only_if_cached: bool = False
     ) -> List[Dict[str, Any]]:
         """
         Builds the active 30-50 institutional options focus pool:
@@ -634,6 +635,7 @@ class InstitutionalUniverseEngine:
         - Prioritizes active portfolio holdings, watchlists, and mega-cap leaders
         - Calculates live Black-Scholes 30-DTE theoretical yield and strikes
         - Stores in SQLite cache with a 24-hour TTL
+        - When only_if_cached=True, returns cached pool or [] immediately without blocking HTTP requests.
         """
         from datetime import datetime
         today_str = datetime.now().strftime("%Y-%m-%d")
@@ -649,6 +651,10 @@ class InstitutionalUniverseEngine:
                         return cached["focus_pool"]
         except Exception as e:
             logger.debug(f"Universe cache check non-critical: {e}")
+
+        if only_if_cached:
+            logger.info("Focus pool not yet cached; returning baseline without blocking startup.")
+            return []
 
         raw_universe = self.get_raw_universe()
 

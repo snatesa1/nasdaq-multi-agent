@@ -161,7 +161,13 @@ class Settings:
         origins = os.getenv("CORS_ORIGINS", "")
         if origins:
             return [o.strip() for o in origins.split(",")]
-        return ["*"]
+        return [
+            "http://localhost:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:8000",
+        ]
 
 settings = Settings()
+
 

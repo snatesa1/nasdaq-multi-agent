@@ -31,12 +31,24 @@ Write-Host "[2/3] Purging stale Python bytecode cache..." -ForegroundColor Yello
 Get-ChildItem -Path "$AppDir\options_lab" -Recurse -Filter "__pycache__" -ErrorAction SilentlyContinue | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 Write-Host "  -> Bytecode cache cleared." -ForegroundColor Green
 
-# 3. Launch hot-reloading uvicorn
-Write-Host "[3/3] Starting fresh hot-reloading FastAPI backend on http://127.0.0.1:$Port..." -ForegroundColor Yellow
+# 3. Detect local Wi-Fi / LAN IP and launch hot-reloading uvicorn on 0.0.0.0
+$localIP = "127.0.0.1"
+try {
+    $ipObj = Get-NetIPAddress -AddressFamily IPv4 | Where-Object { $_.InterfaceAlias -notmatch "Loopback|vEthernet|Virtual|WSL" -and $_.IPAddress -match "^192\.168\." } | Select-Object -First 1
+    if ($ipObj) {
+        $localIP = $ipObj.IPAddress
+    }
+} catch {}
+
+Write-Host "[3/3] Starting fresh hot-reloading FastAPI backend on 0.0.0.0:$Port..." -ForegroundColor Yellow
+Write-Host "  -> Localhost URL: http://localhost:$Port" -ForegroundColor Green
+Write-Host "  -> Local Wi-Fi URL: http://$($localIP):$Port" -ForegroundColor Cyan
+
 $PythonExe = "$AppDir\venv_win\Scripts\python.exe"
 if (-not (Test-Path $PythonExe)) {
     $PythonExe = "python"
 }
 
-Write-Host "  -> Executing: $PythonExe -m uvicorn options_lab.api.main:app --host 127.0.0.1 --port $Port --reload --reload-dir options_lab" -ForegroundColor Cyan
-& $PythonExe -m uvicorn options_lab.api.main:app --host 127.0.0.1 --port $Port --reload --reload-dir "$AppDir\options_lab"
+Write-Host "  -> Executing: $PythonExe -m uvicorn options_lab.api.main:app --host 0.0.0.0 --port $Port --reload --reload-dir $AppDir\options_lab" -ForegroundColor Cyan
+& $PythonExe -m uvicorn options_lab.api.main:app --host 0.0.0.0 --port $Port --reload --reload-dir "$AppDir\options_lab"
+

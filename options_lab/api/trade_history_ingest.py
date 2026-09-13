@@ -10,7 +10,11 @@ from .config import settings
 
 logger = logging.getLogger("trade-history-ingest")
 
-_DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "optionslab.db")
+_DATA_DIR = os.environ.get(
+    "DB_DATA_DIR",
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+)
+_DB_PATH = os.path.join(_DATA_DIR, "optionslab.db")
 
 
 class TradeHistoryIngestEngine:

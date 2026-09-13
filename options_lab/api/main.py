@@ -72,10 +72,11 @@ logger = logging.getLogger("options-lab-api")
 
 app = FastAPI(title="OptionsLab API", version="2.0.0")
 
-# CORS middleware configuration
+# CORS middleware configuration supporting localhost, local Wi-Fi (192.168.x.x), Tailscale (100.x.y.z), and mDNS (.local)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=settings.CORS_ORIGINS,
+    allow_origin_regex=r"^https?://(localhost|127\.0\.0\.1|192\.168\.\d+\.\d+|100\.\d+\.\d+\.\d+|.*\.local)(:\d+)?$",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

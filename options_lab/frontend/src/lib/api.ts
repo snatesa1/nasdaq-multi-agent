@@ -6,63 +6,82 @@ import {
   BrokerOrdersResponse
 } from '@/types/broker';
 
-export const getApiBase = () => {
+// Dynamic API Base Resolver with Adaptive Runtime Discovery
+let _activeApiBase: string | null = null;
+
+export const getApiBase = (): string => {
+  if (_activeApiBase !== null) return _activeApiBase;
   if (typeof window === 'undefined') return 'http://localhost:8000';
-  if (process.env.NEXT_PUBLIC_API_URL) return process.env.NEXT_PUBLIC_API_URL;
-  // If running locally in development mode (Next.js dev server without Nginx proxy on port 3000/5173):
-  if (process.env.NODE_ENV === 'development') {
-    return `http://${window.location.hostname}:8000`;
+  if (process.env.NEXT_PUBLIC_API_URL) {
+    _activeApiBase = process.env.NEXT_PUBLIC_API_URL;
+    return _activeApiBase;
   }
-  // In production (Nginx container), all API routes are reverse-proxied seamlessly.
-  // Relative path '' guarantees same-origin access over LAN, Tailscale, Cloudflare Tunnel, and localhost.
+  // In development mode, Next.js dev server runs without Nginx, so backend is on port 8000:
+  if (process.env.NODE_ENV === 'development') {
+    _activeApiBase = `http://${window.location.hostname}:8000`;
+    return _activeApiBase;
+  }
+  // In production builds, default to same-origin relative path '' (Nginx container in Docker)
+  // Adaptive handshake below will auto-switch to port 8000 if same-origin is not reverse-proxied (Local PC static host)
   return '';
+};
+
+export const setApiBase = (base: string) => {
+  _activeApiBase = base;
 };
 
 export const API_BASE_URL = getApiBase();
 
 export async function checkBackendHandshake(timeoutMs: number = 3000): Promise<{ ok: boolean; error?: string }> {
-  const targetHost = API_BASE_URL || (typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : 'localhost:8000');
+  const currentBase = _activeApiBase !== null ? _activeApiBase : getApiBase();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
-  // Try configured / same-origin API base first
+  // 1. Try configured / same-origin API base first
   try {
-    const res = await fetch(`${API_BASE_URL}/api/health`, { method: 'GET', signal: controller.signal });
+    const res = await fetch(`${currentBase}/api/health`, { method: 'GET', signal: controller.signal });
     clearTimeout(timer);
     if (res.ok) {
+      setApiBase(currentBase);
       return { ok: true };
     }
-    return { ok: false, error: `Backend responded with HTTP ${res.status}` };
   } catch (err: any) {
     clearTimeout(timer);
-    // If running in production container where port 8000 might also be reachable directly:
-    if (typeof window !== 'undefined' && API_BASE_URL === '' && window.location.hostname) {
+  }
+
+  // 2. Adaptive fallback: If current base failed and we are in the browser, probe direct port 8000
+  if (typeof window !== 'undefined' && window.location.hostname) {
+    const fallbackBase = `http://${window.location.hostname}:8000`;
+    if (currentBase !== fallbackBase) {
       try {
         const directController = new AbortController();
-        const directTimer = setTimeout(() => directController.abort(), 1500);
-        const directRes = await fetch(`http://${window.location.hostname}:8000/api/health`, {
+        const directTimer = setTimeout(() => directController.abort(), 2000);
+        const directRes = await fetch(`${fallbackBase}/api/health`, {
           method: 'GET',
           signal: directController.signal
         });
         clearTimeout(directTimer);
         if (directRes.ok) {
+          setApiBase(fallbackBase);
+          console.info(`[OptionsLab Gateway] Adaptive routing locked onto standalone backend at ${fallbackBase}`);
           return { ok: true };
         }
       } catch (dErr) {
-        // Both failed
+        // Direct port 8000 probe also failed
       }
     }
-    if (err.name === 'AbortError') {
-      return { ok: false, error: `Handshake timed out after ${timeoutMs / 1000}s (server on ${targetHost} non-responsive).` };
-    }
-    return { ok: false, error: `Cannot connect to OptionsLab backend on ${targetHost}. Server is offline.` };
   }
+
+  const targetHost = _activeApiBase || (typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : 'localhost:8000');
+  return { ok: false, error: `Cannot connect to OptionsLab backend on ${targetHost}. Server is offline.` };
 }
 
 export async function apiRequest(endpoint: string, method: string = 'GET', body?: any, timeoutMs: number = 30000) {
-  const url = `${API_BASE_URL}${endpoint}`;
+  const base = _activeApiBase !== null ? _activeApiBase : getApiBase();
+  const url = `${base}${endpoint}`;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+
   };
 
   // Attach Firebase auth token if user is signed in
@@ -109,7 +128,7 @@ export async function apiRequest(endpoint: string, method: string = 'GET', body?
       throw timeoutErr;
     }
     if (error.message?.includes('Failed to fetch') || error.message?.includes('NetworkError')) {
-      const targetHost = API_BASE_URL || (typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : 'localhost:8000');
+      const targetHost = base || (typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : 'localhost:8000');
       const netErr = new Error(`Backend Handshake Disconnected: Unable to reach OptionsLab API server (${targetHost}). Please verify the backend container or server is running.`);
       console.error(netErr.message);
       throw netErr;
@@ -154,40 +173,14 @@ export const optionsApi = {
   getSession: (id: string) => apiRequest(`/tutor/sessions/${id}`),
   updateSession: (id: string, messages: { role: string; content: string }[], title?: string) =>
     apiRequest(`/tutor/sessions/${id}`, 'PUT', { messages, title }),
-  deleteSession: async (id: string) => {
-    const url = `${API_BASE_URL}/tutor/sessions/${id}`;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    try {
-      await auth.authStateReady();
-      const token = await auth.currentUser?.getIdToken();
-      if (token) {
-        headers['Authorization'] = 'Bearer ' + token;
-      }
-    } catch (e) { /* no-op */ }
-    const res = await fetch(url, { method: 'DELETE', headers });
-    if (!res.ok && res.status !== 204) throw new Error(`Delete failed: ${res.status}`);
-    return true;
-  },
+  deleteSession: (id: string) => apiRequest(`/tutor/sessions/${id}`, 'DELETE'),
 
   // ── Portfolio ─────────────────────────────────────────────────────────────
   listPortfolios: () => apiRequest('/api/portfolio'),
   getPortfolio: (id: string) => apiRequest(`/api/portfolio/${id}`),
   analyzePortfolio: (id: string) => apiRequest(`/api/portfolio/${id}/analyze`),
   syncPortfolio: (spreadsheetId?: string) => apiRequest(spreadsheetId ? `/api/portfolio/sync?spreadsheet_id=${encodeURIComponent(spreadsheetId)}` : '/api/portfolio/sync', 'POST'),
-  deletePortfolio: async (id: string) => {
-    const url = `${API_BASE_URL}/api/portfolio/${id}`;
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    try {
-      await auth.authStateReady();
-      const token = await auth.currentUser?.getIdToken();
-      if (token) {
-        headers['Authorization'] = 'Bearer ' + token;
-      }
-    } catch (e) { /* no-op */ }
-    const res = await fetch(url, { method: 'DELETE', headers });
-    if (!res.ok && res.status !== 204) throw new Error(`Delete failed: ${res.status}`);
-    return true;
-  },
+  deletePortfolio: (id: string) => apiRequest(`/api/portfolio/${id}`, 'DELETE'),
 
   // ── Multi-Agent ───────────────────────────────────────────────────────────
   runAnalysis: (tickers: string[]) => apiRequest('/multi-agent/analyze', 'POST', { tickers }),
@@ -222,7 +215,7 @@ export const optionsApi = {
 
   // ── Multi-Year Trade History & Behavioral Forensics ───────────────────────
   uploadPdfReport: async (file: File) => {
-    const url = `${API_BASE_URL}/api/history/upload-pdf`;
+    const url = `${getApiBase()}/api/history/upload-pdf`;
     const formData = new FormData();
     formData.append('file', file);
     const headers: Record<string, string> = {};

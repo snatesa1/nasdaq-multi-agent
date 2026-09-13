@@ -12,6 +12,7 @@ tests/__pycache__/
 !destroy_app.sh
 !upload_secrets.sh
 !setup_gh_actions_sa.sh
+!update_linux_server.sh
 
 # Exceptions for options_lab
 !options_lab/**/*.json

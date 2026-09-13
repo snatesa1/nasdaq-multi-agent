@@ -1,0 +1,57 @@
+# ==============================================================================
+# Production Docker Compose Stack for NASDAQ & OptionsLab Multi-Agent Ecosystem
+# Dual-Flavor Target: Remote Linux Mint Private Cloud & Containerized Deployments
+# ==============================================================================
+version: "3.8"
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: akpegis_backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - DB_DATA_DIR=/app/data
+    volumes:
+      # Fast I/O Tier on Host NVMe/SSD
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ./options_lab/frontend
+      dockerfile: Dockerfile
+    container_name: akpegis_frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  backup-agent:
+    image: alpine:3.19
+    container_name: akpegis_backup
+    restart: unless-stopped
+    volumes:
+      - ./data:/data:rw
+      - ${NAS_BACKUP_DIR:-./backups}:/nas_backup
+      - ./scripts:/scripts:ro
+    command: >
+      sh -c "apk add --no-cache sqlite bash tzdata &&
+             mkdir -p /nas_backup/daily /nas_backup/weekly &&
+             echo '0 2 * * * if [ -f /data/optionslab.db ]; then sqlite3 /data/optionslab.db \".backup /nas_backup/daily/optionslab_\$$(date +\%Y\%m\%d_\%H\%M\%S).db\"; find /nas_backup/daily -name \"*.db\" -mtime +7 -delete; fi' > /etc/crontabs/root &&
+             echo 'Backup cron scheduled for 02:00 AM daily.' &&
+             crond -f -l 2"

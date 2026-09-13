@@ -241,9 +241,9 @@ class WeeklyIntelligenceEngine:
         self.active_position_tickers = sorted(list(holdings))
         self.watchlist_tickers = sorted(list(watchlist))
 
-        # 4. Integrate 4-tier institutional focus pool across 11 GICS sectors
+        # 4. Integrate 4-tier institutional focus pool across 11 GICS sectors (non-blocking on startup)
         try:
-            self.focus_pool = self.universe_engine.build_stratified_focus_pool()
+            self.focus_pool = self.universe_engine.build_stratified_focus_pool(only_if_cached=True)
             focus_syms = {p["symbol"].upper() for p in self.focus_pool}
             self.symbol_sector_map = {p["symbol"].upper(): p.get("sector", "Information Technology") for p in self.focus_pool}
         except Exception as e_pool:
