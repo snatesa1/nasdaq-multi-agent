@@ -31,7 +31,7 @@ from .margin_guardian import MarginGuardian
 from .trade_staging import TradeStagingEngine
 from .safety_shield import BehavioralSafetyShield
 from .universe import InstitutionalUniverseEngine, normalize_gics_sector
-from .weekly_intelligence import WeeklyIntelligenceEngine, COMPANY_TICKER_MAP
+from .weekly_intelligence import WeeklyIntelligenceEngine, COMPANY_TICKER_MAP, resolve_target_monthly_option_cycle
 from .market_data import fetch_market_data, fetch_option_market_quote
 from engine.black_scholes import black_scholes_price, black_scholes_greeks
 from engine.interlink_graph import InterlinkGraphEngine
@@ -129,10 +129,16 @@ def macro_news_ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         if t and t not in candidate_pool:
             candidate_pool.append(t)
 
-    # High-priority anchor constituents
-    for t in ["NVDA", "COIN", "INTC", "IBM", "PLTR", "AAPL", "BAC", "CVX", "MSFT", "AMD", "ABT", "KO", "CAT", "NEE", "LIN"]:
-        if t not in candidate_pool:
-            candidate_pool.append(t)
+    # High-priority anchor constituents prioritizing capital-efficient blue chips (strike <= $125)
+    priority_anchors = [
+        "INTC", "BAC", "KO", "CSCO", "C", "NEM", "ABT", "SO", "HPQ", "T", "PFE", "GE",
+        "NVDA", "COIN", "IBM", "PLTR", "AAPL", "CVX", "MSFT", "AMD", "CAT", "NEE", "LIN"
+    ]
+    # Prepend priority anchors so capital-efficient stocks are evaluated first
+    combined_pool = [t for t in priority_anchors if t in candidate_pool] + [t for t in candidate_pool if t not in priority_anchors]
+    for t in priority_anchors:
+        if t not in combined_pool:
+            combined_pool.append(t)
 
     return {
         **state,
@@ -140,7 +146,7 @@ def macro_news_ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         "macro_cards": macro_cards,
         "market_summary": market_summary,
         "cross_asset_table": cross_asset_table,
-        "candidate_pool": candidate_pool,
+        "candidate_pool": combined_pool,
         "news_ticker_contexts": news_ticker_contexts,
         "step_completed": "macro_news_ingestion"
     }
@@ -151,7 +157,7 @@ def tech_volatility_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Tier 2A Node: Evaluates technical support, realized volatility, and momentum beta.
     """
-    candidate_pool = state.get("candidate_pool", [])[:12]
+    candidate_pool = state.get("candidate_pool", [])[:20]
     tech_data: Dict[str, Dict[str, Any]] = {}
 
     def _fetch_mkt_worker(sym: str):
@@ -161,7 +167,7 @@ def tech_volatility_node(state: Dict[str, Any]) -> Dict[str, Any]:
             logger.debug(f"Market fetch worker failed for {sym}: {err}")
             return sym, None
 
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    with ThreadPoolExecutor(max_workers=8) as executor:
         futures = [executor.submit(_fetch_mkt_worker, sym) for sym in candidate_pool]
         for f in as_completed(futures):
             try:
@@ -191,7 +197,7 @@ def fundamental_conviction_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Tier 2B Node: Formulates fundamental thesis, sector alignment, and conviction scores.
     """
-    candidate_pool = state.get("candidate_pool", [])[:12]
+    candidate_pool = state.get("candidate_pool", [])[:20]
     weekly_engine: WeeklyIntelligenceEngine = state.get("weekly_engine")
     news_ticker_contexts = state.get("news_ticker_contexts", {})
     fund_data: Dict[str, Dict[str, Any]] = {}
@@ -260,26 +266,37 @@ def options_greeks_node(state: Dict[str, Any]) -> Dict[str, Any]:
     saxo_client = state.get("saxo_client")
     options_data: Dict[str, Dict[str, Any]] = {}
 
+    target_expiry_dt, target_monthly_dte = resolve_target_monthly_option_cycle()
+    logger.info(f"🎯 [ADK Node: options_greeks_pricing] Target monthly third-Friday expiration: {target_expiry_dt.strftime('%Y-%m-%d')} ({target_monthly_dte} DTE).")
+
     def _fetch_opt_worker(sym: str, t: Dict[str, Any]):
         try:
             spot = t["spot_price"]
             vol = t["historical_volatility"]
             step = 0.5 if spot < 25.0 else (2.5 if spot < 100.0 else (5.0 if spot < 300.0 else 10.0))
-            raw_strike = spot * 0.90  # ~10% OTM Cash-Secured Put
-            strike = round(raw_strike / step) * step
-            if strike >= spot:
-                strike = spot - step
 
-            # Pre-compute analytical Black-Scholes baseline immediately
-            T = 30.0 / 365.0
+            # Calibrate strike to institutional target delta ~ -0.20 to -0.24 (78%–82% PoP) with strike <= $125
+            T = target_monthly_dte / 365.0
             r = 0.045
-            bs_premium = black_scholes_price(S=spot, K=strike, T=T, r=r, sigma=vol, option_type="put")
-            bs_premium = max(0.25, round(round(bs_premium / 0.05) * 0.05, 2))
+            best_k, best_bs, best_delta = None, 0.25, float('inf')
+            for pct in [0.97, 0.96, 0.95, 0.94, 0.93, 0.92, 0.91, 0.90, 0.88, 0.85, 0.82]:
+                k = round((spot * pct) / step) * step
+                if k >= spot or k > 125.0:
+                    continue
+                g = black_scholes_greeks(S=spot, K=k, T=T, r=r, sigma=vol, option_type="put")
+                d = g.get("delta", -0.20)
+                if abs(d - (-0.22)) < abs(best_delta - (-0.22)):
+                    best_delta = d
+                    best_k = k
+                    best_bs = black_scholes_price(S=spot, K=k, T=T, r=r, sigma=vol, option_type="put")
+
+            strike = best_k or (spot - step)
+            bs_premium = max(0.25, round(round(best_bs / 0.05) * 0.05, 2))
 
             # Attempt fast market quote with quick failover
             quote = None
             try:
-                quote = fetch_option_market_quote(sym, strike=strike, option_type="put", dte=30, saxo_client=saxo_client)
+                quote = fetch_option_market_quote(sym, strike=strike, option_type="put", dte=target_monthly_dte, saxo_client=saxo_client)
             except Exception as e_q:
                 logger.debug(f"Option quote query non-critical for {sym}: {e_q}")
 
@@ -300,12 +317,13 @@ def options_greeks_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
             greeks = black_scholes_greeks(S=spot, K=strike, T=T, r=r, sigma=vol, option_type="put")
             delta = round(greeks.get("delta", -0.20), 2)
-            annualized_roc = round((premium / strike) * (365.0 / 30.0) * 100.0, 1) if strike > 0 else 0.0
+            annualized_roc = round((premium / strike) * (365.0 / target_monthly_dte) * 100.0, 1) if strike > 0 else 0.0
 
             return sym, {
                 "strike": strike,
                 "delta": delta,
-                "dte": 30,
+                "dte": target_monthly_dte,
+                "expiry_date": target_expiry_dt.strftime('%Y-%m-%d'),
                 "premium": premium,
                 "bid_price": bid,
                 "ask_price": ask,
@@ -317,13 +335,16 @@ def options_greeks_node(state: Dict[str, Any]) -> Dict[str, Any]:
             logger.warning(f"Option worker error for {sym}: {err}")
             return sym, None
 
-    # Focus on top 8 candidates to eliminate redundant Alpaca chain queries
-    top_candidates = list(tech_data.items())[:8]
-    with ThreadPoolExecutor(max_workers=6) as executor:
+    # Prioritize capital-efficient stocks (spot <= 135.0) to ensure strike <= $125 and collateral <= $12,500
+    qualifying_tech = [item for item in tech_data.items() if item[1]["spot_price"] <= 135.0]
+    other_tech = [item for item in tech_data.items() if item[1]["spot_price"] > 135.0]
+    top_candidates = (qualifying_tech + other_tech)[:16]
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
         futures = [executor.submit(_fetch_opt_worker, sym, t) for sym, t in top_candidates]
         for f in as_completed(futures):
             try:
-                res = f.result(timeout=3.0)
+                res = f.result(timeout=4.0)
                 if res and res[1]:
                     options_data[res[0]] = res[1]
             except Exception as e:
@@ -339,8 +360,12 @@ def options_greeks_node(state: Dict[str, Any]) -> Dict[str, Any]:
 @node(name="multi_agent_synthesizer", timeout=30.0)
 def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Aggregates Tier 2 specialists (Tech, Fund, Greeks) into 6 sector-diversified candidates.
-    Enforces the institutional cap of max 2 trades per GICS sector.
+    Aggregates Tier 2 specialists (Tech, Fund, Greeks) into strictly 4 sector-diversified candidates.
+    Enforces strict criteria:
+    1. Strike <= $125.00 (Collateral <= $12,500) to ensure full 4-contract basket fits within cash budget.
+    2. Strictly 1 trade per distinct GICS sector.
+    3. Target sweet spot $2.00–$3.00 premium ($200–$300/contract) to achieve $1,000/month harvest.
+    4. Strictly 4 candidates max.
     """
     tech_data = state.get("tech_data", {})
     fund_data = state.get("fund_data", {})
@@ -348,22 +373,50 @@ def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
     candidate_pool = state.get("candidate_pool", [])
 
     potential_candidates: List[Dict[str, Any]] = []
-    staged_sectors: Dict[str, int] = {}
-    target_count = 6
 
+    # First pass: collect all valid candidates with strike <= $125
+    valid_candidates = []
     for sym in candidate_pool:
-        if len(potential_candidates) >= target_count:
-            break
         if sym not in tech_data or sym not in fund_data or sym not in options_data:
             continue
-
-        sec = fund_data[sym]["sector"]
-        if staged_sectors.get(sec, 0) >= 2:
-            continue  # Enforce GICS sector balance!
-
         t = tech_data[sym]
         f = fund_data[sym]
         o = options_data[sym]
+        strike = o["strike"]
+        prem = o["premium"]
+
+        # Strike <= $125 cap prevents expensive stocks (AMZN, META, COST, GS) from consuming the cash budget
+        if strike > 125.0 or prem < 0.50 or prem > 5.00:
+            continue
+
+        valid_candidates.append({
+            "sym": sym,
+            "sec": f["sector"],
+            "strike": strike,
+            "premium": prem,
+            "t": t,
+            "f": f,
+            "o": o
+        })
+
+    # Sort candidates prioritizing $2.00–$3.00 sweet spot closest to $2.50
+    sorted_cand_records = sorted(
+        valid_candidates,
+        key=lambda c: (0 if 2.00 <= c["premium"] <= 3.00 else 1, abs(c["premium"] - 2.50))
+    )
+
+    staged_sectors: set = set()
+    for item in sorted_cand_records:
+        if len(potential_candidates) >= 4:
+            break
+        sym = item["sym"]
+        sec = item["sec"]
+        if sec in staged_sectors:
+            continue  # Strictly 1 candidate per distinct GICS sector!
+
+        t = item["t"]
+        f = item["f"]
+        o = item["o"]
 
         cand = {
             "symbol": sym,
@@ -382,6 +435,10 @@ def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
             "pricing_source": o.get("pricing_source", "OPRA_LIVE"),
             "contracts": 1,
             "annualized_roc_pct": o["annualized_roc_pct"],
+            "collateral_required": round(o["strike"] * 100.0, 2),
+            "collateral_coverage_type": "100% Full Cash-Secured ($K * 100)",
+            "collateral_rationale": "Full 100% cash collateral is secured regardless of low/zero assignment probability, guaranteeing zero margin debt.",
+            "pop_percent": round(max(50.0, min(95.0, (1.0 - abs(o["delta"])) * 100.0)), 1),
             "edge_source": f["edge_source"],
             "thesis": f["thesis"],
             "risk_rating": f["risk_rating"],
@@ -393,9 +450,9 @@ def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
             }
         }
         potential_candidates.append(cand)
-        staged_sectors[sec] = staged_sectors.get(sec, 0) + 1
+        staged_sectors.add(sec)
 
-    logger.info(f"🧠 [ADK Node: synthesizer] Produced {len(potential_candidates)} sector-diversified trade candidates.")
+    logger.info(f"🧠 [ADK Node: synthesizer] Produced {len(potential_candidates)} refined, sector-diversified candidates (Cap: 4).")
     return {
         **state,
         "potential_candidates": potential_candidates,
@@ -407,7 +464,8 @@ def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
 def margin_guardian_gate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Deterministic Gate Node: Enforces hard 15% margin utilization cap,
-    sufficient collateral, and safety shield rules.
+    strict cumulative cash collateral limit (<= 50% available cash),
+    and strictly 4 candidates max.
     Outputs route: 'APPROVED' or 'REJECTED'.
     """
     margin_guardian: MarginGuardian = state.get("margin_guardian") or MarginGuardian()
@@ -419,6 +477,11 @@ def margin_guardian_gate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     rejected_trades: List[Dict[str, Any]] = []
 
     for cand in candidates:
+        if len(validated_trades) >= 4:
+            cand["rejection_reason"] = "STAGED TRADE CEILING: Strictly 4 candidates max."
+            rejected_trades.append(cand)
+            continue
+
         margin_eval = margin_guardian.validate_trade_margin(
             strategy=cand["strategy"],
             strike=cand["strike"],
@@ -442,15 +505,24 @@ def margin_guardian_gate_node(state: Dict[str, Any]) -> Dict[str, Any]:
             contracts=cand["contracts"]
         )
 
+        # Cumulative Basket Check
+        basket_audit = margin_guardian.validate_cumulative_basket(
+            staged_candidates=validated_trades,
+            new_candidate=cand,
+            current_status=current_margin_status
+        )
+
         cand["margin_impact_pct"] = margin_eval.get("estimated_margin_impact", 1.5)
         cand["projected_total_margin_pct"] = margin_eval.get("projected_margin_util_pct", 8.0)
         cand["safety_check"] = "PASSED" if (margin_eval.get("is_valid", True) and safety_eval.get("is_safe", True)) else "WARNING"
         cand["margin_eval"] = margin_eval
         cand["safety_eval"] = safety_eval
+        cand["basket_audit"] = basket_audit
 
-        if margin_eval.get("is_valid", True) and safety_eval.get("is_safe", True):
+        if margin_eval.get("is_valid", True) and safety_eval.get("is_safe", True) and basket_audit.get("approved", True):
             validated_trades.append(cand)
         else:
+            cand["rejection_reason"] = basket_audit.get("reasons", ["Margin/Collateral limit exceeded"])[0]
             rejected_trades.append(cand)
 
     logger.info(f"🛡️ [ADK Gate: margin_guardian] Passed: {len(validated_trades)} | Blocked: {len(rejected_trades)}")
@@ -458,7 +530,7 @@ def margin_guardian_gate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     route = "APPROVED" if len(validated_trades) > 0 else "REJECTED"
     return {
         **state,
-        "validated_trades": validated_trades,
+        "validated_trades": validated_trades[:4],
         "rejected_trades": rejected_trades,
         "routing_decision": route,
         "step_completed": "margin_guardian_gate"
@@ -468,19 +540,24 @@ def margin_guardian_gate_node(state: Dict[str, Any]) -> Dict[str, Any]:
 @node(name="hitl_staging_gate")
 def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Human-In-The-Loop (HITL) Pause Node: Stages candidates into SQLite with 'PROPOSED' status.
+    Human-In-The-Loop (HITL) Pause Node: Purges stale unapproved proposals and
+    stages strictly the 4 refined candidates into SQLite with 'PROPOSED' status.
     Suspends graph execution, awaiting user 1-click UI or Slack approval.
     """
     trade_staging: TradeStagingEngine = state.get("trade_staging") or TradeStagingEngine()
     week_label: str = state.get("week_label") or f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
-    validated_trades = state.get("validated_trades", [])
+    validated_trades = state.get("validated_trades", [])[:4]
+
+    # Clean up any stale unapproved proposals for this week
+    from . import db as database
+    database.purge_unapproved_staged_trades(week_label=week_label)
 
     staged_records: List[Dict[str, Any]] = []
     for trade in validated_trades:
         record = trade_staging.stage_recommendation(trade, week_label=week_label)
         staged_records.append(record)
 
-    logger.info(f"⏸️ [ADK HITL Node: hitl_staging_gate] Staged {len(staged_records)} trades in SQLite. Pausing for human authorization.")
+    logger.info(f"⏸️ [ADK HITL Node: hitl_staging_gate] Staged strictly {len(staged_records)} refined candidates in SQLite (Cap: 4). Pausing for human authorization.")
     return {
         **state,
         "staged_trades": staged_records,
@@ -726,15 +803,24 @@ class OptionsADKWorkflowEngine:
                 if staged_trades else 0.0
             )
             total_collateral = sum(t.get("collateral_required", 0.0) for t in staged_trades)
+            cash_avail = float(account_balances.get("cash_available", 70000.0) or 70000.0)
+            max_allowed_collateral = round(cash_avail * 0.50, 2)
+            collateral_headroom = max(0.0, max_allowed_collateral - total_collateral)
+            collateral_util_pct = round((total_collateral / cash_avail * 100.0), 1) if cash_avail > 0 else 0.0
 
             wheel_harvest_blotter = {
                 "monthly_harvest_target": 1000.0,
                 "target_premium_band": "$2.00 - $3.00 ($200 - $300 / contract)",
                 "total_staged_contracts": len(staged_trades),
+                "candidates_cap": 4,
                 "projected_monthly_harvest_dollars": total_monthly_harvest_dollars,
                 "target_achievement_pct": round((total_monthly_harvest_dollars / 1000.0) * 100.0, 1) if total_monthly_harvest_dollars else 0.0,
                 "average_pop_percent": avg_pop,
-                "total_collateral_required": total_collateral,
+                "total_collateral_required": round(total_collateral, 2),
+                "max_allowed_collateral": max_allowed_collateral,
+                "collateral_headroom": round(collateral_headroom, 2),
+                "collateral_utilization_pct": collateral_util_pct,
+                "collateral_coverage_rationale": "Full 100% cash collateral ($K * 100) is locked in account cash regardless of assignment probability, guaranteeing zero margin debt and zero forced liquidation risk.",
                 "candidates": staged_trades
             }
 

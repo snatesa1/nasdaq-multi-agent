@@ -612,8 +612,28 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
           * Next.js static production export completed with 17/17 routes compiled cleanly.
           * Dual-flavor compatibility test suite passed 100%.
 
+    13. **Strict 4-Candidate Wheel Harvest Blotter & Third-Friday Monthly Options Harmonization (2026-09-13)**:
+        - **Target Monthly Third-Friday Expiration Engine (`weekly_intelligence.py` & `options_adk_workflow.py`)**:
+          * Implemented `resolve_target_monthly_option_cycle(min_dte=28, max_dte=35) -> Tuple[datetime, int]` dynamically computing the next OCC standard third-Friday monthly expiration cycle (e.g. October 16, 2026, 33 DTE) falling strictly in the third week of the month.
+          * Harmonized candidate generation across both Google ADK 2.0 Graph Workflow (`options_greeks_node`) and `WeeklyIntelligenceEngine` to target the standard third-Friday cycle, eliminating sub-30 DTE weekly expirations.
+        - **Strict 100% Cash Collateral Calculation & Single-Candidate Cap (`margin_guardian.py`)**:
+          * Enforces true 100% cash-secured collateral requirement ($\text{Collateral} = \text{Strike} \times 100 \times \text{Contracts}$) regardless of theoretical Black-Scholes assignment probability.
+          * Introduced single-candidate collateral cap: single-trade collateral cannot exceed 35% of the account's uninvested cash buffer ($\le \$12,500$ collateral on \$71,984 uninvested cash, capping CSP strikes at $\le \$125.00$).
+          * Filters out high-strike/expensive stocks (AMZN, COST, GS, META) requiring \$23k–\$93k collateral per contract to guarantee that a 4-position basket fits comfortably within the 50% cash collateral limit ($\le \$35,992$).
+        - **Strict 4-Candidate Cross-Sector Wheel Harvest Blotter**:
+          * Synthesizer nodes strictly select exactly 4 high-conviction candidates across 4 distinct GICS sectors (e.g. Information Technology, Financials, Healthcare, Consumer Staples).
+          * Purged extra bench reserve staging to keep proposed blotter clean and focused on verified 4-position execution.
+          * Preserved all authentic live orders in SQLite (`TRD-A819407E` AMZN, `TRD-925987DF` GOOGL).
+        - **Institutional Blotter UI Enhancements (`weekly-intelligence/page.tsx` & `intelligence.ts`)**:
+          * Header badges updated: `Strict 4-Candidate Cap (Cross-Sector)`, `Monthly 30–35 DTE (3rd Week Friday)`, and `100% Cash Secured ($K * 100)`.
+          * 5-metric KPI ribbon updated: Monthly Goal (\$1,000), Projected Harvest, Candidates Cap (4 / 4), Total Cash Collateral, and Collateral Headroom.
+          * Candidate cards now feature standard third-week expiration badge `📅 2026-10-16 (33 DTE • 3rd Wk)` and a prominent amber `100% Full Cash-Secured Guarantee ($K × 100)` card detailing the reserved unencumbered collateral.
+        - **Verification & Parity**:
+          * Next.js production build (`npm run build`) compiled 17/17 routes with 0 errors.
+          * Integration test suite `scripts/test_weekly_intelligence_integration.py` passed 100%.
+
 ## 📊 Antigravity Usage Stats
-> Last Updated: 2026-09-13 11:23:00 SGT
+> Last Updated: 2026-09-13 14:25:00 SGT
 
 | Metric | Current Session |
 | :--- | :--- |

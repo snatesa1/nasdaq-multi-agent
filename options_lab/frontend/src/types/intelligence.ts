@@ -148,6 +148,9 @@ export interface StagedTrade {
   approved_at?: string;
   executed_at?: string;
   week_label: string;
+  expiration_date?: string;
+  collateral_explanation?: string;
+  collateral_coverage_type?: string;
   pillars?: {
     watchlist_status: string;
     trade_history_profile: string;
@@ -163,6 +166,11 @@ export interface WheelHarvestBlotter {
   target_achievement_pct: number;
   average_pop_percent: number;
   total_collateral_required: number;
+  candidates_cap?: number;
+  max_allowed_collateral?: number;
+  collateral_headroom?: number;
+  collateral_utilization_pct?: number;
+  collateral_coverage_rationale?: string;
   candidates: StagedTrade[];
 }
 

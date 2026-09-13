@@ -310,12 +310,23 @@ class MarginGuardian:
         projected_margin_used = margin_used + margin_impact
         projected_util_pct = (projected_margin_used / total_equity * 100.0) if total_equity > 0 else 0.0
 
+        # Enforce single-position collateral ceiling for CSPs:
+        # No single candidate can consume > 35% of total collateral budget (~$12,500 max / strike <= $125)
+        # to ensure that 4 high-quality candidates can fit into the account's cash collateral budget.
+        max_single_trade_collateral = max_allowed_collateral * 0.35
+        passed_single_trade_cap = (collateral_required <= max_single_trade_collateral) if "PUT" in strat_upper else True
         passed_margin_cap = projected_util_pct <= self.max_margin_util_pct
         passed_collateral_check = (collateral_required <= max_allowed_collateral) if "PUT" in strat_upper else True
 
-        approved = passed_margin_cap and passed_collateral_check
+        approved = passed_margin_cap and passed_collateral_check and passed_single_trade_cap
 
         reasons = []
+        if not passed_single_trade_cap:
+            reasons.append(
+                f"SINGLE-POSITION COLLATERAL CAP EXCEEDED: Collateral ${collateral_required:,.2f} (Strike: ${strike:.2f}) "
+                f"exceeds single-candidate cap of ${max_single_trade_collateral:,.2f} (35% of collateral budget). "
+                f"High-strike stocks cannot be cash-secured without crowding out 4-contract basket diversification."
+            )
         if not passed_margin_cap:
             reasons.append(
                 f"MARGIN EXCEEDED: Projected margin utilization would reach {projected_util_pct:.2f}%, "
@@ -328,10 +339,10 @@ class MarginGuardian:
             )
 
         status_str = "APPROVED"
-        if not passed_margin_cap:
-            status_str = "MARGIN_LIMIT_EXCEEDED"
-        elif not passed_collateral_check:
+        if not passed_single_trade_cap or not passed_collateral_check:
             status_str = "COLLATERAL_LIMIT_EXCEEDED"
+        elif not passed_margin_cap:
+            status_str = "MARGIN_LIMIT_EXCEEDED"
 
         return {
             "approved": approved,
@@ -340,6 +351,9 @@ class MarginGuardian:
             "strike": strike,
             "contracts": contracts,
             "collateral_required": round(collateral_required, 2),
+            "max_single_trade_collateral": round(max_single_trade_collateral, 2),
+            "collateral_coverage_type": "100% Full Cash-Secured ($K * 100)",
+            "collateral_rationale": "Full 100% cash collateral is secured regardless of assignment probability, guaranteeing zero margin debt.",
             "estimated_margin_impact": round(margin_impact, 2),
             "current_margin_util_pct": status["margin_utilization_pct"],
             "projected_margin_util_pct": round(projected_util_pct, 2),

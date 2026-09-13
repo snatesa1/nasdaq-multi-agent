@@ -984,6 +984,41 @@ def list_staged_trades(week_label: Optional[str] = None, status: Optional[str] =
         logger.error(f"Failed to list staged trades: {e}")
         return []
 
+def purge_unapproved_staged_trades(week_label: str) -> int:
+    """
+    Descriptive Summary:
+        Purges stale unapproved 'PROPOSED' and 'BENCH_RESERVE' trade records for a given week from SQLite,
+        preserving all active user decisions ('APPROVED', 'EXECUTING', 'PLACED', 'FILLED', 'REJECTED').
+        Guarantees that new weekly intelligence runs replace unapproved proposals with exactly 4 refined candidates.
+
+    Parameters:
+        week_label (str): ISO calendar week identifier (e.g. '2026-W37').
+
+    Returns:
+        int: Total number of unapproved trade records purged.
+
+    Exceptions / Side Effects:
+        Mutates the staged_trades table in optionslab.db. Commits transaction upon completion.
+
+    Usage Example:
+        >>> deleted_count = purge_unapproved_staged_trades('2026-W37')
+        >>> print(f'Purged {deleted_count} stale proposed trades.')
+    """
+    try:
+        with _get_conn() as conn:
+            cursor = conn.execute(
+                "DELETE FROM staged_trades WHERE week_label = ? AND status IN ('PROPOSED', 'BENCH_RESERVE')",
+                (week_label,)
+            )
+            conn.commit()
+            purged = cursor.rowcount
+            logger.info(f"Purged {purged} unapproved staged trades for week {week_label}.")
+            return purged
+    except Exception as e:
+        logger.error(f"Failed to purge unapproved staged trades for week {week_label}: {e}")
+        return 0
+
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 #  MACRO NEWS MEMORY HELPERS (Accumulated Weekly Headlines & Deduplication)

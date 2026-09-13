@@ -91,6 +91,68 @@ COMPANY_TICKER_MAP = {
 }
 
 
+def resolve_target_monthly_option_cycle(
+    ref_date: Optional[datetime] = None,
+    min_dte: int = 28,
+    max_dte: int = 35
+) -> Tuple[datetime, int]:
+    """
+    Descriptive Summary:
+        Calculates the authentic monthly options expiration date (third Friday of the month,
+        falling in the third week) and exact DTE strictly targeting the 28 to 35 DTE window
+        (specifically targeting 30 to 35 days). Guarantees adherence to standard monthly OCC
+        expiration cycles without exposure to illiquid weeklies or gamma cliffs.
+
+    Parameters:
+        ref_date (Optional[datetime]): Anchor date to calculate forward expiration from. Defaults to datetime.now().
+        min_dte (int): Lower bound days to expiration. Defaults to 28.
+        max_dte (int): Upper bound days to expiration. Defaults to 35.
+
+    Returns:
+        Tuple[datetime, int]: Tuple containing:
+            - target_expiry (datetime): Target third-Friday expiration date.
+            - exact_dte (int): Exact integer days to expiration.
+
+    Exceptions / Side Effects:
+        Pure mathematical calendar calculation. Non-throwing.
+
+    Usage Example:
+        >>> expiry_dt, dte = resolve_target_monthly_option_cycle(datetime(2026, 9, 13))
+        >>> print(expiry_dt.strftime('%Y-%m-%d'), dte)
+        2026-10-16 33
+    """
+    import datetime as dt_module
+    base_dt = ref_date or datetime.now()
+    base_date = base_dt.date() if isinstance(base_dt, datetime) else base_dt
+
+    def _third_friday(y: int, m: int) -> dt_module.date:
+        first_day = dt_module.date(y, m, 1)
+        first_friday_day = 1 + (4 - first_day.weekday()) % 7
+        return dt_module.date(y, m, first_friday_day + 14)
+
+    y = base_date.year
+    m = base_date.month
+    cands = []
+    for _ in range(4):
+        cands.append(_third_friday(y, m))
+        m += 1
+        if m > 12:
+            m = 1
+            y += 1
+
+    for tf in cands:
+        d_val = (tf - base_date).days
+        if min_dte <= d_val <= max_dte:
+            return datetime.combine(tf, datetime.min.time()), d_val
+
+    viable = [tf for tf in cands if (tf - base_date).days >= min_dte]
+    if viable:
+        best = min(viable, key=lambda tf: abs((tf - base_date).days - 30))
+        return datetime.combine(best, datetime.min.time()), (best - base_date).days
+
+    return datetime.combine(cands[1], datetime.min.time()), (cands[1] - base_date).days
+
+
 class WeeklyIntelligenceEngine:
     """
     Descriptive Summary:
@@ -474,6 +536,8 @@ class WeeklyIntelligenceEngine:
             "annualized_roc_pct": annualized_roc,
             "pop_pct": pop_pct,
             "collateral_required": collateral_req,
+            "collateral_coverage_type": "100% Full Cash-Secured ($K * 100)",
+            "collateral_rationale": "100% of strike ($100 * K) is secured in cash regardless of low/zero assignment probability, guaranteeing zero margin call and zero forced liquidation risk.",
             "breakeven_price": breakeven,
             "discount_to_spot_pct": discount_pct,
             "assignment_probability_pct": assignment_prob_pct,
@@ -1435,23 +1499,30 @@ class WeeklyIntelligenceEngine:
             if t and t not in candidate_pool:
                 candidate_pool.append(t)
 
-        # Ensure high-priority liquid tickers are included in pool
-        priority_anchors = ["NVDA", "COIN", "INTC", "IBM", "PLTR", "AAPL", "BAC", "CVX", "MSFT", "AMD", "ABT", "KO", "CAT", "NEE", "LIN"]
+        # Ensure high-priority liquid capital-efficient blue-chip anchors (strike <= $125) are prioritized
+        priority_anchors = [
+            "INTC", "BAC", "KO", "CSCO", "C", "NEM", "ABT", "SO", "HPQ", "T", "PFE", "GE",
+            "NVDA", "COIN", "IBM", "PLTR", "AAPL", "CVX", "MSFT", "AMD", "CAT", "NEE", "LIN"
+        ]
         for t in priority_anchors:
             if t not in candidate_pool:
                 candidate_pool.append(t)
 
+        # Calculate exact monthly third-Friday options expiration date and DTE (30 to 35 days DTE)
+        target_monthly_expiry, target_monthly_dte = resolve_target_monthly_option_cycle()
+        logger.info(f"Targeting standard monthly third-Friday expiration: {target_monthly_expiry.strftime('%Y-%m-%d')} (DTE: {target_monthly_dte}).")
+
         potential_trades = []
-        target_count = 6  # Present 6 distinct high-conviction opportunities
-        staged_sectors: Dict[str, int] = {}  # Enforce max 2 trades per GICS sector for portfolio balance
+        target_count = 4  # Strictly 4 distinct high-conviction candidates across distinct GICS sectors
+        staged_sectors: Dict[str, int] = {}
 
         for symbol in candidate_pool:
             if len(potential_trades) >= target_count:
                 break
 
             sec = self.symbol_sector_map.get(symbol.upper(), normalize_gics_sector("", symbol))
-            if staged_sectors.get(sec, 0) >= 2:
-                # Skip to preserve sector diversification across all 11 GICS sectors
+            if staged_sectors.get(sec, 0) >= 1:
+                # Strictly 1 trade per distinct GICS sector for clean 4-sector diversification
                 continue
 
             # Formulate dynamic thesis and edge source
@@ -1469,34 +1540,46 @@ class WeeklyIntelligenceEngine:
             elif symbol in ["INTC"]:
                 thesis = "Semiconductor manufacturing reorganization and valuation consolidation provide durable floor. Selling conservative OTM Put offers attractive cash yield with margin safety."
                 edge_source = "Foundry Separation Floor & Realized Volatility Harvesting"
+            elif symbol in ["CSCO"]:
+                thesis = "Enterprise networking security backlog and healthy dividend yield create resilient foundation. Selling conservative OTM Put generates disciplined income."
+                edge_source = "Enterprise Networking Moat & Dividend Support"
+            elif symbol in ["BAC", "C"]:
+                thesis = f"{symbol} solid net interest income and capital return programs establish strong book value support. Selling conservative OTM Put generates steady premium."
+                edge_source = f"{symbol} Financial Fortress & Dividend Support"
+            elif symbol in ["KO"]:
+                thesis = "Global beverage distribution network and steady consumer demand provide bond-like defensive cushion. Selling conservative OTM Put captures steady yield."
+                edge_source = "Consumer Staple Fortress & Resilient Cash Flow"
+            elif symbol in ["ABT", "PFE"]:
+                thesis = f"{symbol} diversified healthcare and pharmaceutical balance sheet offer recession-resistant floor. Selling conservative OTM Put yields theta decay."
+                edge_source = f"{symbol} Defensive Healthcare Floor & Non-cyclical Premium"
+            elif symbol in ["NEM"]:
+                thesis = "Gold mining operating cash flows and balance sheet discipline provide natural hedge. Selling conservative OTM Put harvests options volatility."
+                edge_source = "Precious Metals Inflation Hedge & Volatility Harvest"
+            elif symbol in ["SO", "NEE"]:
+                thesis = f"{symbol} regulated utility rate base growth and AI datacenter clean energy demand create bond-like defensive cushion. Selling conservative OTM Put generates low-beta yield."
+                edge_source = f"{symbol} Regulated Utility Rate Base & Low-Beta Yield"
             elif symbol in ["IBM"]:
                 thesis = "Enterprise hybrid cloud bookings and consulting cash flows provide resilient downside support. Selling conservative OTM Put yields steady annualized cash flow."
                 edge_source = "Enterprise AI Consulting Cash Flow & Conservative CSP Yield"
             elif symbol in ["PLTR"]:
                 thesis = "Defense and enterprise AI contract momentum support structural growth trend. Selling conservative OTM Cash-Secured Put monetizes elevated options demand."
-                edge_source = "Enterprise AI & Defense Analytics Growth Trend"
-            elif symbol in ["BAC", "GS", "JPM", "C", "BRK.B"] or sec == "Financials":
-                thesis = f"{symbol} solid net interest income and capital return programs establish strong book value support. Selling conservative OTM Put generates steady premium."
-                edge_source = f"{symbol} Financial Fortress & High Dividend Yield Support"
-            elif symbol in ["CVX", "COP", "XOM", "SLB"] or sec == "Energy":
+                edge_source = "Enterprise AI Analytics Moat & Systematic Options Skew"
+            elif symbol in ["CVX", "COP", "XOM"] or sec == "Energy":
                 thesis = f"{symbol} resilient free cash flows and disciplined capital allocation provide reliable floor. Selling conservative OTM Put monetizes steady energy yield."
-                edge_source = f"{symbol} Energy Cash Flow & Structural Commodity Support"
-            elif symbol in ["ABT", "JNJ", "LLY", "PFE", "UNH"] or sec == "Health Care":
-                thesis = f"{symbol} non-cyclical healthcare demand, robust pharmaceutical pipelines, and balance sheet strength provide defensive ballast. Selling conservative ~10% OTM Put monetizes premium with low macro correlation."
-                edge_source = f"{symbol} Defensive Healthcare Floor & Non-cyclical Premium"
-            elif symbol in ["KO", "PEP", "PG", "COST", "WMT", "TGT"] or sec == "Consumer Staples":
+                edge_source = f"{symbol} Energy Cash Flow & Commodity Support"
+            elif sec == "Consumer Staples":
                 thesis = f"{symbol} essential consumer goods demand and strong dividend coverage provide dependable downside cushion. Selling conservative OTM Put monetizes steady yield."
                 edge_source = f"{symbol} Consumer Staple Fortress & Resilient Cash Flow"
-            elif symbol in ["GE", "CAT", "BA", "HON"] or sec == "Industrials":
+            elif sec == "Industrials":
                 thesis = f"{symbol} commercial manufacturing backlog and global infrastructure capex anchor valuation support. Selling conservative OTM Put yields theta decay."
                 edge_source = f"{symbol} Industrial Infrastructure Capex & Valuation Floor"
-            elif symbol in ["NEE", "DUK", "SO"] or sec == "Utilities":
+            elif sec == "Utilities":
                 thesis = f"{symbol} regulated utility rate base growth and AI datacenter clean energy demand create bond-like defensive cushion. Selling conservative OTM Put generates low-beta yield."
                 edge_source = f"{symbol} Regulated Utility Rate Base & Low-Beta Yield"
-            elif symbol in ["NEM", "LIN", "APD", "FCX"] or sec == "Materials":
+            elif sec == "Materials":
                 thesis = f"{symbol} essential industrial gas supply agreements / commodity asset backing create strong inflation-hedged balance sheet cushion. Selling conservative OTM Put harvests premium."
                 edge_source = f"{symbol} Materials Infrastructure & Inflation Hedge Cushion"
-            elif symbol in ["T", "VZ", "GOOGL", "META", "NFLX"] or sec == "Communication Services":
+            elif sec == "Communication Services":
                 thesis = f"{symbol} resilient recurring subscription revenues and communications network moat establish dependable support floor. Selling conservative OTM Put generates income."
                 edge_source = f"{symbol} Communication Services Network Moat & Recurring Yield"
             elif symbol in ["AAPL", "MSFT"]:
@@ -1511,15 +1594,20 @@ class WeeklyIntelligenceEngine:
                 strategy="CSP",
                 thesis=thesis,
                 edge_source=edge_source,
-                dte=35,
+                dte=target_monthly_dte,
                 risk_rating=4,
                 positions_list=positions_list,
                 margin_status=margin_status
             )
             if cand:
                 prem = cand.get("premium_estimate", 0.0)
-                # Reject penny options (< $0.50) and extreme binary gamble premiums (> $5.00)
-                if prem >= 0.50 and prem <= 5.00:
+                strike = cand.get("strike", 0.0)
+                has_earnings = cand.get("has_earnings_blackout", False)
+                # Strict Quality & Collateral Fit:
+                # 1. Reject penny options (< $0.50) and extreme binary gamble premiums (> $5.00)
+                # 2. Reject excessive strikes (> $125.00 / collateral > $12,500) to prevent single trades from eating the cash budget
+                # 3. Reject companies reporting earnings within the 30-45 DTE window (earnings blackout guard)
+                if 0.50 <= prem <= 5.00 and strike <= 125.0 and not has_earnings:
                     potential_trades.append(cand)
                     staged_sectors[sec] = staged_sectors.get(sec, 0) + 1
 
@@ -1527,7 +1615,7 @@ class WeeklyIntelligenceEngine:
         # 1. Target Sweet Spot: strictly $2.00 to $3.00 ($200 to $300 per contract)
         # 2. Enforce Cumulative Basket Collateral Cap: <= 50.0% of available cash (~$35,992 on $71,984 cash)
         # 3. Enforce Cumulative Margin Cap: <= 15.0% of total account equity (~$15,328 on $102,192 equity)
-        # 4. Enforce Active Staged Trades Ceiling: strictly 3 to 4 trades max with cross-sector diversification
+        # 4. Enforce Active Staged Trades Ceiling: strictly 4 trades max across 4 distinct GICS sectors
         sweet_spot_trades = [t for t in potential_trades if 2.00 <= t.get("premium_estimate", 0.0) <= 3.00]
         other_valid_trades = [t for t in potential_trades if t not in sweet_spot_trades]
 
@@ -1546,13 +1634,13 @@ class WeeklyIntelligenceEngine:
                 continue
 
             sec = cand.get("sector")
-            # Prefer 1 trade per sector initially unless candidate pool is limited
-            if sec in selected_sectors and len(selected_sectors) < min(3, len(sorted_candidates)):
+            # Enforce 1 trade per GICS sector for clean 4-sector diversification
+            if sec in selected_sectors and len(selected_sectors) < min(4, len(sorted_candidates)):
                 cand["status"] = "BENCH_RESERVE"
                 bench_candidates.append(cand)
                 continue
 
-            # Audit cumulative basket risk (<= 50% available cash, <= 15% margin)
+            # Audit cumulative basket risk (<= 50% available cash, <= 15% margin, <= 4 trades)
             basket_audit = self.margin_guardian.validate_cumulative_basket(
                 staged_candidates=active_staged,
                 new_candidate=cand,
@@ -1566,10 +1654,10 @@ class WeeklyIntelligenceEngine:
                 cand["rejection_reason"] = basket_audit.get("reasons", ["Cumulative basket limit exceeded"])[0]
                 bench_candidates.append(cand)
 
-        # If sector constraint resulted in fewer than 3 trades, fill from bench candidates that fit within limits
-        if len(active_staged) < 3 and bench_candidates:
+        # If sector constraint resulted in fewer than 4 trades, fill from bench candidates that fit within limits
+        if len(active_staged) < 4 and bench_candidates:
             for cand in list(bench_candidates):
-                if len(active_staged) >= 3:
+                if len(active_staged) >= 4:
                     break
                 basket_audit = self.margin_guardian.validate_cumulative_basket(
                     staged_candidates=active_staged,
@@ -1581,20 +1669,15 @@ class WeeklyIntelligenceEngine:
                     active_staged.append(cand)
                     bench_candidates.remove(cand)
 
-        # Stage the selected 3-4 active trades into DB as PROPOSED for user approval
+        # Purge any stale unapproved proposals for this week before saving the refined 4
+        database.purge_unapproved_staged_trades(week_label=week_label)
+
+        # Stage strictly the 4 refined active trades into DB as PROPOSED for user approval
         staged_trades = []
-        for trade in active_staged:
+        for trade in active_staged[:4]:
             trade["status"] = "PROPOSED"
             staged = self.trade_staging.stage_recommendation(trade, week_label=week_label)
             staged_trades.append(staged)
-
-        # Stage reserve candidates as BENCH_RESERVE for transparency
-        for trade in bench_candidates[:4]:
-            trade["status"] = "BENCH_RESERVE"
-            try:
-                self.trade_staging.stage_recommendation(trade, week_label=week_label)
-            except Exception:
-                pass
 
         return staged_trades
 

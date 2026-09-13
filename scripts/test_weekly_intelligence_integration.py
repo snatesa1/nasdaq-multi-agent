@@ -36,7 +36,7 @@ def test_engine_outputs():
         print(f"   * {row['asset']}: {row['level']} ({row['change']}) -> [{row['direction']}] Bias: {row['bias']}")
     assert len(table) == 8
     
-    print("\n✅ All WeeklyIntelligenceEngine methods tested successfully!")
+    print("\n[SUCCESS] All WeeklyIntelligenceEngine methods tested successfully!")
 
 if __name__ == "__main__":
     test_engine_outputs()
