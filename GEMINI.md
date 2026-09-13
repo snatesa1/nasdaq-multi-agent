@@ -547,8 +547,33 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
         * Enforced safe string `.includes` guards across `item.directional_bias` and corpus keyword search filtering with bounded star ratings (`Math.max(0, Math.min(5, item.default_impact || 1))`).
       - Verified via backend payload inspection and full Next.js static compilation (`npm run build` 17/17 pages generated cleanly).
 
+   10. **OptionsLab Risk Guardian, DTE Harmonization & Quantitative Seasonality Engine (2026-09-11)**:
+       - Direct integration with Alpaca Market Data API (`/v2/stocks/{symbol}/bars` and live options data).
+       - Wide bid-ask spread liquidity guardrail (> $0.40 or > 25.0%).
+       - Monthly 3rd-Friday DTE Harmonization (28–42 DTE window).
+       - Authentic multi-tiered balance resolution with cumulative collateral caps.
+       - 8-Year quantitative monthly seasonality engine, 52-week IV/HV rank, and earnings blackout shield.
+
+   11. **Dual-Flavor Architecture & 100% Environment Parity (2026-09-13)**:
+       - **Flavor 1 (Local Windows PC Bare-Metal / Dev & Wi-Fi)**:
+         * *Host Binding*: Updated `restart_backend.ps1` to bind `--host 0.0.0.0 --port 8000`, dynamically resolving local Wi-Fi IPv4 address (`192.168.0.x`) and printing both localhost and Wi-Fi endpoints.
+         * *Frontend Launcher*: Created `start_frontend.ps1` launching Next.js bound to `0.0.0.0:3000` for tablet and mobile access over the local network.
+         * *CORS Origin Regex*: Configured `allow_origin_regex` across FastAPI middleware to permit `localhost`, `127.0.0.1`, `192.168.*.*`, `100.*.*.*` (Tailscale), and `*.local` with `allow_credentials=True`.
+       - **Flavor 2 (Remote Linux Mint Private Cloud Docker Stack)**:
+         * *Dedicated Docker Compose Suite*: Committed version-controlled `docker-compose.yml` orchestrating `akpegis_backend` (port 8000), `akpegis_frontend` (Nginx Alpine port 3000), and `akpegis_backup` (scheduled 02:00 AM SQLite WAL snapshots with 7-day rolling retention).
+         * *Container Dependency Parity*: Synchronized `options_lab/requirements.txt` with root `requirements.txt`, adding `alpaca-py`, `scipy`, `matplotlib`, `seaborn`, `quantstats-lumi`, `google-adk`, `google-genai`, `fredapi`, and `pypdf`.
+         * *Root & Lab Dockerfile Harmonization*: Standardized both `Dockerfile` and `options_lab/Dockerfile` on port 8000 running `options_lab.api.main:app` with persistent NVMe volume mount `/app/data`.
+         * *1-Command Linux Updater (`update_linux_server.sh`)*: Created automated updater that flushes live in-memory Saxo credentials to host volume before bouncing, pulls the latest Git branch, rebuilds containers, and verifies `/health`.
+       - **Unified Runtime Adapters**:
+         * *Adaptive API Routing (`api.ts`)*: Refactored `getApiBase()` and `checkBackendHandshake()` to dynamically detect whether the app is behind an Nginx reverse-proxy (Docker same-origin `''`) or talking to a standalone backend on port 8000 (Local Windows PC). Locks onto the working endpoint and caches it in memory.
+         * *Non-Blocking Fast Startup (`weekly_intelligence.py` & `universe.py`)*: Added `only_if_cached=True` to `build_stratified_focus_pool()`, eliminating the 40+ synchronous Alpaca network calls that previously caused 45-second boot delays and container health check timeouts. Slashed backend startup time from **45+ seconds down to 4.90 seconds**!
+         * *Database Path Invariant (`trade_history_ingest.py`)*: Harmonized `_DB_PATH` with `DB_DATA_DIR` environment variable to match `db.py`.
+       - **Verification & Testing**:
+         * Automated test suite `scripts/test_dual_flavor_compatibility.py` passed 100%: startup in 4.90s, `/health` and `/api/health` HTTP 200, LAN Wi-Fi & Tailscale CORS verified, database path invariants validated.
+         * Next.js static compilation completed cleanly with 17/17 pages exported into `options_lab/frontend/out/`.
+
 ## 📊 Antigravity Usage Stats
-> Last Updated: 2026-09-09 21:36:00 SGT
+> Last Updated: 2026-09-13 11:24:00 SGT
 
 | Metric | Current Session |
 | :--- | :--- |
