@@ -18,7 +18,7 @@ if ($connections) {
             Write-Host "  -> Terminating orphan process PID $procId on port $Port..." -ForegroundColor Red
             Stop-Process -Id $procId -Force -ErrorAction SilentlyContinue
         } catch {
-            Write-Host "  -> Could not kill PID $procId: $_" -ForegroundColor DarkGray
+            Write-Host "  -> Could not kill PID ${procId}: $_" -ForegroundColor DarkGray
         }
     }
     Start-Sleep -Seconds 1
