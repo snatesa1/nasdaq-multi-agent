@@ -334,14 +334,16 @@ def options_greeks_node(state: Dict[str, Any]) -> Dict[str, Any]:
                     if contract_meta:
                         opt_uic = contract_meta.get("contract_uic")
                         strike = float(contract_meta.get("strike", strike))
-                        target_monthly_dte = int(contract_meta.get("calendar_dte", target_monthly_dte))
+                        actual_dte = int(contract_meta.get("calendar_dte", target_monthly_dte))
             except Exception as e_c:
                 logger.debug(f"Contract pre-resolution non-critical for {sym}: {e_c}")
+
+            actual_dte = actual_dte if 'actual_dte' in locals() else target_monthly_dte
 
             return sym, {
                 "strike": strike,
                 "delta": delta,
-                "dte": target_monthly_dte,
+                "dte": actual_dte,
                 "expiry_date": target_expiry_dt.strftime('%Y-%m-%d'),
                 "expiration_date": target_expiry_dt.strftime('%Y-%m-%d'),
                 "premium": premium,
