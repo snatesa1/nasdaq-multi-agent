@@ -139,7 +139,11 @@ def _init_db():
                 bid_price             REAL,
                 ask_price             REAL,
                 spread                REAL,
-                pricing_source        TEXT
+                pricing_source        TEXT,
+                contract_uic          INTEGER,
+                contract_description  TEXT,
+                contract_symbol       TEXT,
+                expiration_date       TEXT
             )
         """)
         # Dynamic schema migration for existing databases
@@ -147,7 +151,11 @@ def _init_db():
             ("bid_price", "REAL"),
             ("ask_price", "REAL"),
             ("spread", "REAL"),
-            ("pricing_source", "TEXT")
+            ("pricing_source", "TEXT"),
+            ("contract_uic", "INTEGER"),
+            ("contract_description", "TEXT"),
+            ("contract_symbol", "TEXT"),
+            ("expiration_date", "TEXT")
         ]:
             try:
                 conn.execute(f"ALTER TABLE staged_trades ADD COLUMN {col} {col_type}")
@@ -207,11 +215,203 @@ def _init_db():
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_corpus_category ON macro_category_corpus(category)")
         conn.execute("CREATE INDEX IF NOT EXISTS idx_corpus_keyword ON macro_category_corpus(keyword)")
+
+        # ── Dynamic User Watchlists ────────────────────────────────────
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS user_watchlists (
+                watchlist_id    TEXT NOT NULL,
+                name            TEXT NOT NULL,
+                symbol          TEXT NOT NULL,
+                position        INTEGER NOT NULL DEFAULT 0,
+                created_at      TEXT NOT NULL,
+                PRIMARY KEY (watchlist_id, symbol)
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_watchlists_id ON user_watchlists(watchlist_id)")
         conn.commit()
 
 
 # Initialise on import
 _init_db()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  DYNAMIC WATCHLIST MANAGEMENT
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def seed_default_watchlists() -> None:
+    """
+    Descriptive Summary:
+        Seeds baseline watchlists ('WL_STOCKS_US' for Stocks US and 'WL_PORTFOLIO' for Portfolio/Traded)
+        in SQLite if the user_watchlists table is empty.
+
+    Parameters:
+        None.
+
+    Returns:
+        None.
+
+    Exceptions / Side Effects:
+        Mutates SQLite user_watchlists table.
+
+    Concrete Executable Usage Example:
+        >>> seed_default_watchlists()
+    """
+    default_us_stocks = ["ABT", "T", "AAPL", "BAC", "BRK.B", "CVX", "CSCO", "C", "KO", "COP", "GE", "GS", "HPQ"]
+    portfolio_stocks = ["COIN", "INTC", "IBM", "PLTR", "NEM"]
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with _get_conn() as conn:
+        row = conn.execute("SELECT COUNT(*) as cnt FROM user_watchlists WHERE watchlist_id = 'WL_STOCKS_US'").fetchone()
+        if not row or row["cnt"] == 0:
+            for idx, sym in enumerate(default_us_stocks):
+                conn.execute("""
+                    INSERT OR IGNORE INTO user_watchlists (watchlist_id, name, symbol, position, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, ("WL_STOCKS_US", "Stocks US", sym, idx, now_iso))
+
+        p_row = conn.execute("SELECT COUNT(*) as cnt FROM user_watchlists WHERE watchlist_id = 'WL_PORTFOLIO'").fetchone()
+        if not p_row or p_row["cnt"] == 0:
+            for idx, sym in enumerate(portfolio_stocks):
+                conn.execute("""
+                    INSERT OR IGNORE INTO user_watchlists (watchlist_id, name, symbol, position, created_at)
+                    VALUES (?, ?, ?, ?, ?)
+                """, ("WL_PORTFOLIO", "Portfolio & Traded", sym, idx, now_iso))
+        conn.commit()
+
+
+def get_user_watchlists() -> List[Dict[str, Any]]:
+    """
+    Descriptive Summary:
+        Retrieves all user watchlists from SQLite with aggregated ticker counts and display ordering.
+
+    Parameters:
+        None.
+
+    Returns:
+        List[Dict[str, Any]]: List of watchlist metadata objects:
+            - WatchlistId (str): Unique watchlist ID (e.g. 'WL_STOCKS_US').
+            - Name (str): Human-friendly name (e.g. 'Stocks US').
+            - Position (int): Sort order.
+            - count (int): Count of tickers in watchlist.
+
+    Exceptions / Side Effects:
+        Queries SQLite user_watchlists table and triggers seed_default_watchlists() if needed.
+
+    Concrete Executable Usage Example:
+        >>> wls = get_user_watchlists()
+        >>> assert len(wls) >= 1
+    """
+    seed_default_watchlists()
+    with _get_conn() as conn:
+        rows = conn.execute("""
+            SELECT watchlist_id, name, MIN(position) as min_pos, COUNT(symbol) as cnt
+            FROM user_watchlists
+            GROUP BY watchlist_id, name
+            ORDER BY min_pos ASC
+        """).fetchall()
+        return [
+            {
+                "WatchlistId": r["watchlist_id"],
+                "Name": r["name"],
+                "Position": r["min_pos"],
+                "count": r["cnt"]
+            }
+            for r in rows
+        ]
+
+
+def get_watchlist_symbols(watchlist_id: str) -> List[str]:
+    """
+    Descriptive Summary:
+        Retrieves the ordered list of uppercase ticker symbols for a specific watchlist.
+
+    Parameters:
+        watchlist_id (str): Watchlist ID to query (e.g. 'WL_STOCKS_US').
+
+    Returns:
+        List[str]: List of uppercase ticker symbols.
+
+    Exceptions / Side Effects:
+        Queries SQLite user_watchlists table.
+
+    Concrete Executable Usage Example:
+        >>> syms = get_watchlist_symbols('WL_STOCKS_US')
+        >>> assert 'AAPL' in syms
+    """
+    seed_default_watchlists()
+    with _get_conn() as conn:
+        rows = conn.execute("""
+            SELECT symbol FROM user_watchlists
+            WHERE watchlist_id = ?
+            ORDER BY position ASC
+        """, (watchlist_id,)).fetchall()
+        if not rows and watchlist_id in ["WL_STOCKS_US", "WL_DEFAULT"]:
+            return ["ABT", "T", "AAPL", "BAC", "BRK.B", "CVX", "CSCO", "C", "KO", "COP", "GE", "GS", "HPQ"]
+        return [r["symbol"] for r in rows]
+
+
+def add_to_watchlist(watchlist_id: str, name: str, symbol: str) -> bool:
+    """
+    Descriptive Summary:
+        Adds a ticker symbol to a designated watchlist in SQLite.
+
+    Parameters:
+        watchlist_id (str): Unique watchlist ID.
+        name (str): Display name for the watchlist.
+        symbol (str): Ticker symbol to add.
+
+    Returns:
+        bool: True upon successful insertion.
+
+    Exceptions / Side Effects:
+        Mutates SQLite user_watchlists table.
+
+    Concrete Executable Usage Example:
+        >>> ok = add_to_watchlist('WL_STOCKS_US', 'Stocks US', 'NVDA')
+        >>> assert ok is True
+    """
+    sym = symbol.strip().upper()
+    now_iso = datetime.now(timezone.utc).isoformat()
+    with _get_conn() as conn:
+        max_pos = conn.execute(
+            "SELECT COALESCE(MAX(position), -1) as mp FROM user_watchlists WHERE watchlist_id = ?",
+            (watchlist_id,)
+        ).fetchone()["mp"]
+        conn.execute("""
+            INSERT OR REPLACE INTO user_watchlists (watchlist_id, name, symbol, position, created_at)
+            VALUES (?, ?, ?, ?, ?)
+        """, (watchlist_id, name, sym, max_pos + 1, now_iso))
+        conn.commit()
+    return True
+
+
+def remove_from_watchlist(watchlist_id: str, symbol: str) -> bool:
+    """
+    Descriptive Summary:
+        Removes a ticker symbol from a designated watchlist in SQLite.
+
+    Parameters:
+        watchlist_id (str): Unique watchlist ID.
+        symbol (str): Ticker symbol to remove.
+
+    Returns:
+        bool: True upon successful deletion.
+
+    Exceptions / Side Effects:
+        Mutates SQLite user_watchlists table.
+
+    Concrete Executable Usage Example:
+        >>> ok = remove_from_watchlist('WL_STOCKS_US', 'NVDA')
+        >>> assert ok is True
+    """
+    sym = symbol.strip().upper()
+    with _get_conn() as conn:
+        conn.execute(
+            "DELETE FROM user_watchlists WHERE watchlist_id = ? AND symbol = ?",
+            (watchlist_id, sym)
+        )
+        conn.commit()
+    return True
 
 
 def save_broker_tokens(
@@ -902,7 +1102,8 @@ def save_staged_trade(record: Dict[str, Any]):
                     margin_check_result, safety_check_result, status,
                     saxo_order_id, saxo_order_response, proposed_at,
                     approved_at, executed_at, week_label,
-                    bid_price, ask_price, spread, pricing_source
+                    bid_price, ask_price, spread, pricing_source,
+                    contract_uic, contract_description, contract_symbol, expiration_date
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?,
                     ?, ?, ?, ?,
@@ -910,6 +1111,7 @@ def save_staged_trade(record: Dict[str, Any]):
                     ?, ?, ?,
                     ?, ?, ?,
                     ?, ?, ?,
+                    ?, ?, ?, ?,
                     ?, ?, ?, ?
                 )
                 ON CONFLICT(trade_id) DO UPDATE SET
@@ -923,7 +1125,11 @@ def save_staged_trade(record: Dict[str, Any]):
                     bid_price = COALESCE(excluded.bid_price, staged_trades.bid_price),
                     ask_price = COALESCE(excluded.ask_price, staged_trades.ask_price),
                     spread = COALESCE(excluded.spread, staged_trades.spread),
-                    pricing_source = COALESCE(excluded.pricing_source, staged_trades.pricing_source)
+                    pricing_source = COALESCE(excluded.pricing_source, staged_trades.pricing_source),
+                    contract_uic = COALESCE(excluded.contract_uic, staged_trades.contract_uic),
+                    contract_description = COALESCE(excluded.contract_description, staged_trades.contract_description),
+                    contract_symbol = COALESCE(excluded.contract_symbol, staged_trades.contract_symbol),
+                    expiration_date = COALESCE(excluded.expiration_date, staged_trades.expiration_date)
                 """,
                 (
                     record.get("trade_id"), record.get("symbol"), record.get("strategy"), record.get("direction"),
@@ -933,7 +1139,9 @@ def save_staged_trade(record: Dict[str, Any]):
                     record.get("margin_check_result"), record.get("safety_check_result"), record.get("status", "PROPOSED"),
                     record.get("saxo_order_id"), record.get("saxo_order_response"), record.get("proposed_at"),
                     record.get("approved_at"), record.get("executed_at"), record.get("week_label"),
-                    record.get("bid_price"), record.get("ask_price"), record.get("spread"), record.get("pricing_source")
+                    record.get("bid_price"), record.get("ask_price"), record.get("spread"), record.get("pricing_source"),
+                    record.get("contract_uic") or record.get("uic"), record.get("contract_description"),
+                    record.get("contract_symbol"), record.get("expiration_date")
                 )
             )
             conn.commit()

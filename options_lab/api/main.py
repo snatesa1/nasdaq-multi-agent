@@ -1088,6 +1088,59 @@ async def get_broker_watchlist_instruments(watchlist_id: str, user=Depends(verif
         logger.error(f"Failed to fetch watchlist instruments: {e}")
         return {"watchlist_id": watchlist_id, "instruments": []}
 
+@app.post("/api/broker/watchlist/{watchlist_id}/symbols")
+async def add_symbol_to_watchlist(watchlist_id: str, payload: Dict[str, Any], user=Depends(verify_firebase_token)):
+    """
+    Descriptive Summary:
+        Adds a ticker symbol to a user watchlist stored in SQLite and returns the refreshed watchlist.
+
+    Parameters:
+        watchlist_id (str): Target watchlist identifier.
+        payload (Dict[str, Any]): Dictionary containing 'symbol' and optional 'name'.
+        user: Authenticated Firebase user context.
+
+    Returns:
+        Dict[str, Any]: Status payload with refreshed instruments list.
+
+    Exceptions / Side Effects:
+        Mutates SQLite user_watchlists table.
+
+    Concrete Executable Usage Example:
+        POST /api/broker/watchlist/WL_STOCKS_US/symbols {"symbol": "NVDA"}
+    """
+    symbol = payload.get("symbol", "").strip().upper()
+    if not symbol:
+        raise HTTPException(status_code=400, detail="Symbol is required.")
+    name = payload.get("name", "Stocks US")
+    database.add_to_watchlist(watchlist_id, name, symbol)
+    instruments = saxo_broker_client.get_watchlist_instruments(watchlist_id)
+    return {"status": "SUCCESS", "watchlist_id": watchlist_id, "symbol": symbol, "instruments": instruments}
+
+@app.delete("/api/broker/watchlist/{watchlist_id}/symbols/{symbol}")
+async def remove_symbol_from_watchlist(watchlist_id: str, symbol: str, user=Depends(verify_firebase_token)):
+    """
+    Descriptive Summary:
+        Removes a ticker symbol from a user watchlist in SQLite and returns the refreshed watchlist.
+
+    Parameters:
+        watchlist_id (str): Target watchlist identifier.
+        symbol (str): Ticker symbol to remove.
+        user: Authenticated Firebase user context.
+
+    Returns:
+        Dict[str, Any]: Status payload with refreshed instruments list.
+
+    Exceptions / Side Effects:
+        Mutates SQLite user_watchlists table.
+
+    Concrete Executable Usage Example:
+        DELETE /api/broker/watchlist/WL_STOCKS_US/symbols/NVDA
+    """
+    clean_sym = symbol.strip().upper()
+    database.remove_from_watchlist(watchlist_id, clean_sym)
+    instruments = saxo_broker_client.get_watchlist_instruments(watchlist_id)
+    return {"status": "SUCCESS", "watchlist_id": watchlist_id, "symbol": clean_sym, "instruments": instruments}
+
 @app.get("/api/broker/closed-positions")
 async def get_broker_closed_positions(user=Depends(verify_firebase_token)):
     """Fetches historical closed positions / order blotter with realized P&L."""

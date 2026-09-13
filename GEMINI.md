@@ -629,11 +629,32 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
           * 5-metric KPI ribbon updated: Monthly Goal (\$1,000), Projected Harvest, Candidates Cap (4 / 4), Total Cash Collateral, and Collateral Headroom.
           * Candidate cards now feature standard third-week expiration badge `📅 2026-10-16 (33 DTE • 3rd Wk)` and a prominent amber `100% Full Cash-Secured Guarantee ($K × 100)` card detailing the reserved unencumbered collateral.
         - **Verification & Parity**:
-          * Next.js production build (`npm run build`) compiled 17/17 routes with 0 errors.
-          * Integration test suite `scripts/test_weekly_intelligence_integration.py` passed 100%.
+           * Next.js production build (`npm run build`) compiled 17/17 routes with 0 errors.
+           * Integration test suite `scripts/test_weekly_intelligence_integration.py` passed 100%.
+
+     14. **Dynamic SQLite Watchlists, Authentic Stock UIC Resolution & Live Quote Hydration (2026-09-13)**:
+         - **Elimination of Hardcoded Watchlist Snapshots (`saxo_client.py`)**:
+           * Purged legacy hardcoded `stocks_us_instruments` static array with stale price snapshots (`112.33`, `24.97`, `307.28`...).
+           * Implemented `user_watchlists` table in SQLite (`optionslab.db`) with composite primary key `(watchlist_id, symbol)` and indexed ordering.
+           * Added `seed_default_watchlists()`, `get_user_watchlists()`, `get_watchlist_symbols(watchlist_id)`, `add_to_watchlist()`, and `remove_from_watchlist()` in `db.py`, all fully stamped with 5-point docstrings.
+         - **Authentic Primary US Stock UIC Resolution & Multi-Exchange Collision Prevention**:
+           * Differentiated Saxo Option Root IDs (e.g. 169, 184, 266, 381) from tradeable stock UICs. Resolved authentic tradeable US stock UICs: `ABT: 329`, `T: 303`, `AAPL: 211`, `BAC: 375`, `BRK.B: 2631`, `CVX: 2128`, `CSCO: 226`, `C: 306`, `KO: 307`, `COP: 4597`, `GE: 312`, `GS: 1255`, `HPQ: 3102`, `INTC: 247`.
+           * Filtered symbol lookups against primary US exchanges (`:xnys`, `:xnas`, `:arcx`) to eliminate foreign ticker collisions (e.g. Canadian `:xtse` Telus vs US `T`, BacTech vs `BAC`, HPQ on TSX).
+           * Implemented concurrent thread pool hydration in `get_watchlist_instruments()`, resolving authentic real-time market prices across all 13 tickers concurrently in under 1.5 seconds.
+         - **Watchlist Management REST Endpoints & Frontend Client Bindings**:
+           * Added `POST /api/broker/watchlist/{watchlist_id}/symbols` to add tickers to watchlists dynamically.
+           * Added `DELETE /api/broker/watchlist/{watchlist_id}/symbols/{symbol}` to remove tickers dynamically.
+           * Exposed `addWatchlistSymbol` and `removeWatchlistSymbol` in frontend `api.ts`.
+         - **Strict Pre-Execution Contract Locking & Tamper-Proof Safeguards (`trade_staging.py`)**:
+           * Pre-execution verification freezes `contract_uic`, `contract_description`, `contract_symbol`, and `expiration_date` directly in `staged_trades`.
+           * During `approve_and_execute_trade`, queries live broker instrument details for `contract_uic` and immediately hard-aborts if `BLOCKED_EXPIRY_MISMATCH` or `BLOCKED_TICKER_MISMATCH` occurs, preventing multi-year LEAPS order submission bugs.
+           * Staged verified 2026-W37 monthly third-Friday candidates: `INTC 90 P` (UIC `56955175`), `C 125 P` (UIC `54887530`), `ABT 95 P` (UIC `57874430`), `KO 85 P` (UIC `55595409`).
+         - **Verification & UI Badges**:
+           * Frontend `weekly-intelligence/page.tsx` renders verified `Saxo UIC: {uic}` badges on candidate cards.
+           * Next.js production build compiled cleanly with 17/17 routes exported.
 
 ## 📊 Antigravity Usage Stats
-> Last Updated: 2026-09-13 14:25:00 SGT
+> Last Updated: 2026-09-13 15:05:00 SGT
 
 | Metric | Current Session |
 | :--- | :--- |

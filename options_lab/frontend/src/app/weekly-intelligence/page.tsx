@@ -801,6 +801,18 @@ export default function WeeklyIntelligencePage() {
                               </>
                             )}
                           </div>
+
+                          {trade.contract_uic && (
+                            <div className="flex flex-wrap items-center gap-2 mt-1 text-[11px] text-slate-600 font-mono">
+                              <span className="px-2 py-0.5 bg-slate-100 border border-slate-200 rounded text-slate-700 font-semibold">
+                                Saxo: {trade.contract_description || `${trade.symbol} ${trade.expiration_date} ${trade.strike} Put`}
+                              </span>
+                              <span className="text-slate-500 font-bold">UIC: {trade.contract_uic}</span>
+                              {trade.contract_symbol && (
+                                <span className="text-slate-400 text-[10px] hidden sm:inline">({trade.contract_symbol})</span>
+                              )}
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -808,7 +820,11 @@ export default function WeeklyIntelligencePage() {
                       <div className="flex flex-wrap items-center gap-3">
                         <div className="flex flex-col items-end gap-1">
                           <div className="flex items-center gap-1.5">
-                            {trade.contract_verified ? (
+                            {trade.contract_uic ? (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold" title={trade.contract_description || ''}>
+                                <CheckCircle2 className="h-3 w-3" /> UIC: {trade.contract_uic} (Verified)
+                              </span>
+                            ) : trade.contract_verified ? (
                               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 text-[10px] font-bold">
                                 <CheckCircle2 className="h-3 w-3" /> Contract Verified
                               </span>

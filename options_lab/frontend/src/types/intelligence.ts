@@ -133,6 +133,9 @@ export interface StagedTrade {
   assignment_probability_pct?: number;
   assignment_risk_description?: string;
   contract_verified?: boolean;
+  contract_uic?: number;
+  contract_description?: string;
+  contract_symbol?: string;
   verification_status?: string;
   exchange_precheck_viable?: boolean;
   precheck_margin_impact?: number;

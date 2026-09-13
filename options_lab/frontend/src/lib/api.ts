@@ -206,6 +206,10 @@ export const optionsApi = {
   getBrokerWatchlists: (): Promise<{ watchlists: any[] }> => apiRequest('/api/broker/watchlists'),
   getBrokerWatchlistInstruments: (watchlistId: string): Promise<{ watchlist_id: string; instruments: any[] }> =>
     apiRequest(`/api/broker/watchlist/${encodeURIComponent(watchlistId)}`),
+  addWatchlistSymbol: (watchlistId: string, symbol: string, name?: string): Promise<any> =>
+    apiRequest(`/api/broker/watchlist/${encodeURIComponent(watchlistId)}/symbols`, 'POST', { symbol, name }),
+  removeWatchlistSymbol: (watchlistId: string, symbol: string): Promise<any> =>
+    apiRequest(`/api/broker/watchlist/${encodeURIComponent(watchlistId)}/symbols/${encodeURIComponent(symbol)}`, 'DELETE'),
   scanCspOpportunities: (source: string = 'saxo', watchlistId?: string): Promise<{ source: string; scanned_symbols: string[]; opportunities: any[] }> =>
     apiRequest(watchlistId ? `/api/scanner/csp?source=${source}&watchlist_id=${encodeURIComponent(watchlistId)}` : `/api/scanner/csp?source=${source}`),
   placeBrokerOrder: (payload: { uic: number; asset_type?: string; amount?: number; buy_sell?: string; order_type?: string; order_price: number }) =>

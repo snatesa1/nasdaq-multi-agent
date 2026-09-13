@@ -319,17 +319,41 @@ def options_greeks_node(state: Dict[str, Any]) -> Dict[str, Any]:
             delta = round(greeks.get("delta", -0.20), 2)
             annualized_roc = round((premium / strike) * (365.0 / target_monthly_dte) * 100.0, 1) if strike > 0 else 0.0
 
+            # Pre-resolve authentic Saxo Option Contract UIC and metadata across all months
+            contract_meta = None
+            opt_uic = None
+            try:
+                if saxo_client and saxo_client.access_token:
+                    contract_meta = saxo_client.resolve_exact_option_contract(
+                        symbol=sym,
+                        strike=strike,
+                        option_type="Put",
+                        target_expiration_date=target_expiry_dt.strftime('%Y-%m-%d'),
+                        dte=target_monthly_dte
+                    )
+                    if contract_meta:
+                        opt_uic = contract_meta.get("contract_uic")
+                        strike = float(contract_meta.get("strike", strike))
+                        target_monthly_dte = int(contract_meta.get("calendar_dte", target_monthly_dte))
+            except Exception as e_c:
+                logger.debug(f"Contract pre-resolution non-critical for {sym}: {e_c}")
+
             return sym, {
                 "strike": strike,
                 "delta": delta,
                 "dte": target_monthly_dte,
                 "expiry_date": target_expiry_dt.strftime('%Y-%m-%d'),
+                "expiration_date": target_expiry_dt.strftime('%Y-%m-%d'),
                 "premium": premium,
                 "bid_price": bid,
                 "ask_price": ask,
                 "spread": spread,
                 "pricing_source": source,
-                "annualized_roc_pct": annualized_roc
+                "annualized_roc_pct": annualized_roc,
+                "uic": opt_uic,
+                "contract_uic": opt_uic,
+                "contract_description": contract_meta.get("contract_description") if contract_meta else f"{sym} {target_expiry_dt.strftime('%Y-%m-%d')} {strike:.1f} Put",
+                "contract_symbol": contract_meta.get("contract_symbol") if contract_meta else None
             }
         except Exception as err:
             logger.warning(f"Option worker error for {sym}: {err}")
@@ -360,12 +384,31 @@ def options_greeks_node(state: Dict[str, Any]) -> Dict[str, Any]:
 @node(name="multi_agent_synthesizer", timeout=30.0)
 def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Aggregates Tier 2 specialists (Tech, Fund, Greeks) into strictly 4 sector-diversified candidates.
-    Enforces strict criteria:
-    1. Strike <= $125.00 (Collateral <= $12,500) to ensure full 4-contract basket fits within cash budget.
-    2. Strictly 1 trade per distinct GICS sector.
-    3. Target sweet spot $2.00–$3.00 premium ($200–$300/contract) to achieve $1,000/month harvest.
-    4. Strictly 4 candidates max.
+    Descriptive Summary:
+        Aggregates Tier 2 specialists (Tech, Fund, Greeks) into strictly 4 sector-diversified candidates.
+        Enforces strict criteria: Strike <= $125.00, strictly 1 trade per distinct GICS sector,
+        sweet spot $2.00–$3.00 premium, exact monthly expiration dates, pre-resolved Saxo contract UICs,
+        and strictly 4 candidates maximum.
+
+    Parameters:
+        state (Dict[str, Any]): The workflow state dictionary containing:
+            - tech_data (Dict[str, Any]): Technical analysis and spot prices.
+            - fund_data (Dict[str, Any]): Fundamental valuation and sector classifications.
+            - options_data (Dict[str, Any]): Greeks, pricing, and pre-resolved Saxo option contracts.
+            - candidate_pool (List[str]): Symbols evaluated across specialist nodes.
+
+    Returns:
+        Dict[str, Any]: Updated state dictionary containing:
+            - potential_candidates (List[Dict[str, Any]]): Up to 4 refined candidates with exact UICs.
+            - step_completed (str): 'multi_agent_synthesizer'.
+
+    Exceptions / Side Effects:
+        Pure state transformation. No external I/O or network calls.
+
+    Concrete Executable Usage Example:
+        >>> state = {"tech_data": {}, "fund_data": {}, "options_data": {}, "candidate_pool": []}
+        >>> res = synthesizer_node(state)
+        >>> assert "potential_candidates" in res
     """
     tech_data = state.get("tech_data", {})
     fund_data = state.get("fund_data", {})
@@ -428,6 +471,11 @@ def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
             "strike": o["strike"],
             "delta": o["delta"],
             "dte": o["dte"],
+            "expiration_date": o.get("expiration_date") or o.get("expiry_date"),
+            "contract_uic": o.get("contract_uic") or o.get("uic"),
+            "contract_description": o.get("contract_description"),
+            "contract_symbol": o.get("contract_symbol"),
+            "contract_verified": bool(o.get("contract_uic") or o.get("uic")),
             "premium_estimate": o["premium"],
             "bid_price": o.get("bid_price", 0.0),
             "ask_price": o.get("ask_price", 0.0),

@@ -416,17 +416,29 @@ class WeeklyIntelligenceEngine:
             opt_type = "call"
             direction = "NEUTRAL_BULLISH"
 
-        # Resolve authentic contract UIC from Saxo OpenAPI
+        # Resolve target monthly expiration date (standard third-Friday)
+        target_exp_date, target_dte = resolve_target_monthly_option_cycle(28, 35)
+        target_exp_str = target_exp_date.strftime("%Y-%m-%d")
+        dte = target_dte
+
+        # Resolve authentic contract UIC and metadata across all months from Saxo OpenAPI
         option_uic = None
+        contract_meta = None
         try:
-            option_uic = self.saxo_client.resolve_option_contract_uic(
+            contract_meta = self.saxo_client.resolve_exact_option_contract(
                 symbol=symbol,
                 strike=strike,
                 option_type="Put" if is_put else "Call",
+                target_expiration_date=target_exp_str,
                 dte=dte
             )
+            if contract_meta:
+                option_uic = contract_meta.get("contract_uic")
+                strike = float(contract_meta.get("strike", strike))
+                dte = int(contract_meta.get("calendar_dte", dte))
+                target_exp_str = str(contract_meta.get("expiration_date", target_exp_str))
         except Exception as e:
-            logger.debug(f"UIC resolution non-critical: {e}")
+            logger.warning(f"Exact contract resolution for {symbol} failed: {e}")
 
         # Fetch authentic live market quote (Saxo OpenAPI -> OPRA Option Chain)
         quote = fetch_option_market_quote(
@@ -495,7 +507,10 @@ class WeeklyIntelligenceEngine:
         # 5-Point Cryptographic / Structural Contract Verification
         contract_verified = False
         verification_msg = "UNVERIFIED"
-        if hasattr(self.saxo_client, "verify_option_contract"):
+        # 5-Point Cryptographic / Structural Contract Verification
+        contract_verified = bool(option_uic and contract_meta and contract_meta.get("contract_uic"))
+        verification_msg = "VERIFIED_SAXO_CONTRACT" if contract_verified else "UNVERIFIED"
+        if not contract_verified and hasattr(self.saxo_client, "verify_option_contract"):
             contract_verified, verification_msg = self.saxo_client.verify_option_contract({
                 "asset_type": "StockOption",
                 "underlying_symbol": symbol,
@@ -526,12 +541,16 @@ class WeeklyIntelligenceEngine:
             "strike": round(strike, 2),
             "delta": delta,
             "dte": dte,
+            "expiration_date": target_exp_str,
             "premium_estimate": premium,
             "bid_price": bid_price,
             "ask_price": ask_price,
             "spread": spread,
             "pricing_source": quote_source,
             "uic": option_uic,
+            "contract_uic": option_uic,
+            "contract_description": contract_meta.get("contract_description") if contract_meta else f"{symbol} {target_exp_str} {strike:.1f} {'Put' if is_put else 'Call'}",
+            "contract_symbol": contract_meta.get("contract_symbol") if contract_meta else None,
             "contracts": 1,
             "annualized_roc_pct": annualized_roc,
             "pop_pct": pop_pct,

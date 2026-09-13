@@ -108,7 +108,11 @@ class TradeStagingEngine:
             "ask_price": float(rec.get("ask_price", 0.0) or 0.0),
             "spread": float(rec.get("spread", 0.0) or 0.0),
             "pricing_source": rec.get("pricing_source", "OPRA_LIVE"),
-            "uic": rec.get("uic"),
+            "uic": rec.get("contract_uic") or rec.get("uic"),
+            "contract_uic": rec.get("contract_uic") or rec.get("uic"),
+            "contract_description": rec.get("contract_description"),
+            "contract_symbol": rec.get("contract_symbol"),
+            "expiration_date": rec.get("expiration_date"),
             "contracts": contracts,
             "spot_price": spot_price,
             "annualized_roc_pct": float(rec.get("annualized_roc_pct", 0.0)),
@@ -215,24 +219,93 @@ class TradeStagingEngine:
         asset_type = "StockOption" if ("CSP" in strategy or "CC" in strategy or "OPTION" in strategy) else "Stock"
         opt_type = "Put" if "CSP" in strategy else ("Call" if "CC" in strategy else "Put")
 
-        # 3. Resolve UIC for instrument
-        uic = None
+        # 3. Resolve & Verify Contract UIC with Zero-Guessing Integrity Guard
+        uic = record.get("contract_uic") or record.get("uic")
+        expected_expiry = record.get("expiration_date")
+
         if asset_type == "StockOption":
-            uic = self.saxo_client.resolve_option_contract_uic(
-                symbol=symbol,
-                strike=strike,
-                option_type=opt_type,
-                dte=dte
-            )
+            # If UIC was not pre-staged, attempt exact resolution
+            if not uic:
+                meta = self.saxo_client.resolve_exact_option_contract(
+                    symbol=symbol,
+                    strike=strike,
+                    option_type=opt_type,
+                    target_expiration_date=expected_expiry,
+                    dte=dte
+                )
+                if meta:
+                    uic = meta["contract_uic"]
+                    expected_expiry = meta["expiration_date"]
+                    record["contract_uic"] = uic
+                    record["contract_description"] = meta["contract_description"]
+                    record["contract_symbol"] = meta["contract_symbol"]
+                    record["expiration_date"] = expected_expiry
 
-        if not uic:
-            instruments = self.saxo_client.search_instruments(symbol, asset_types=[asset_type, "Stock"])
-            if instruments and isinstance(instruments, list):
-                first_inst = instruments[0]
-                uic = int(first_inst.get("Uic") or first_inst.get("Identifier") or first_inst.get("PrimaryListing") or 0)
+            # Hard Integrity Pre-Flight Check: Verify contract details against Saxo live
+            if uic and int(uic) > 0:
+                uic = int(uic)
+                details = self.saxo_client.get_instrument_details(uic, "StockOption")
+                if details:
+                    contract_desc = details.get("Description", "")
+                    contract_expiry = str(details.get("ExpiryDate", "")).split("T")[0]
+                    contract_sym = str(details.get("Symbol", "")).split(":")[0].split("/")[0].upper()
 
-        if not uic:
-            uic = SaxoClient.KNOWN_UICS.get(symbol, 123456)
+                    # Audit Expiry Date match
+                    if expected_expiry and contract_expiry != expected_expiry:
+                        error_msg = (
+                            f"CONTRACT INTEGRITY FAILURE: Staged expiry is '{expected_expiry}', but resolved Saxo contract "
+                            f"'{contract_desc}' (UIC: {uic}) expires on '{contract_expiry}'. Order execution blocked to prevent wrong-month execution."
+                        )
+                        logger.error(error_msg)
+                        record["status"] = "BLOCKED_EXPIRY_MISMATCH"
+                        database.save_staged_trade(record)
+                        return {
+                            "status": "BLOCKED_EXPIRY_MISMATCH",
+                            "trade_id": trade_id,
+                            "reasons": [error_msg],
+                            "record": record
+                        }
+
+                    # Audit Underlying Ticker match
+                    if contract_sym and not (contract_sym == symbol.upper() or contract_sym.startswith(symbol.upper())):
+                        error_msg = (
+                            f"CONTRACT TICKER MISMATCH: Expected underlying ticker '{symbol}', but resolved Saxo contract "
+                            f"'{contract_desc}' (UIC: {uic}) belongs to '{contract_sym}'. Order execution blocked."
+                        )
+                        logger.error(error_msg)
+                        record["status"] = "BLOCKED_TICKER_MISMATCH"
+                        database.save_staged_trade(record)
+                        return {
+                            "status": "BLOCKED_TICKER_MISMATCH",
+                            "trade_id": trade_id,
+                            "reasons": [error_msg],
+                            "record": record
+                        }
+
+            if not uic or int(uic) <= 0:
+                error_msg = f"Cannot approve trade {trade_id}: No verified Saxo Option Contract UIC exists for {symbol} {strike} {opt_type} expiring {expected_expiry}."
+                logger.error(error_msg)
+                record["status"] = "BLOCKED_NO_CONTRACT"
+                database.save_staged_trade(record)
+                return {
+                    "status": "BLOCKED_NO_CONTRACT",
+                    "trade_id": trade_id,
+                    "reasons": [error_msg],
+                    "record": record
+                }
+        else:
+            # Stock asset type resolution
+            if not uic:
+                instruments = self.saxo_client.search_instruments(symbol, asset_types=["Stock"])
+                if instruments and isinstance(instruments, list):
+                    for inst in instruments:
+                        inst_sym = (inst.get("Symbol") or "").split(":")[0].upper()
+                        if inst_sym == symbol.upper():
+                            uic = int(inst.get("Uic") or inst.get("Identifier") or 0)
+                            break
+            if not uic:
+                uic = SaxoClient.KNOWN_UICS.get(symbol, 123456)
+            uic = int(uic)
 
         # 4. Place Order on Saxo
         record["approved_at"] = now_iso
