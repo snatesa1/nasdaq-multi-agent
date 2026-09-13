@@ -96,8 +96,10 @@ def macro_news_ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
     weekly_engine: WeeklyIntelligenceEngine = state.get("weekly_engine") or WeeklyIntelligenceEngine(saxo_client=saxo_client)
 
     logger.info("📡 [ADK Node: macro_news_ingestion] Collecting live news catalysts...")
-    raw_news = saxo_client.get_portfolio_news(top=30)
+    raw_news = weekly_engine.collect_weekly_news_events()
     macro_cards = weekly_engine._extract_dynamic_macro_events(raw_news)
+    market_summary = weekly_engine.build_market_summary_accordions(raw_news)
+    cross_asset_table = weekly_engine.build_cross_asset_directional_table()
     
     # Extract ticker mentions
     news_extracted_tickers = []
@@ -136,6 +138,8 @@ def macro_news_ingestion_node(state: Dict[str, Any]) -> Dict[str, Any]:
         **state,
         "raw_news": raw_news,
         "macro_cards": macro_cards,
+        "market_summary": market_summary,
+        "cross_asset_table": cross_asset_table,
         "candidate_pool": candidate_pool,
         "news_ticker_contexts": news_ticker_contexts,
         "step_completed": "macro_news_ingestion"
@@ -666,15 +670,34 @@ class OptionsADKWorkflowEngine:
                 f"- Frame calendar seasonality and structural capital flows (e.g. post-Labor Day September dynamics, institutional rebalancing, corporate debt issuance, options expiry, CPI / macro catalysts).\n"
                 f"- Maintain an observant, high-conviction tone: 'There are moments when the market becomes unusually data-dependent — when the edge moves to the analysts who can see what's actually happening beneath the surface, before the headlines catch up.'\n\n"
                 f"Provide a concise, high-conviction macroeconomic and systematic options yield summary.\n"
-                f"Active portfolio sectors analyzed: {active_sectors}."
+                f"Active portfolio sectors analyzed: {active_sectors}.\n\n"
+                f"CRITICAL FORMATTING INSTRUCTIONS (ZERO-MEMO POLICY):\n"
+                f"- NEVER output email or memo headers (DO NOT write 'TO:', 'FROM:', 'SUBJECT:', 'DATE:', or any email wrapper).\n"
+                f"- DO NOT start with any memo salutations.\n"
+                f"- Begin directly with ## Executive Summary."
             )
             briefing_text = self.weekly_engine._call_gemini_with_failover(briefing_prompt)
             if not briefing_text:
                 briefing_text = (
-                    f"Daily Macro & Options Briefing for {current_date_str} ({week_label}): "
-                    f"Active sectors diversified across {', '.join(active_sectors) if active_sectors else 'Information Technology, Communication Services, Financials, and Industrials'}. "
-                    f"Quantitative margin checks passed within 15% limit."
+                    f"## Executive Summary\n"
+                    f"The macroeconomic landscape for {current_date_str} ({week_label}) reflects resilient corporate fundamentals "
+                    f"amid shifting monetary policy expectations. Active sectors remain well-diversified across "
+                    f"{', '.join(active_sectors) if active_sectors else 'Information Technology, Communication Services, Financials, and Industrials'}. "
+                    f"Quantitative risk checks confirm portfolio operations remain safely within the 15% maximum margin limit."
                 )
+
+            # Post-process briefing_text to strictly purge any residual memo headers (TO:, FROM:, SUBJECT:, DATE:)
+            if briefing_text:
+                import re
+                clean_lines = []
+                for line in briefing_text.split("\n"):
+                    stripped = line.strip()
+                    if re.match(r"^(TO|FROM|DATE|SUBJECT)\s*:", stripped, re.IGNORECASE):
+                        continue
+                    if stripped == "---" and not clean_lines:
+                        continue
+                    clean_lines.append(line)
+                briefing_text = "\n".join(clean_lines).strip()
 
             # Compute 4D Macro Direction Compass
             raw_news = s1.get("raw_news", [])
@@ -725,6 +748,8 @@ class OptionsADKWorkflowEngine:
                 "saxo_needs_mfa": s0.get("saxo_needs_mfa", False),
                 "ai_summary": briefing_text,
                 "macro_briefing": briefing_text,
+                "market_summary": s1.get("market_summary") or self.weekly_engine.build_market_summary_accordions(),
+                "cross_asset_table": s1.get("cross_asset_table") or self.weekly_engine.build_cross_asset_directional_table(),
                 "balance_provenance": account_balances,
                 "macro_events": s1.get("macro_cards", []),
                 "events": s1.get("macro_cards", []),

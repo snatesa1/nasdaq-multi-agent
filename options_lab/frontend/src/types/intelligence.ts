@@ -179,6 +179,29 @@ export interface MarginStatus {
   updated_at: string;
 }
 
+export interface MarketSummaryItem {
+  id: string;
+  title: string;
+  context: string;
+  sources: string[];
+  sites_count: number;
+  category: string;
+  bias?: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | string;
+  link?: string;
+  date?: string;
+}
+
+export interface CrossAssetRow {
+  asset: string;
+  benchmark_code: string;
+  level: string;
+  change: string;
+  direction: 'UP' | 'DOWN' | 'FLAT';
+  bias: 'BULLISH' | 'BEARISH' | 'NEUTRAL' | 'RANGE-BOUND';
+  driver: string;
+  options_stance: string;
+}
+
 export interface BriefingData {
   week_label: string;
   generated_at: string;
@@ -196,4 +219,6 @@ export interface BriefingData {
   balance_provenance?: BalanceProvenance;
   interlink_cockpit?: InterlinkCockpit;
   wheel_harvest_blotter?: WheelHarvestBlotter;
+  market_summary?: MarketSummaryItem[];
+  cross_asset_table?: CrossAssetRow[];
 }
