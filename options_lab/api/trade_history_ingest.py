@@ -123,9 +123,20 @@ class TradeHistoryIngestEngine:
         return self._save_parsed_data(parsed, filename)
 
     def ingest_default_sample(self) -> Dict[str, Any]:
-        """Ingests the verified 16-page baseline Saxo Portfolio report data."""
-        parsed = self.parser.parse_raw_text("")
-        return self._save_parsed_data(parsed, "Saxo_Portfolio_Report_2026.pdf")
+        """
+        Ingests the verified 16-page baseline Saxo Portfolio report dataset.
+
+        Parameters:
+            None.
+
+        Returns:
+            Dict[str, Any]: Ingestion result dictionary with status, report_id, and stored records count.
+
+        Side Effects:
+            Mutates SQLite tables (saxo_reports, saxo_options_history, saxo_stock_history, etc.)
+        """
+        parsed = self.parser.get_baseline_sample_data()
+        return self._save_parsed_data(parsed, "Saxo_Portfolio_Report_Sample.pdf")
 
     def _save_parsed_data(self, data: Dict[str, Any], filename: str) -> Dict[str, Any]:
         meta = data.get("metadata", {})
@@ -270,3 +281,83 @@ class TradeHistoryIngestEngine:
             else:
                 rows = conn.execute("SELECT * FROM saxo_quarterly_performance").fetchall()
             return [dict(r) for r in rows]
+
+    def purge_sample_reports(self) -> Dict[str, Any]:
+        """
+        Purges demo baseline sample report records and mock trades from the SQLite database.
+
+        Parameters:
+            None.
+
+        Returns:
+            Dict[str, Any]: Status summary reporting counts of purged records across all tables.
+
+        Side Effects:
+            Executes SQL DELETE operations across saxo_reports, saxo_options_history,
+            saxo_stock_history, saxo_quarterly_performance, and saxo_holdings_history.
+        """
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            sample_filter = "report_id LIKE 'REP-SAMPLE%' OR report_id LIKE '%SAMPLE%' OR report_id = 'REP-33888_221497-19-Aug-2026'"
+            cur.execute(f"DELETE FROM saxo_options_history WHERE {sample_filter}")
+            del_options = cur.rowcount
+            cur.execute(f"DELETE FROM saxo_stock_history WHERE {sample_filter}")
+            del_stocks = cur.rowcount
+            cur.execute(f"DELETE FROM saxo_quarterly_performance WHERE {sample_filter}")
+            del_quarterly = cur.rowcount
+            cur.execute(f"DELETE FROM saxo_holdings_history WHERE {sample_filter}")
+            del_holdings = cur.rowcount
+            cur.execute(f"DELETE FROM saxo_reports WHERE {sample_filter}")
+            del_reports = cur.rowcount
+            conn.commit()
+
+        logger.info(f"Purged baseline sample report data: {del_reports} reports, {del_options} options, {del_stocks} stocks.")
+        return {
+            "status": "SUCCESS",
+            "purged": {
+                "reports": del_reports,
+                "options_trades": del_options,
+                "stock_trades": del_stocks,
+                "quarterly_periods": del_quarterly,
+                "holdings": del_holdings
+            }
+        }
+
+    def delete_report(self, report_id: str) -> Dict[str, Any]:
+        """
+        Deletes a specific ingested report and all associated option and stock historical trades.
+
+        Parameters:
+            report_id (str): Primary key of report in saxo_reports table.
+
+        Returns:
+            Dict[str, Any]: Deletion result summary.
+
+        Side Effects:
+            Executes targeted DELETE queries in SQLite database.
+        """
+        with self._get_conn() as conn:
+            cur = conn.cursor()
+            cur.execute("DELETE FROM saxo_options_history WHERE report_id = ?", (report_id,))
+            del_opts = cur.rowcount
+            cur.execute("DELETE FROM saxo_stock_history WHERE report_id = ?", (report_id,))
+            del_stocks = cur.rowcount
+            cur.execute("DELETE FROM saxo_quarterly_performance WHERE report_id = ?", (report_id,))
+            del_q = cur.rowcount
+            cur.execute("DELETE FROM saxo_holdings_history WHERE report_id = ?", (report_id,))
+            del_h = cur.rowcount
+            cur.execute("DELETE FROM saxo_reports WHERE report_id = ?", (report_id,))
+            del_rep = cur.rowcount
+            conn.commit()
+
+        return {
+            "status": "SUCCESS",
+            "deleted_report_id": report_id,
+            "deleted": {
+                "reports": del_rep,
+                "options": del_opts,
+                "stocks": del_stocks,
+                "quarterly": del_q,
+                "holdings": del_h
+            }
+        }

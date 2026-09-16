@@ -1291,35 +1291,49 @@ def initialize_sample_report(user=Depends(verify_firebase_token)):
         logger.error(f"Failed to initialize sample report: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/api/history/purge-sample")
+def purge_sample_report(user=Depends(verify_firebase_token)):
+    """Purges the seeded demo baseline sample reports and mock trade records from SQLite."""
+    try:
+        res = ingest_engine.purge_sample_reports()
+        return res
+    except Exception as e:
+        logger.error(f"Failed to purge sample report: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.get("/api/history/reports")
 def list_ingested_reports(user=Depends(verify_firebase_token)):
-    """Lists all historical reports stored in the database."""
+    """Lists all historical reports stored in the database without auto-seeding mock data."""
     try:
         reports = ingest_engine.get_ingested_reports()
-        if not reports:
-            # Auto-seed if empty
-            ingest_engine.ingest_default_sample()
-            reports = ingest_engine.get_ingested_reports()
         return {"reports": reports}
     except Exception as e:
         logger.error(f"Failed to list reports: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/history/campaigns")
-def get_historical_campaigns(report_id: Optional[str] = None, user=Depends(verify_firebase_token)):
+def get_historical_campaigns(
+    report_id: Optional[str] = None,
+    source: Optional[str] = "all",
+    user=Depends(verify_firebase_token)
+):
     """Returns stitched multi-leg trade campaign lifecycles (Wheel, Covered Calls, Bag-holds)."""
     try:
-        campaigns = campaign_stitcher.reconstruct_all_campaigns(report_id=report_id)
+        campaigns = campaign_stitcher.reconstruct_all_campaigns(report_id=report_id, source=source or "all")
         return {"campaigns": campaigns, "count": len(campaigns)}
     except Exception as e:
         logger.error(f"Failed to reconstruct campaigns: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/api/history/behavioral-audit")
-def get_behavioral_audit(report_id: Optional[str] = None, user=Depends(verify_firebase_token)):
+def get_behavioral_audit(
+    report_id: Optional[str] = None,
+    source: Optional[str] = "all",
+    user=Depends(verify_firebase_token)
+):
     """Performs full psychological and behavioral audit, calculating discipline score and bias diagnostics."""
     try:
-        audit = behavioral_forensics.generate_behavioral_audit(report_id=report_id)
+        audit = behavioral_forensics.generate_behavioral_audit(report_id=report_id, source=source or "all")
         return audit
     except Exception as e:
         logger.error(f"Failed to run behavioral audit: {e}")

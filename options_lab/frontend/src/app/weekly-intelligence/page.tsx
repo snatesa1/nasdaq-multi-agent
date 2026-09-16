@@ -285,21 +285,12 @@ export default function WeeklyIntelligencePage() {
     setLoadingStep('Verifying Backend Handshake...');
 
     try {
-      const handshake = await optionsApi.checkHandshake(3000);
+      const handshake = await optionsApi.checkHandshake(8000);
       if (!handshake.ok) {
-        const errMsg = handshake.error || 'OptionsLab backend on port 8000 is unreachable.';
-        setLoading(false);
-        setHandshakeError(errMsg);
-        setError(`🔌 Backend Handshake Failed: ${errMsg}`);
-        return;
+        console.warn('[OptionsLab Gateway] Initial handshake probe notice:', handshake.error);
       }
     } catch (hErr: any) {
-      setLoading(false);
-      const targetHost = typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : 'localhost:8000';
-      const errMsg = `Cannot connect to OptionsLab backend on ${targetHost}. Server is offline.`;
-      setHandshakeError(errMsg);
-      setError(`🔌 Backend Handshake Failed: ${errMsg}`);
-      return;
+      console.warn('[OptionsLab Gateway] Initial handshake probe non-critical:', hErr);
     }
 
     setLoadingStep('Synthesizing 4D Macro Compass, Interlink Graph & Wheel Harvest Blotter...');
@@ -473,16 +464,16 @@ export default function WeeklyIntelligencePage() {
               <AlertTriangle className="h-6 w-6 shrink-0 text-amber-600 mt-0.5" />
               <div>
                 <h4 className="text-sm font-bold text-amber-900 flex items-center gap-2">
-                  🔌 Backend Handshake Short-Circuited
+                  🔌 Backend Connection Delayed
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-200 text-amber-800">
-                    {typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : '8000'}
+                    {typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '8000'}` : '8000'}
                   </span>
                 </h4>
                 <p className="text-xs text-amber-800 mt-1 leading-relaxed font-medium">
                   {handshakeError}
                 </p>
                 <p className="text-[11px] font-mono text-amber-700 mt-1.5">
-                  Check backend service: <code className="bg-amber-200/70 px-2 py-0.5 rounded font-bold">docker compose ps</code> or <code className="bg-amber-200/70 px-2 py-0.5 rounded font-bold">.\restart_backend.ps1</code>
+                  Verify the Python backend is running on port 8000 (<code className="bg-amber-200/70 px-2 py-0.5 rounded font-bold">.\restart_backend.ps1</code>).
                 </p>
               </div>
             </div>
@@ -491,7 +482,7 @@ export default function WeeklyIntelligencePage() {
               className="shrink-0 flex items-center gap-2 px-4 py-2.5 bg-amber-600 hover:bg-amber-700 text-white rounded-xl text-xs font-bold transition shadow-xs cursor-pointer"
             >
               <RefreshCw className="h-4 w-4" />
-              Retry Handshake
+              Retry Connection
             </button>
           </div>
         ) : error && (

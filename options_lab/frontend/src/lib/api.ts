@@ -16,13 +16,16 @@ export const getApiBase = (): string => {
     _activeApiBase = process.env.NEXT_PUBLIC_API_URL;
     return _activeApiBase;
   }
-  // In development mode, Next.js dev server runs without Nginx, so backend is on port 8000:
-  if (process.env.NODE_ENV === 'development') {
+  // If accessing directly on port 8000 (FastAPI static mount or Electron), use same-origin relative path:
+  if (window.location.port === '8000' || window.location.port === '') {
+    _activeApiBase = '';
+    return '';
+  }
+  // If running on port 3000 (Next.js dev server), target port 8000:
+  if (process.env.NODE_ENV === 'development' || window.location.port === '3000') {
     _activeApiBase = `http://${window.location.hostname}:8000`;
     return _activeApiBase;
   }
-  // In production builds, default to same-origin relative path '' (Nginx container in Docker)
-  // Adaptive handshake below will auto-switch to port 8000 if same-origin is not reverse-proxied (Local PC static host)
   return '';
 };
 
@@ -32,7 +35,7 @@ export const setApiBase = (base: string) => {
 
 export const API_BASE_URL = getApiBase();
 
-export async function checkBackendHandshake(timeoutMs: number = 3000): Promise<{ ok: boolean; error?: string }> {
+export async function checkBackendHandshake(timeoutMs: number = 8000): Promise<{ ok: boolean; error?: string }> {
   const currentBase = _activeApiBase !== null ? _activeApiBase : getApiBase();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -55,7 +58,7 @@ export async function checkBackendHandshake(timeoutMs: number = 3000): Promise<{
     if (currentBase !== fallbackBase) {
       try {
         const directController = new AbortController();
-        const directTimer = setTimeout(() => directController.abort(), 2000);
+        const directTimer = setTimeout(() => directController.abort(), 6000);
         const directRes = await fetch(`${fallbackBase}/api/health`, {
           method: 'GET',
           signal: directController.signal
@@ -72,7 +75,7 @@ export async function checkBackendHandshake(timeoutMs: number = 3000): Promise<{
     }
   }
 
-  const targetHost = _activeApiBase || (typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '80'}` : 'localhost:8000');
+  const targetHost = _activeApiBase || (typeof window !== 'undefined' ? `${window.location.hostname}:${window.location.port || '8000'}` : 'localhost:8000');
   return { ok: false, error: `Cannot connect to OptionsLab backend on ${targetHost}. Server is offline.` };
 }
 
@@ -236,11 +239,22 @@ export const optionsApi = {
     return await res.json();
   },
   initSampleReport: () => apiRequest('/api/history/sample-init', 'POST'),
+  purgeSampleReport: () => apiRequest('/api/history/purge-sample', 'POST'),
   listReports: () => apiRequest('/api/history/reports'),
-  getHistoricalCampaigns: (reportId?: string) =>
-    apiRequest(reportId ? `/api/history/campaigns?report_id=${encodeURIComponent(reportId)}` : '/api/history/campaigns'),
-  getBehavioralAudit: (reportId?: string) =>
-    apiRequest(reportId ? `/api/history/behavioral-audit?report_id=${encodeURIComponent(reportId)}` : '/api/history/behavioral-audit'),
+  getHistoricalCampaigns: (reportId?: string, source: string = 'all') => {
+    const params = new URLSearchParams();
+    if (reportId) params.append('report_id', reportId);
+    if (source && source !== 'all') params.append('source', source);
+    const q = params.toString();
+    return apiRequest(q ? `/api/history/campaigns?${q}` : '/api/history/campaigns');
+  },
+  getBehavioralAudit: (reportId?: string, source: string = 'all') => {
+    const params = new URLSearchParams();
+    if (reportId) params.append('report_id', reportId);
+    if (source && source !== 'all') params.append('source', source);
+    const q = params.toString();
+    return apiRequest(q ? `/api/history/behavioral-audit?${q}` : '/api/history/behavioral-audit');
+  },
   getPortfolioNews: (top: number = 25, forceRefresh: boolean = false) =>
     apiRequest(`/api/history/news?top=${top}&force_refresh=${forceRefresh}&_t=${Date.now()}`),
   checkOrderSafety: (payload: any) =>

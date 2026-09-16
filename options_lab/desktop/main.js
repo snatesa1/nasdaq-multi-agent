@@ -4,19 +4,25 @@ const fs = require('fs');
 const { spawn, exec } = require('child_process');
 const http = require('http');
 
-// Set unique userData path to completely bypass Windows access violations or sharing locks
-try {
-  const uniqueSessionDir = path.join(app.getPath('temp'), 'options-lab-desktop-' + Date.now());
-  if (!fs.existsSync(uniqueSessionDir)) {
-    fs.mkdirSync(uniqueSessionDir, { recursive: true });
-  }
-  app.setPath('userData', uniqueSessionDir);
-} catch (err) {
-  console.error('[OptionsLab Desktop] Failed to set unique userData path:', err);
-}
-
-// Disable HTTP Cache completely to prevent loading stale JS/CSS compiled assets
+// ── 0. Hardware Acceleration & Windows Cold-Boot Crash Prevention ────────────
+// Disable hardware acceleration to eliminate Chromium GPU rasterization hangs/black screens on reboot
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-gpu-compositing');
+app.commandLine.appendSwitch('disable-software-rasterizer');
 app.commandLine.appendSwitch('disable-http-cache');
+
+// Set stable, persistent userData path in AppData to retain cookies/tokens and avoid random %TEMP% bloat
+try {
+  const appDataDir = app.getPath('appData');
+  const persistentDataDir = path.join(appDataDir, 'OptionsLabDesktop');
+  if (!fs.existsSync(persistentDataDir)) {
+    fs.mkdirSync(persistentDataDir, { recursive: true });
+  }
+  app.setPath('userData', persistentDataDir);
+} catch (err) {
+  console.error('[OptionsLab Desktop] Failed to set persistent userData path:', err);
+}
 
 let mainWindow = null;
 let tray = null;
@@ -33,20 +39,33 @@ const FRONTEND_URL = process.env.OPTIONS_LAB_FRONTEND_URL || `http://localhost:$
 // ── 1. Backend & Frontend Process Management & Health Checks ────────────────
 function isBackendReady() {
   return new Promise((resolve) => {
-    http.get(`${BACKEND_URL}/health`, (res) => {
+    const req = http.get(`${BACKEND_URL}/api/health`, (res) => {
       resolve(res.statusCode === 200);
-    }).on('error', () => {
+    });
+    req.on('error', () => {
+      resolve(false);
+    });
+    req.setTimeout(1500, () => {
+      req.abort();
       resolve(false);
     });
   });
 }
 
-async function waitForBackend(maxAttempts = 30) {
+async function waitForBackend(maxAttempts = 60, onProgress = null) {
+  console.log(`[OptionsLab Desktop] Waiting for Python backend on ${BACKEND_URL} (max ${maxAttempts}s)...`);
   for (let i = 0; i < maxAttempts; i++) {
     const ready = await isBackendReady();
-    if (ready) return true;
-    await new Promise((r) => setTimeout(r, 500));
+    if (ready) {
+      console.log(`[OptionsLab Desktop] Backend confirmed healthy on attempt ${i + 1}!`);
+      return true;
+    }
+    if (onProgress) {
+      onProgress(i + 1, maxAttempts);
+    }
+    await new Promise((r) => setTimeout(r, 1000));
   }
+  console.warn(`[OptionsLab Desktop] Backend failed to respond after ${maxAttempts}s.`);
   return false;
 }
 
@@ -59,7 +78,7 @@ function startBackend() {
   const pythonCmd = fs.existsSync(venvPythonPath) ? venvPythonPath : 'python';
   console.log(`[OptionsLab Desktop] Using Python interpreter: ${pythonCmd}`);
 
-  backendProcess = spawn(pythonCmd, ['-m', 'uvicorn', 'options_lab.api.main:app', '--host', '127.0.0.1', '--port', String(BACKEND_PORT), '--reload', '--reload-dir', 'options_lab'], {
+  backendProcess = spawn(pythonCmd, ['-m', 'uvicorn', 'options_lab.api.main:app', '--host', '0.0.0.0', '--port', String(BACKEND_PORT), '--reload', '--reload-dir', 'options_lab'], {
     cwd: rootDir,
     shell: true,
     stdio: 'pipe'
@@ -177,7 +196,7 @@ async function createWindow() {
     minWidth: 1024,
     minHeight: 700,
     title: 'OptionsLab — Institutional Broker Gateway',
-    backgroundColor: '#F3F3F9',
+    backgroundColor: '#0f172a',
     autoHideMenuBar: true,
     show: false,
     webPreferences: {
@@ -191,11 +210,37 @@ async function createWindow() {
   const isDev = process.argv.includes('--dev');
   const isHidden = process.argv.includes('--hidden');
 
-  // 1. Ensure Backend is active
+  // Immediately show window with the splash screen so the user never sees a black/blank viewport
+  const splashPath = path.join(__dirname, 'splash.html');
+  mainWindow.loadFile(splashPath);
+  if (!isHidden) {
+    mainWindow.show();
+    mainWindow.focus();
+  }
+
+  // 1. Ensure Backend is active on port 8000
   const backendUp = await isBackendReady();
   if (!backendUp) {
     startBackend();
-    await waitForBackend();
+    const ready = await waitForBackend(60, (attempt, max) => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.executeJavaScript(`
+          const el = document.getElementById('statusText');
+          if (el) el.innerText = 'Starting Python quantitative engines & broker gateway... (${attempt}/${max}s)';
+        `).catch(() => {});
+      }
+    });
+
+    if (!ready) {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.loadFile(splashPath, {
+          query: {
+            error: `Failed to connect to OptionsLab backend on ${BACKEND_URL} within 60 seconds. Please check if Python dependencies are installed or run .\\restart_backend.ps1.`
+          }
+        });
+      }
+      return;
+    }
   }
 
   // 2. Resolve target URL (Dev server if --dev, otherwise fast static mount via FastAPI)
@@ -212,10 +257,40 @@ async function createWindow() {
     }
   }
 
-  console.log(`[OptionsLab Desktop] Loading application at ${targetUrl}...`);
+  console.log(`[OptionsLab Desktop] Backend is healthy! Loading application at ${targetUrl}...`);
 
-  mainWindow.loadURL(targetUrl).catch(() => {
-    setTimeout(() => mainWindow.loadURL(targetUrl), 2000);
+  // Load target URL with automatic retry and did-fail-load recovery
+  mainWindow.loadURL(targetUrl).catch((err) => {
+    console.warn(`[OptionsLab Desktop] Initial loadURL caught error: ${err}. Retrying in 2s...`);
+    setTimeout(() => {
+      if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.loadURL(targetUrl);
+      }
+    }, 2000);
+  });
+
+  // Handle load failure gracefully without leaving user on a dead black screen
+  mainWindow.webContents.on('did-fail-load', (event, errorCode, errorDescription, validatedURL) => {
+    console.error(`[OptionsLab Desktop] did-fail-load: code ${errorCode} (${errorDescription}) on ${validatedURL}`);
+    if (validatedURL && validatedURL.includes(String(BACKEND_PORT))) {
+      setTimeout(() => {
+        if (mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.loadFile(splashPath, {
+            query: {
+              error: `Unable to render ${validatedURL} (${errorDescription}). Backend may be restarting. Click Retry below.`
+            }
+          });
+        }
+      }, 1500);
+    }
+  });
+
+  // Recover from renderer process crash
+  mainWindow.webContents.on('render-process-gone', (event, details) => {
+    console.error(`[OptionsLab Desktop] Renderer process crashed:`, details);
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.reload();
+    }
   });
 
   // Open external links in default browser

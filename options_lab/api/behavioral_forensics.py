@@ -20,9 +20,32 @@ class BehavioralForensicsEngine:
     def __init__(self, campaign_stitcher: Optional[CampaignStitcher] = None):
         self.stitcher = campaign_stitcher or CampaignStitcher()
 
-    def generate_behavioral_audit(self, report_id: Optional[str] = None) -> Dict[str, Any]:
-        """Performs full forensic audit across all campaigns and trades."""
-        campaigns = self.stitcher.reconstruct_all_campaigns(report_id)
+    def generate_behavioral_audit(self, report_id: Optional[str] = None, source: str = "all") -> Dict[str, Any]:
+        """
+        Performs comprehensive quantitative psychological and behavioral audit across trading campaigns.
+
+        1. Descriptive Summary:
+            Calculates an institutional discipline score (0-100), net realized/unrealized stock and option P&L,
+            win rates, volatility drag penalties (momentum short call drag), and disposition effect diagnostics
+            (unhedged bag-holding) filtered by data source.
+
+        2. Parameters / Encapsulation:
+            report_id (Optional[str], default=None): Primary key filter for an ingested report.
+            source (str, default='all'): Data filter ('live' for live broker blotter, 'reports' for uploaded PDFs, 'all' for harmonized).
+
+        3. Returns / Internal State:
+            Dict[str, Any]: Audit summary with discipline_score, grade, total_pnl, stock_pnl, option_pnl,
+            options_win_rate, winning_options_trades, losing_options_trades, and list of behavioral diagnoses.
+
+        4. Exceptions / Side Effects:
+            Catches data voids gracefully and returns calibrated baseline metrics. No database mutations.
+
+        5. Concrete Executable Usage Example:
+            >>> forensics = BehavioralForensicsEngine()
+            >>> live_audit = forensics.generate_behavioral_audit(source='live')
+            >>> print(live_audit['discipline_score'], live_audit['grade'])
+        """
+        campaigns = self.stitcher.reconstruct_all_campaigns(report_id, source=source)
         
         total_pnl = sum(c["total_pnl"] for c in campaigns)
         total_stock_pnl = sum(c["stock_pnl"] for c in campaigns)
