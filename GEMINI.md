@@ -30,7 +30,12 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
 2. **Orphan Port Scavenger**: Before starting any test or service on port 8000/3000, always check and terminate any stale/detached PID holding the port (`Get-NetTCPConnection -LocalPort 8000 | Stop-Process`).
 3. **Bytecode Purge**: Delete `__pycache__` when structural model definitions or schema classes are altered.
 4. **Zero WSL**: Absolutely zero commands are sent to `wsl` or `wsl.exe`. Windows PowerShell (`pwsh`) is the sole execution environment.
-5. **Mandatory Live Market Option Quotes & Tick Quantization**:
+5. **Zero-Guessing Python & PowerShell Execution Protocol (Permanent Invariant)**:
+   - **Zero API / DB Function Guessing**: NEVER guess a database helper, function signature, or class name (e.g. `get_staged_trades_for_week` vs `list_staged_trades`). Always verify the exact signature in `options_lab/api/db.py` or the target module before invoking.
+   - **Prohibition on Complex Inline `python -c` in PowerShell**: NEVER run multiline or complex inline Python commands with `$` or nested quotes in `pwsh` (prevents `ParserError` variable expansions). Always execute verified standalone scripts or `python -m pytest`.
+   - **Repository Root Module Invariant**: Always execute commands from `c:\Admin\Akpegis-Agent-Ecosystem\nasdaq-multi-agent` using `.\venv_win\Scripts\python.exe` with module semantics (`-m`) or explicit `sys.path` so `options_lab` is never missing.
+   - **ASCII-Safe Windows Terminal**: Never emit unescaped Unicode emojis in ad-hoc Python stdout on Windows CP1252 terminals.
+6. **Mandatory Live Market Option Quotes & Tick Quantization**:
    - **Zero Theoretical Execution**: NEVER stage or submit real-money limit orders based solely on theoretical models (e.g. continuous Black-Scholes). Always resolve real exchange market quotes (`Bid`, `Ask`, `Mid`, `Spread`) via Saxo OpenAPI (`trade/v1/infoprices`) or authentic OPRA option chain feeds before proposing trades.
    - **Strict Tick Size Quantization**: All proposed and submitted option limit prices MUST be quantized to valid exchange tick size increments (e.g., \$0.05 or \$0.10 for options $\ge \$3.00$) dynamically derived from the broker's `TickSizeScheme` or OCC standard rules using `quantize_order_price()`. Never send unquantized continuous floating prices to the exchange.
 6. **Frontend-Backend Handshake Short-Circuit & Anti-Hang Timeout Protocol**:
@@ -98,6 +103,13 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
          3. *Cross-Asset Causal Transmission*: Trace the transmission mechanism from commodity shocks (e.g. Brent crude) to inflation expectations, 10Y Treasury yields, and DCF discount rates / WACC on growth multiples.
          4. *Earnings Breadth Axiom*: "Price breadth can be speculative. Earnings breadth is considerably harder to fake."
          5. *Capital Cycle Shift*: Frame market transitions from "Buy AI" to "Show me the earnings" to "Show me the Return on Invested Capital (ROIC)."
+   12. **Autonomous Multi-Agent Dialectical Fiduciary Integrity Standard (Added 2026-09-17)**:
+       - *Top-Level Numeric Mandate Audit*: When orchestrating multi-agent systems with numeric portfolio targets (e.g., $1,000/month Wheel Harvest across 4 trades = $250 target/slot), the Executive Allocator agent MUST evaluate the aggregated basket total across all proposals BEFORE granting approval.
+       - *Mandatory Dialectical Challenge to Research Agents*: If proposed candidates produce an aggregate deficit (e.g., $680 vs $1,000 target):
+         1. The Allocator MUST challenge the Financial Analyst: Question why low-yielding candidates (sub-$2.00 premium) were retrieved, and interrogate alternative tickers or strike/delta adjustments (e.g., 0.25 Delta).
+         2. The Allocator MUST challenge the Risk Aggregator: Interrogate whether contract sizing can be dynamically scaled (e.g., 2 contracts of a $1.25 option) without breaching portfolio margin (15%) or cash collateral caps (50%).
+       - *Zero Silent Rubber-Stamping & Mandatory Tension Reporting*:
+         The system is strictly prohibited from stamping "Approved" or "Golden Trade" on deficit portfolios without surfacing an explicit `TARGET_SHORTFALL_CHALLENGE` alert in the telemetry and UI. If risk constraints make reaching the target impossible, the Allocator must state its explicit dissent and present the exact trade-off to the user.
 
 ## ☁️ Google Cloud
 - gcloud billing accounts list
@@ -717,6 +729,20 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
             3. **Executive Portfolio Allocator Agent**: Awards final consensus, ranks **Golden Trades #1–4**, and calculates monthly harvest target contribution ($250/trade toward the $1,000/month goal).
           * Frontend `weekly-intelligence/page.tsx` renders the **Sub-Agent Consensus Review Panel** with conviction ratings, margin impacts, and Golden Trade badges.
           * Added `isTimeoutLocked` handling in frontend with amber lock badge: *"Check TraderGO (Timeout Locked)"* and telemetry log updates.
+    18. **Autonomous Multi-Agent Dialectical Consensus, Dynamic Contract Sizing & Wide Sector Expansion (2026-09-17)**:
+        - **Dialectical Fiduciary Integrity Standard**:
+          * Implemented active dialetical interrogations where the Executive Portfolio Allocator agent does NOT rubber-stamp deficits. If proposed trades generate an aggregate shortfall (e.g. < $1,000 target), the Allocator sets `status = "TARGET_SHORTFALL_CHALLENGE"` and surfaces explicit tension analysis in both telemetry and UI.
+          * Financial Analyst defends selections (explaining whether low-beta defensive qualities justify sub-$2.00 premiums); Risk Aggregator audits contract scaling headroom against the 50% cash collateral cap and 15% margin ceiling.
+        - **Dynamic Contract Sizing Optimization**:
+          * Upgraded candidate generation in `weekly_intelligence.py` and `options_adk_workflow.py` with dynamic sizing: for sub-$2.00 sweet-spot trades, dynamically scales contracts ($C_i = \max(1, \min(3, \text{round}(250.0 / (\text{prem} \times 100)))))$ to reach the $250/slot harvest goal while strictly respecting `MarginGuardian.validate_cumulative_basket`.
+        - **Fix for `resolve_target_monthly_option_cycle`**:
+          * Diagnosed positional argument bug where `resolve_target_monthly_option_cycle(28, 35)` assigned integer 28 to `ref_date`, causing `AttributeError: 'int' object has no attribute 'year'`.
+          * Added internal defensive type checking (`if isinstance(ref_date, int): min_dte = ref_date; ref_date = None`) and updated call sites to keyword arguments `(min_dte=28, max_dte=35)`.
+        - **Elimination of Premature Candidate Loop Break & Multi-Sector Expansion**:
+          * Diagnosed why sectors like Energy (`CVX`, `COP`), Consumer Staples (`KO`), Utilities (`SO`, `NEE`), and Communications (`T`) were absent from the 4 Golden Trades: `_generate_dynamic_trade_candidates` was executing `break` immediately upon finding 4 initial candidate matches in `candidate_pool`, before broad sector sorting or sweet-spot ranking occurred.
+          * Expanded initial candidate discovery buffer to 16 symbols and allowed up to 2 candidates per sector during the discovery phase, allowing diverse sectors to compete for the 4 final Golden Trade slots.
+        - **Frontend Executive Dialectical Challenge Banner**:
+          * Added an interactive amber warning banner to `weekly-intelligence/page.tsx` displaying the exact monthly harvest gap, Allocator challenge statement, and dynamic contract breakdown when a target shortfall is detected.
 
 ## 📊 Antigravity Usage Stats
 > Last Updated: 2026-09-13 15:05:00 SGT

@@ -115,6 +115,7 @@ export interface SubAgentConsensus {
     verdict: string;
     sweet_spot_score?: string;
     fundamental_floor?: string;
+    analyst_defense?: string;
   };
   risk_aggregator: {
     persona: string;
@@ -123,6 +124,7 @@ export interface SubAgentConsensus {
     sector_clearance?: string;
     margin_impact?: string;
     collateral_status?: string;
+    sizing_rationale?: string;
   };
   executive_allocator: {
     persona: string;
@@ -131,6 +133,9 @@ export interface SubAgentConsensus {
     golden_trade_label: string;
     monthly_harvest_contribution: string;
     allocation_decision: string;
+    target_harvest_gap?: string;
+    challenge_inquiry?: string;
+    dialectical_verdict?: string;
   };
 }
 
@@ -202,6 +207,9 @@ export interface WheelHarvestBlotter {
   collateral_headroom?: number;
   collateral_utilization_pct?: number;
   collateral_coverage_rationale?: string;
+  allocator_challenge_active?: boolean;
+  allocator_shortfall_dollars?: number;
+  allocator_challenge_statement?: string;
   candidates: StagedTrade[];
 }
 

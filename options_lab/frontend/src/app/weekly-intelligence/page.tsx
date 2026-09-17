@@ -740,6 +740,29 @@ export default function WeeklyIntelligencePage() {
               </div>
             </div>
 
+            {/* Executive Portfolio Allocator Dialectical Challenge Alert */}
+            {wheelBlotter?.allocator_challenge_active && (
+              <div className="p-4 bg-amber-50 border border-amber-300/80 rounded-2xl flex items-start gap-3.5 shadow-xs">
+                <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+                <div className="space-y-1 text-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-bold uppercase tracking-wider text-[11px] text-amber-900 flex items-center gap-1.5">
+                      🏛️ Executive Portfolio Allocator Dialectical Challenge
+                    </span>
+                    <span className="px-2 py-0.5 rounded bg-amber-200/80 font-mono font-black text-amber-950 text-[10px] border border-amber-300">
+                      -${wheelBlotter.allocator_shortfall_dollars?.toFixed(2)} Target Shortfall
+                    </span>
+                    <span className="text-[10px] px-2 py-0.5 bg-amber-100 text-amber-800 rounded font-semibold">
+                      Action Required: Discretionary Review
+                    </span>
+                  </div>
+                  <p className="text-amber-900/90 leading-relaxed font-medium">
+                    {wheelBlotter.allocator_challenge_statement}
+                  </p>
+                </div>
+              </div>
+            )}
+
             {/* Candidate Cards Grid */}
             <div className="space-y-4">
               {stagedTrades.map((trade) => {
@@ -982,8 +1005,12 @@ export default function WeeklyIntelligencePage() {
                             <span className="font-bold text-indigo-300 text-[11px] flex items-center gap-1">
                               📊 Financial Analyst
                             </span>
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/30 text-emerald-300 font-bold">
-                              {trade.sub_agent_consensus?.financial_analyst?.status || 'APPROVED'}
+                            <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
+                              trade.sub_agent_consensus?.financial_analyst?.status === 'CHALLENGED_ON_SWEET_SPOT' 
+                                ? 'bg-amber-500/30 text-amber-300 border border-amber-400/30' 
+                                : 'bg-emerald-500/30 text-emerald-300'
+                            }`}>
+                              {trade.sub_agent_consensus?.financial_analyst?.status === 'CHALLENGED_ON_SWEET_SPOT' ? 'SWEET SPOT CHALLENGED' : (trade.sub_agent_consensus?.financial_analyst?.status || 'APPROVED')}
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-300 leading-snug">
@@ -1018,16 +1045,27 @@ export default function WeeklyIntelligencePage() {
                             <span className="font-bold text-emerald-300 text-[11px] flex items-center gap-1">
                               🏛️ Executive Allocator
                             </span>
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-indigo-500/40 text-indigo-200 font-bold">
-                              GOLDEN
+                            <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
+                              trade.sub_agent_consensus?.executive_allocator?.status === 'TARGET_SHORTFALL_CHALLENGE'
+                                ? 'bg-amber-500/30 text-amber-300 border border-amber-400/50'
+                                : 'bg-emerald-500/30 text-emerald-300'
+                            }`}>
+                              {trade.sub_agent_consensus?.executive_allocator?.status === 'TARGET_SHORTFALL_CHALLENGE' ? 'DEFICIT CHALLENGE' : 'GOLDEN TARGET'}
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-300 leading-snug">
                             {trade.sub_agent_consensus?.executive_allocator?.allocation_decision || 'Approved for user 1-click authorization into Saxo Order Blotter.'}
                           </p>
-                          <span className="text-[10px] text-emerald-300 font-mono block font-bold">
-                            Contribution: {trade.sub_agent_consensus?.executive_allocator?.monthly_harvest_contribution || `$${(trade.premium_estimate * 100).toFixed(2)} towards $1,000 goal`}
-                          </span>
+                          <div className="flex flex-wrap items-center justify-between gap-1 pt-1 border-t border-white/10">
+                            <span className="text-[10px] text-emerald-300 font-mono font-bold">
+                              {trade.sub_agent_consensus?.executive_allocator?.monthly_harvest_contribution || `$${(trade.premium_estimate * 100).toFixed(2)} towards $1,000 goal`}
+                            </span>
+                            {trade.sub_agent_consensus?.executive_allocator?.target_harvest_gap && (
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-mono font-bold">
+                                {trade.sub_agent_consensus.executive_allocator.target_harvest_gap}
+                              </span>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>

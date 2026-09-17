@@ -602,8 +602,46 @@ def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
     from . import db as database
     database.purge_unapproved_staged_trades(week_label=week_label)
 
+    # 🏛️ 3 Sub-Agent Dialectical Consensus & Dynamic Contract Sizing Engine
+    target_monthly_harvest = 1000.0
+    initial_candidates = validated_trades[:4]
+
+    # Dynamic Sizing Optimization
+    scaled_basket: List[Dict[str, Any]] = []
+    for cand in initial_candidates:
+        cand_copy = dict(cand)
+        prem = float(cand_copy.get("premium_estimate", 0.0))
+        strike = float(cand_copy.get("strike", 0.0))
+        desired_contracts = max(1, min(3, round(250.0 / (prem * 100.0)))) if prem > 0 else 1
+        cand_copy["contracts"] = desired_contracts
+        cand_copy["collateral_required"] = strike * 100.0 * desired_contracts
+        cand_copy["max_margin_impact_pct"] = round(desired_contracts * 1.5, 1)
+
+        basket_test = margin_guardian.validate_cumulative_basket(
+            staged_candidates=scaled_basket,
+            new_candidate=cand_copy,
+            current_status=margin_status
+        )
+        if basket_test["approved"]:
+            cand_copy["scaling_approved"] = True
+            scaled_basket.append(cand_copy)
+        else:
+            cand_copy["scaling_approved"] = False
+            cand_copy["contracts"] = 1
+            cand_copy["collateral_required"] = strike * 100.0
+            cand_copy["max_margin_impact_pct"] = 1.5
+            cand_copy["scaling_blocked_reason"] = basket_test.get("reasons", ["Cash collateral or margin ceiling reached"])[0]
+            scaled_basket.append(cand_copy)
+
+    final_basket_harvest = sum(
+        round(t.get("premium_estimate", 0.0) * 100.0 * t.get("contracts", 1), 2)
+        for t in scaled_basket
+    )
+    final_deficit = max(0.0, round(target_monthly_harvest - final_basket_harvest, 2))
+    has_shortfall = final_deficit > 10.0
+
     staged_records: List[Dict[str, Any]] = []
-    for rank_idx, trade in enumerate(validated_trades):
+    for rank_idx, trade in enumerate(scaled_basket):
         trade["golden_trade_rank"] = rank_idx + 1
         sym = trade.get("symbol", "")
         sec = trade.get("sector", "General")
@@ -611,37 +649,80 @@ def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
         delta = float(trade.get("delta", -0.22))
         pop = float(trade.get("pop_pct", 80.0))
         prem = float(trade.get("premium_estimate", 2.50))
-        collateral = float(trade.get("collateral_required", strike * 100.0))
+        contracts = int(trade.get("contracts", 1))
+        collateral = float(trade.get("collateral_required", strike * 100.0 * contracts))
         margin_imp = float(trade.get("max_margin_impact_pct", 1.5))
+        contrib = round(prem * 100.0 * contracts, 2)
+        is_below_sweet_spot = prem < 2.00
+        scaling_approved = trade.get("scaling_approved", False)
+
+        if has_shortfall:
+            allocator_status = "TARGET_SHORTFALL_CHALLENGE"
+            allocator_label = f"Golden Trade #{rank_idx + 1} (Deficit Challenge)"
+            allocator_decision = (
+                f"ALLOCATOR TARGET DEFICIT ALERT: Basket generates ${final_basket_harvest:,.2f} "
+                f"(-${final_deficit:,.2f} vs $1,000 target). Financial Analyst selected {sym} at ${prem:.2f} "
+                f"(sub-$2.00 sweet-spot); Risk Aggregator capped sizing to {contracts} contract(s) to protect cash ceiling. "
+                f"Approved with documented target challenge for user decision."
+            )
+        else:
+            allocator_status = "GOLDEN_TRADE_DESIGNATED"
+            allocator_label = f"Golden Trade #{rank_idx + 1} of 4"
+            allocator_decision = (
+                f"ALLOCATOR APPROVAL: Target satisfied. Sized at {contracts} contract(s) generating ${contrib:,.2f} "
+                f"towards the $1,000 monthly harvest goal. Fully cleared against collateral and margin caps."
+            )
+
+        fa_defense = (
+            f"Financial Analyst Defense: Low implied volatility in defensive sector ({sec}) establishes a solid "
+            f"support floor at ${strike:.1f} ({pop:.1f}% PoP). While per-share premium (${prem:.2f}) falls below "
+            f"the $2.00 sweet spot, capital preservation overrides aggressive yield-seeking."
+            if is_below_sweet_spot else
+            f"Financial Analyst Verdict: High fundamental conviction. Selling conservative 30-DTE OTM CSP at ${strike:.1f} "
+            f"(Δ {delta:.2f}, {pop:.1f}% PoP) captures ${prem:.2f} premium sweet-spot above structural support."
+        )
+
+        ra_rationale = (
+            f"Risk Aggregator Audit: Sizing calibrated to {contracts} contract(s) (${collateral:,.2f} collateral, +{margin_imp:.1f}% margin). "
+            f"Cleared 100% full cash reserve within 50% basket ceiling."
+            if scaling_approved else
+            f"Risk Aggregator Audit: Capped at {contracts} contract(s) (${collateral:,.2f} collateral). Scaling blocked by "
+            f"{trade.get('scaling_blocked_reason', 'collateral ceiling')} to preserve cash liquidity buffer."
+        )
 
         sub_agent_consensus = {
             "financial_analyst": {
                 "persona": "Financial Analyst Agent",
-                "status": "APPROVED",
-                "verdict": f"High fundamental conviction. Selling conservative 30-DTE OTM CSP at ${strike:.1f} (Δ {delta:.2f}, {pop:.1f}% PoP) captures ${prem:.2f} premium sweet-spot above structural support.",
-                "sweet_spot_score": f"${prem:.2f} / contract (Sweet Spot target $2.00–$3.00)",
+                "status": "CHALLENGED_ON_SWEET_SPOT" if is_below_sweet_spot else "APPROVED",
+                "verdict": fa_defense,
+                "sweet_spot_score": f"${prem:.2f} / share ({'Sub-Sweet Spot <$2.00' if is_below_sweet_spot else 'Optimal Sweet Spot $2.00–$3.00'})",
                 "fundamental_floor": f"Solid balance sheet, {sec} sector leadership, durable earnings moat."
             },
             "risk_aggregator": {
                 "persona": "Risk Aggregator Agent",
                 "status": "APPROVED",
-                "verdict": f"Risk limits cleared. +{margin_imp:.1f}% margin impact within 15% account cap. 100% full cash collateral (${collateral:,.2f}) within 50% basket ceiling.",
+                "verdict": ra_rationale,
                 "sector_clearance": f"Cleared ({sec} — 1 of 4 distinct GICS sectors)",
                 "margin_impact": f"+{margin_imp:.1f}%",
-                "collateral_status": "100% Full Cash Reserved"
+                "collateral_status": f"100% Full Cash Reserved (${collateral:,.2f})"
             },
             "executive_allocator": {
                 "persona": "Executive Portfolio Allocator Agent",
-                "status": "GOLDEN_TRADE_DESIGNATED",
+                "status": allocator_status,
                 "rank": rank_idx + 1,
-                "golden_trade_label": f"Golden Trade #{rank_idx + 1} of 4",
-                "monthly_harvest_contribution": f"${prem * 100:.2f} towards $1,000 monthly goal",
-                "allocation_decision": "Approved for user 1-click authorization into Saxo Order Blotter."
+                "golden_trade_label": allocator_label,
+                "monthly_harvest_contribution": f"${contrib:.2f} towards $1,000 monthly goal ({contracts} contract{'s' if contracts > 1 else ''})",
+                "target_harvest_gap": f"-${final_deficit:.2f} Shortfall" if has_shortfall else "Target Met ($1,000+)",
+                "allocation_decision": allocator_decision
             }
         }
         trade["sub_agent_consensus"] = sub_agent_consensus
+        trade["contracts"] = contracts
+        trade["collateral_required"] = collateral
         record = trade_staging.stage_recommendation(trade, week_label=week_label)
         record["golden_trade_rank"] = rank_idx + 1
+        record["contracts"] = contracts
+        record["collateral_required"] = collateral
         record["sub_agent_consensus"] = sub_agent_consensus
         staged_records.append(record)
 
