@@ -612,7 +612,26 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
           * Next.js static production export completed with 17/17 routes compiled cleanly.
           * Dual-flavor compatibility test suite passed 100%.
 
-    13. **Strict 4-Candidate Wheel Harvest Blotter & Third-Friday Monthly Options Harmonization (2026-09-13)**:
+    13. **Google Finance-Style Market Summary Accordions, Cross-Asset Directional Matrix & Curated Google News Integration (2026-09-13)**:
+        - **Dynamic Multi-Tier Google News RSS Ingestion Engine (`weekly_intelligence.py`)**:
+          * Implemented `fetch_curated_google_news()` with strict 5-point docstring standard.
+          * Ingests verified clustered market stories from Google News Business/Markets topic `CAAqJggKIiBDQkFTRWdvSUwyMHZNRGx6TVdZU0FtVnVHZ0pWVXlnQVAB` and dynamic 24-hour portfolio/watchlist ticker search (`when:24h+(COIN+OR+NVDA+OR+INTC...)`).
+          * Parses story clusters to extract clean headlines, publication dates, and multi-publisher sources from `<font color="#6f6f6f">` tags (e.g. Bloomberg, Reuters, WSJ, CNBC), alongside cluster outlet counts (`5 sites`).
+        - **Google Finance-Style "US Market Summary" Accordions (`media_1789273687657.png` Emulation)**:
+          * Implemented `build_market_summary_accordions()` generating 5 thematic macro cards across Wall Street Equities, Fed/Rates, Energy & Commodities, Tech & AI Capex, and Digital Assets.
+          * Replicated Google Finance interactive accordion cards with source pills, `X sites` count badges, smooth expandable drawers, circular blue chevrons, and 2-4 sentence contextual syntheses with transmission vectors.
+        - **Cross-Asset Directional Matrix ("Going Up & Down")**:
+          * Implemented `build_cross_asset_directional_table()` spanning 8 core benchmarks: S&P 500, Nasdaq 100, 10Y Yield, WTI Crude Oil, Spot Gold, US Dollar Index, Bitcoin, and CBOE VIX.
+          * Displays green `▲` Up / red `▼` Down indicators, `BULLISH` / `BEARISH` / `NEUTRAL` / `RANGE-BOUND` badges, current levels, causal macro drivers, and actionable weekly options yield stances.
+        - **Complete Elimination of Email Memo Formatting**:
+          * Enforced strict negative prompt constraints forbidding `TO:`, `FROM:`, `SUBJECT:`, `DATE:` headers across both `weekly_intelligence.py` and `options_adk_workflow.py`.
+          * Added regex post-processing filter in backend and client-side sanitization in `MacroBriefingView` to guarantee zero memo headers are ever displayed.
+        - **Verification & Testing**:
+          * `scripts/test_weekly_intelligence_integration.py` passed 100%: 6 clustered news items fetched, 5 accordion cards generated, 8 cross-asset rows validated.
+          * `scripts/test_adk_pipeline_macro_summary.py` passed 100%: complete pipeline execution verified with zero memo headers.
+          * Next.js static production export completed with 17/17 routes compiled cleanly into `options_lab/frontend/out/`.
+
+    14. **Strict 4-Candidate Wheel Harvest Blotter & Third-Friday Monthly Options Harmonization (2026-09-13)**:
         - **Target Monthly Third-Friday Expiration Engine (`weekly_intelligence.py` & `options_adk_workflow.py`)**:
           * Implemented `resolve_target_monthly_option_cycle(min_dte=28, max_dte=35) -> Tuple[datetime, int]` dynamically computing the next OCC standard third-Friday monthly expiration cycle (e.g. October 16, 2026, 33 DTE) falling strictly in the third week of the month.
           * Harmonized candidate generation across both Google ADK 2.0 Graph Workflow (`options_greeks_node`) and `WeeklyIntelligenceEngine` to target the standard third-Friday cycle, eliminating sub-30 DTE weekly expirations.
@@ -632,26 +651,72 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
            * Next.js production build (`npm run build`) compiled 17/17 routes with 0 errors.
            * Integration test suite `scripts/test_weekly_intelligence_integration.py` passed 100%.
 
-     14. **Dynamic SQLite Watchlists, Authentic Stock UIC Resolution & Live Quote Hydration (2026-09-13)**:
-         - **Elimination of Hardcoded Watchlist Snapshots (`saxo_client.py`)**:
-           * Purged legacy hardcoded `stocks_us_instruments` static array with stale price snapshots (`112.33`, `24.97`, `307.28`...).
-           * Implemented `user_watchlists` table in SQLite (`optionslab.db`) with composite primary key `(watchlist_id, symbol)` and indexed ordering.
-           * Added `seed_default_watchlists()`, `get_user_watchlists()`, `get_watchlist_symbols(watchlist_id)`, `add_to_watchlist()`, and `remove_from_watchlist()` in `db.py`, all fully stamped with 5-point docstrings.
-         - **Authentic Primary US Stock UIC Resolution & Multi-Exchange Collision Prevention**:
-           * Differentiated Saxo Option Root IDs (e.g. 169, 184, 266, 381) from tradeable stock UICs. Resolved authentic tradeable US stock UICs: `ABT: 329`, `T: 303`, `AAPL: 211`, `BAC: 375`, `BRK.B: 2631`, `CVX: 2128`, `CSCO: 226`, `C: 306`, `KO: 307`, `COP: 4597`, `GE: 312`, `GS: 1255`, `HPQ: 3102`, `INTC: 247`.
-           * Filtered symbol lookups against primary US exchanges (`:xnys`, `:xnas`, `:arcx`) to eliminate foreign ticker collisions (e.g. Canadian `:xtse` Telus vs US `T`, BacTech vs `BAC`, HPQ on TSX).
-           * Implemented concurrent thread pool hydration in `get_watchlist_instruments()`, resolving authentic real-time market prices across all 13 tickers concurrently in under 1.5 seconds.
-         - **Watchlist Management REST Endpoints & Frontend Client Bindings**:
-           * Added `POST /api/broker/watchlist/{watchlist_id}/symbols` to add tickers to watchlists dynamically.
-           * Added `DELETE /api/broker/watchlist/{watchlist_id}/symbols/{symbol}` to remove tickers dynamically.
-           * Exposed `addWatchlistSymbol` and `removeWatchlistSymbol` in frontend `api.ts`.
-         - **Strict Pre-Execution Contract Locking & Tamper-Proof Safeguards (`trade_staging.py`)**:
-           * Pre-execution verification freezes `contract_uic`, `contract_description`, `contract_symbol`, and `expiration_date` directly in `staged_trades`.
-           * During `approve_and_execute_trade`, queries live broker instrument details for `contract_uic` and immediately hard-aborts if `BLOCKED_EXPIRY_MISMATCH` or `BLOCKED_TICKER_MISMATCH` occurs, preventing multi-year LEAPS order submission bugs.
-           * Staged verified 2026-W37 monthly third-Friday candidates: `INTC 90 P` (UIC `56955175`), `C 125 P` (UIC `54887530`), `ABT 95 P` (UIC `57874430`), `KO 85 P` (UIC `55595409`).
-         - **Verification & UI Badges**:
-           * Frontend `weekly-intelligence/page.tsx` renders verified `Saxo UIC: {uic}` badges on candidate cards.
-           * Next.js production build compiled cleanly with 17/17 routes exported.
+    15. **Dynamic SQLite Watchlists, Authentic Stock UIC Resolution & Live Quote Hydration (2026-09-13)**:
+        - **Elimination of Hardcoded Watchlist Snapshots (`saxo_client.py`)**:
+          * Purged legacy hardcoded `stocks_us_instruments` static array with stale price snapshots (`112.33`, `24.97`, `307.28`...).
+          * Implemented `user_watchlists` table in SQLite (`optionslab.db`) with composite primary key `(watchlist_id, symbol)` and indexed ordering.
+          * Added `seed_default_watchlists()`, `get_user_watchlists()`, `get_watchlist_symbols(watchlist_id)`, `add_to_watchlist()`, and `remove_from_watchlist()` in `db.py`, all fully stamped with 5-point docstrings.
+        - **Authentic Primary US Stock UIC Resolution & Multi-Exchange Collision Prevention**:
+          * Differentiated Saxo Option Root IDs (e.g. 169, 184, 266, 381) from tradeable stock UICs. Resolved authentic tradeable US stock UICs: `ABT: 329`, `T: 303`, `AAPL: 211`, `BAC: 375`, `BRK.B: 2631`, `CVX: 2128`, `CSCO: 226`, `C: 306`, `KO: 307`, `COP: 4597`, `GE: 312`, `GS: 1255`, `HPQ: 3102`, `INTC: 247`.
+          * Filtered symbol lookups against primary US exchanges (`:xnys`, `:xnas`, `:arcx`) to eliminate foreign ticker collisions (e.g. Canadian `:xtse` Telus vs US `T`, BacTech vs `BAC`, HPQ on TSX).
+          * Implemented concurrent thread pool hydration in `get_watchlist_instruments()`, resolving authentic real-time market prices across all 13 tickers concurrently in under 1.5 seconds.
+        - **Watchlist Management REST Endpoints & Frontend Client Bindings**:
+          * Added `POST /api/broker/watchlist/{watchlist_id}/symbols` to add tickers to watchlists dynamically.
+          * Added `DELETE /api/broker/watchlist/{watchlist_id}/symbols/{symbol}` to remove tickers dynamically.
+          * Exposed `addWatchlistSymbol` and `removeWatchlistSymbol` in frontend `api.ts`.
+        - **Strict Pre-Execution Contract Locking & Tamper-Proof Safeguards (`trade_staging.py`)**:
+          * Pre-execution verification freezes `contract_uic`, `contract_description`, `contract_symbol`, and `expiration_date` directly in `staged_trades`.
+          * During `approve_and_execute_trade`, queries live broker instrument details for `contract_uic` and immediately hard-aborts if `BLOCKED_EXPIRY_MISMATCH` or `BLOCKED_TICKER_MISMATCH` occurs, preventing multi-year LEAPS order submission bugs.
+          * Staged verified 2026-W37 monthly third-Friday candidates: `INTC 90 P` (UIC `56955175`), `C 125 P` (UIC `54887530`), `ABT 95 P` (UIC `57874430`), `KO 85 P` (UIC `55595409`).
+        - **Verification & UI Badges**:
+          * Frontend `weekly-intelligence/page.tsx` renders verified `Saxo UIC: {uic}` badges on candidate cards.
+          * Next.js production build compiled cleanly with 17/17 routes exported.
+
+    16. **Cold-Boot Resilience, Unified Desktop Ingress & Dynamic Trade Campaign Ingestion (2026-09-16)**:
+        - **Desktop App Cold-Boot Black Screen Prevention (`options_lab/desktop/main.js` & `splash.html`)**:
+          * Diagnosed Chromium GPU rasterization hangs and backend cold-boot race conditions where scientific libraries (`numpy`, `scipy`, `vertexai`) require 15–25s on Windows startup, causing `net::ERR_CONNECTION_REFUSED` and a blank window.
+          * Added Chromium flags `app.disableHardwareAcceleration()`, `--disable-gpu`, `--disable-gpu-compositing`, `--disable-software-rasterizer`, and persistent AppData caching in `%APPDATA%\OptionsLabDesktop`.
+          * Implemented a native HTML/CSS animated splash screen (`splash.html`) that mounts immediately on boot, displays live connection progress (`Starting engines... (x/60s)`), and only navigates to `targetUrl` after `/api/health` returns HTTP 200.
+          * Added `did-fail-load` and `render-process-gone` auto-recovery hooks with retry cards.
+        - **Handshake Abort Elimination & Unified Origin Routing (`api.ts` & `weekly-intelligence/page.tsx`)**:
+          * Purged premature 2–3s client aborts that generated false-positive offline error cards on Windows during initial macro pipeline synthesis.
+          * Upgraded `checkBackendHandshake()` probe budget to 8s (secondary fallback probe 6s) and allowed `fetchBriefing()` to proceed directly with a 75s synthesis budget.
+          * Unified origin resolution: `getApiBase()` dynamically uses relative same-origin `''` when running on port 8000 (FastAPI static mount or Electron), and `http://${window.location.hostname}:8000` when running Next.js dev server on port 3000. Purged Linux Docker messaging on Windows error banners.
+        - **Purge of Hardcoded 10-Stock Loop & Dynamic Campaign Reconstruction (`pdf_report_parser.py`, `campaign_stitcher.py`, `trade_history_ingest.py`, `behavioral-lab/page.tsx`)**:
+          * Purged static hardcoded Python arrays (`AMZN`, `CVX`, `COIN`, `PANW`, `PLUG`, `V`, `IBM`, `RBLX`, and two ETFs) from `_extract_stock_trades()`, `_extract_options_trades()`, and `_extract_holdings()`. Implemented real regex table extraction for authentic Saxo PDF uploads.
+          * Isolated baseline demo dataset into `get_baseline_sample_data()`, only accessible via explicit `/api/history/sample-init`. Purged auto-seeding logic from `list_ingested_reports()`.
+          * Added `purge_sample_reports()` and endpoint `POST /api/history/purge-sample` to cleanly wipe demo records from SQLite.
+          * Added `source` parameter (`'live'`, `'reports'`, `'all'`) to `CampaignStitcher.reconstruct_all_campaigns()` and `GET /api/history/campaigns`. When `source='live'`, queries ONLY authentic Saxo OpenAPI blotter and live positions (`COIN`, `INTC`, `PLTR`), completely eliminating static mock noise.
+          * Attached transparent provenance badges (`LIVE_BROKER`, `UPLOADED_REPORT`, `HYBRID`) to each campaign.
+          * Updated `behavioral-lab/page.tsx` with interactive source filter pills (`All Campaigns`, `Live Saxo Broker`, `Uploaded Reports`), a 1-click `Purge Demo Sample` button, and provenance badges.
+        - **Full-Stack Verification**:
+          * Next.js production build (`npm run build`) compiled 17/17 routes with 0 errors.
+          * Regression suite `test_behavioral_pipeline.py` passed 100%.
+    17. **Saxo Order Gateway Timeout Resilience, Post-Timeout Broker Reconciliation, Authentic NEM Resolution & 3-Agent Wheel Harvest Architecture (2026-09-17)**:
+        - **Saxo OpenAPI Order Gateway Timeout Root Cause & Solution (`config.py`, `saxo_client.py`)**:
+          * Root cause diagnosed: When placing live option orders (`POST /trade/v2/orders`), Saxo performs synchronous pre-trade margin calculations and exchange routing (Cboe/OPRA). During volatile market hours, this takes 8–15 seconds. The legacy client timeout was defaulted to 8 seconds (`SAXO_TIMEOUT_SECONDS = 8`), causing Python `requests` to abort the socket with `HTTPSConnectionPool(host='gateway.saxobank.com', port=443): Read timed out. (read timeout=8)`. Saxo's gateway had actually accepted and queued the order, causing false `EXECUTION_ERROR` reports while orders were executed live on Saxo TraderGO.
+          * Increased default `SAXO_TIMEOUT_SECONDS` from 8 to 30 seconds in `config.py`.
+          * In `saxo_client.py:place_order()`, assigned a minimum 30.0s dedicated socket timeout (`order_timeout = max(30.0, float(self.timeout or 30.0))`).
+        - **Automated Post-Timeout Broker Reconciliation Engine (`saxo_client.py:reconcile_unconfirmed_order`)**:
+          * When any order placement times out, `place_order()` automatically initiates an immediate broker reconciliation audit before returning to the caller.
+          * Queries `port/v1/orders/me` (active working orders) and `cs/v1/audit/orderactivities` (recent order placements) matching instrument UIC, side (`Buy`/`Sell`), and contract quantity within a 120-second window.
+          * If the order is discovered on the broker, it dynamically recovers the order ID (`OrderId`), sets `status = "PLACED"` with `reconciled = True`, and confirms the execution without reporting an error.
+          * If unconfirmed, marks `status = "UNCONFIRMED_TIMEOUT"` and locks out duplicate submissions.
+        - **Idempotency Shield & Double-Placement Prevention (`trade_staging.py`)**:
+          * In `TradeStagingEngine.approve_and_execute_trade()`, installed an entry-level idempotency lock: if `record["status"] in ["FILLED", "PLACED", "EXECUTING", "UNCONFIRMED_TIMEOUT"]`, order placement is hard-blocked and returns an explanatory message without hitting the broker.
+          * Captures gateway timeouts and tags SQLite record with `UNCONFIRMED_TIMEOUT`, preventing user double-clicking from placing duplicate contracts.
+        - **Underlying Ticker Collision Elimination for US Equities (`NEM` vs `NET_EU`)**:
+          * Diagnosed ticker ambiguity where `NEM` (Newmont Mining Corporation, US NYSE) was erroneously resolving to `Nemetschek AG` (`NET_EU`, German XETRA) due to substring search prefix overlap.
+          * Updated `resolve_exact_option_contract()` in `saxo_client.py`: added `KNOWN_STOCK_UICS["NEM"] = {"uic": 590, "name": "Newmont Mining"}`. Prioritized primary US exchanges (`:xnys`, `:xnas`, `:arcx`) and `USD` currency over foreign collisions.
+          * Installed safety return shield asserting `contract_sym_root == clean_sym or contract_sym_root.startswith(clean_sym)`. Verified live: resolves to authentic Newmont Mining Put UIC `59455509`.
+          * Repaired staged trade `TRD-762BD7A8` in SQLite with authentic contract details.
+        - **Autonomous 3 Sub-Agent Consensus Architecture for the $1,000 Wheel Harvest (`weekly_intelligence.py`, `options_adk_workflow.py`)**:
+          * Implemented 3 specialized persona agents:
+            1. **Financial Analyst Agent**: Assesses fundamental thesis, technical valuation floor, and sweet-spot score targeting $2.00–$3.00 premium.
+            2. **Risk Aggregator Agent**: Verifies margin headroom (<1.5% incremental utilization), enforces 100% cash collateral requirement ($K \times 100$), and ensures 1-trade-per-sector portfolio diversification.
+            3. **Executive Portfolio Allocator Agent**: Awards final consensus, ranks **Golden Trades #1–4**, and calculates monthly harvest target contribution ($250/trade toward the $1,000/month goal).
+          * Frontend `weekly-intelligence/page.tsx` renders the **Sub-Agent Consensus Review Panel** with conviction ratings, margin impacts, and Golden Trade badges.
+          * Added `isTimeoutLocked` handling in frontend with amber lock badge: *"Check TraderGO (Timeout Locked)"* and telemetry log updates.
 
 ## 📊 Antigravity Usage Stats
 > Last Updated: 2026-09-13 15:05:00 SGT

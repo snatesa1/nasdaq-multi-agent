@@ -108,6 +108,32 @@ export interface InterlinkCockpit {
   composite_interlink_health_index: number;
 }
 
+export interface SubAgentConsensus {
+  financial_analyst: {
+    persona: string;
+    status: string;
+    verdict: string;
+    sweet_spot_score?: string;
+    fundamental_floor?: string;
+  };
+  risk_aggregator: {
+    persona: string;
+    status: string;
+    verdict: string;
+    sector_clearance?: string;
+    margin_impact?: string;
+    collateral_status?: string;
+  };
+  executive_allocator: {
+    persona: string;
+    status: string;
+    rank: number;
+    golden_trade_label: string;
+    monthly_harvest_contribution: string;
+    allocation_decision: string;
+  };
+}
+
 export interface StagedTrade {
   trade_id: string;
   symbol: string;
@@ -154,6 +180,8 @@ export interface StagedTrade {
   expiration_date?: string;
   collateral_explanation?: string;
   collateral_coverage_type?: string;
+  golden_trade_rank?: number;
+  sub_agent_consensus?: SubAgentConsensus;
   pillars?: {
     watchlist_status: string;
     trade_history_profile: string;

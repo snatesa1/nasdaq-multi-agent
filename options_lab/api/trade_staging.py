@@ -151,18 +151,38 @@ class TradeStagingEngine:
 
     def approve_and_execute_trade(self, trade_id: str) -> Dict[str, Any]:
         """
-        User approval endpoint:
-        1. Fetches staged record.
-        2. Re-audits live margin and safety shield.
-        3. If approved, calls Saxo Client place_order API.
-        4. Updates SQLite record to EXECUTING / FILLED / BLOCKED.
+        Descriptive Summary:
+            Authenticates and executes a staged trade order against Saxo OpenAPI or simulation sandbox.
+            Executes pre-flight margin headroom verification, safety shield audit, contract UIC validation,
+            idempotency locks against duplicate placement, and post-timeout broker reconciliation.
+
+        Parameters:
+            trade_id (str): Unique staged trade identifier (e.g. 'TRD-762BD7A8').
+
+        Returns:
+            Dict[str, Any]: Execution result containing 'status', 'trade_id', 'reasons', 'saxo_response', and 'record'.
+
+        Exceptions / Side Effects:
+            Raises ValueError if trade_id not found in SQLite database.
+            Mutates SQLite staged_trades record to EXECUTING, PLACED, FILLED, UNCONFIRMED_TIMEOUT, or error states.
+            Transmits real-money order request to Saxo OpenAPI endpoint when live execution is active.
+
+        Concrete Executable Usage Example:
+            >>> manager = StagedTradeManager()
+            >>> res = manager.approve_and_execute_trade("TRD-762BD7A8")
+            >>> assert res["status"] in ["PLACED", "FILLED", "UNCONFIRMED_TIMEOUT", "BLOCKED_SAFETY_CONFIG"]
         """
         record = database.get_staged_trade_by_id(trade_id)
         if not record:
             raise ValueError(f"Staged trade {trade_id} not found.")
 
-        if record["status"] in ["FILLED", "EXECUTING"]:
-            return {"status": record["status"], "message": "Trade already approved/executed.", "record": record}
+        # Idempotency Shield: Block duplicate executions if trade is already active or unconfirmed
+        if record["status"] in ["FILLED", "PLACED", "EXECUTING", "UNCONFIRMED_TIMEOUT"]:
+            return {
+                "status": record["status"],
+                "message": f"Trade {trade_id} is already in state '{record['status']}'. Duplicate order submission blocked to protect capital.",
+                "record": record
+            }
 
         now_iso = datetime.now().isoformat()
         symbol = str(record.get("symbol", "AAPL")).strip().upper()
@@ -337,6 +357,12 @@ class TradeStagingEngine:
             if saxo_res.get("status") in ["LIVE_EXECUTION_BLOCKED_BY_SAFETY_SHIELD"]:
                 record["status"] = "BLOCKED_SAFETY_CONFIG"
                 reasons.append("Live order blocked by broker safety config (BROKER_ALLOW_LIVE_EXECUTION=False).")
+            elif saxo_res.get("status") == "UNCONFIRMED_TIMEOUT":
+                record["status"] = "UNCONFIRMED_TIMEOUT"
+                reasons.append(saxo_res.get("error", "Saxo order request timed out. Order locked to prevent duplicates. Please check Saxo TraderGO."))
+            elif saxo_res.get("reconciled") and saxo_res.get("status") == "PLACED":
+                record["status"] = "PLACED"
+                reasons.append(saxo_res.get("message", "Order confirmed on Saxo via post-timeout broker reconciliation."))
             elif "error" in saxo_res or saxo_res.get("status", "").endswith("_ERROR"):
                 record["status"] = "EXECUTION_ERROR"
                 raw_err = saxo_res.get("error", "")
@@ -357,15 +383,25 @@ class TradeStagingEngine:
                 "record": record
             }
         except Exception as e:
-            logger.error(f"Saxo order placement failed for {trade_id}: {e}")
-            record["status"] = "EXECUTION_ERROR"
-            record["saxo_order_response"] = json.dumps({"error": str(e)})
+            err_str = str(e)
+            logger.error(f"Saxo order placement failed for {trade_id}: {err_str}")
+            is_timeout = "timed out" in err_str.lower() or "timeout" in err_str.lower()
+            if is_timeout:
+                record["status"] = "UNCONFIRMED_TIMEOUT"
+                err_text = (
+                    f"Broker gateway timed out for trade {trade_id}. "
+                    f"Status unconfirmed on broker; duplicate submission locked to protect capital. Please check Saxo TraderGO."
+                )
+            else:
+                record["status"] = "EXECUTION_ERROR"
+                err_text = err_str
+            record["saxo_order_response"] = json.dumps({"error": err_text})
             database.save_staged_trade(record)
             return {
-                "status": "EXECUTION_ERROR",
+                "status": record["status"],
                 "trade_id": trade_id,
-                "reasons": [str(e)],
-                "error": str(e),
+                "reasons": [err_text],
+                "error": err_text,
                 "record": record
             }
 

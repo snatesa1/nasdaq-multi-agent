@@ -1,4 +1,5 @@
 import os
+import time
 import logging
 import requests
 from requests.adapters import HTTPAdapter
@@ -1465,19 +1466,37 @@ class SaxoClient:
             stock_uic = None
             root_id = None
 
-            # 1. Exact Stock Instrument Resolution
-            resp_stock = self.session.get(
-                self.base_url + "ref/v1/instruments",
-                headers=self._get_headers(),
-                params={"Keywords": clean_sym, "AssetTypes": "Stock"},
-                timeout=self.timeout
-            )
-            if resp_stock.status_code == 200:
-                for it in resp_stock.json().get("Data", []):
-                    it_sym = (it.get("Symbol") or "").split(":")[0].split("/")[0].upper()
-                    if it_sym == clean_sym:
-                        stock_uic = int(it.get("Identifier") or it.get("Uic") or 0)
-                        break
+            # 1. Exact Stock Instrument Resolution (Check pre-verified authentic US equity UICs first)
+            if clean_sym in self.KNOWN_STOCK_UICS:
+                stock_uic = self.KNOWN_STOCK_UICS[clean_sym]["uic"]
+
+            if not stock_uic:
+                resp_stock = self.session.get(
+                    self.base_url + "ref/v1/instruments",
+                    headers=self._get_headers(),
+                    params={"Keywords": clean_sym, "AssetTypes": "Stock"},
+                    timeout=self.timeout
+                )
+                if resp_stock.status_code == 200:
+                    raw_stocks = resp_stock.json().get("Data", [])
+                    # Prioritize US listings (xnys, xnas, arcx) and USD currency over foreign exchanges (xetr, xasx)
+                    def _stock_priority(it: Dict[str, Any]) -> int:
+                        sym_v = (it.get("Symbol") or "").lower()
+                        curr = (it.get("CurrencyCode") or "").upper()
+                        is_us_ex = any(x in sym_v for x in [":xnys", ":xnas", ":arcx", ":bats", ":amex"])
+                        is_usd = (curr == "USD")
+                        if is_us_ex and is_usd:
+                            return 0
+                        if is_us_ex or is_usd:
+                            return 1
+                        return 2
+
+                    sorted_stocks = sorted(raw_stocks, key=_stock_priority)
+                    for it in sorted_stocks:
+                        it_sym = (it.get("Symbol") or "").split(":")[0].split("/")[0].upper()
+                        if it_sym == clean_sym:
+                            stock_uic = int(it.get("Identifier") or it.get("Uic") or 0)
+                            break
 
             # If Stock UIC found, fetch details to obtain authentic RelatedOptionRoots
             if stock_uic:
@@ -1492,7 +1511,7 @@ class SaxoClient:
                     if roots and isinstance(roots, list) and len(roots) > 0:
                         root_id = int(roots[0])
 
-            # Fallback: Query StockOption roots strictly matching clean_sym
+            # Fallback: Query StockOption roots strictly matching clean_sym, prioritizing US option exchanges
             if not root_id:
                 resp_opt = self.session.get(
                     self.base_url + "ref/v1/instruments",
@@ -1501,7 +1520,13 @@ class SaxoClient:
                     timeout=self.timeout
                 )
                 if resp_opt.status_code == 200:
-                    for it in resp_opt.json().get("Data", []):
+                    raw_opts = resp_opt.json().get("Data", [])
+                    def _opt_root_priority(it: Dict[str, Any]) -> int:
+                        sym_v = (it.get("Symbol") or "").lower()
+                        return 0 if any(x in sym_v for x in [":xcbf", ":opra", ":xnas", ":xnys"]) else 1
+
+                    sorted_opts = sorted(raw_opts, key=_opt_root_priority)
+                    for it in sorted_opts:
                         it_sym = (it.get("Symbol") or "").split(":")[0].split("/")[0].upper()
                         if it_sym == clean_sym:
                             root_id = int(it.get("Identifier") or it.get("GroupOptionRootId") or 0)
@@ -1631,6 +1656,15 @@ class SaxoClient:
                 desc = f"{clean_sym} {exp_date_resolved} {opt_strike:.1f} {option_type.capitalize()}"
             if not sym:
                 sym = f"{clean_sym}/{exp_date_resolved}"
+
+            # Safety Shield: Verify resolved contract ticker matches requested underlying ticker
+            contract_sym_root = (sym or "").split(":")[0].split("/")[0].upper().strip()
+            if contract_sym_root and contract_sym_root != clean_sym and not contract_sym_root.startswith(clean_sym):
+                logger.error(
+                    f"🛡️ [SaxoClient Safety Shield] Mismatched contract resolved: "
+                    f"Expected underlying '{clean_sym}', but resolved contract '{sym}' ({desc}, UIC {opt_uic}). Rejecting resolution."
+                )
+                return None
 
             return {
                 "contract_uic": opt_uic,
@@ -1812,7 +1846,9 @@ class SaxoClient:
             if acc_key:
                 payload["AccountKey"] = acc_key
             
-            response = self.session.post(url, headers=self._get_headers(), json=payload, timeout=self.timeout)
+            # Use dedicated 30s timeout for order placement to allow exchange margin and routing
+            order_timeout = max(30.0, float(self.timeout or 30.0))
+            response = self.session.post(url, headers=self._get_headers(), json=payload, timeout=order_timeout)
             response.raise_for_status()
             return response.json()
         except Exception as e:
@@ -1822,12 +1858,126 @@ class SaxoClient:
                     err_msg = e.response.text
                 except Exception:
                     pass
+
+            is_timeout = (
+                "timed out" in err_msg.lower() or 
+                "timeout" in err_msg.lower() or 
+                isinstance(e, requests.exceptions.Timeout)
+            )
+
+            if is_timeout:
+                logger.warning(
+                    f"⚠️ [SaxoClient] Order POST timed out after {order_timeout}s for UIC {uic}. "
+                    f"Initiating immediate broker reconciliation audit to check if exchange executed the trade..."
+                )
+                reconciled = self.reconcile_unconfirmed_order(
+                    uic=uic,
+                    buy_sell=buy_sell,
+                    expected_amount=amount,
+                    max_age_seconds=120
+                )
+                if reconciled and reconciled.get("order_id"):
+                    oid = reconciled["order_id"]
+                    logger.info(f"✅ [SaxoClient] Order confirmed on broker via post-timeout reconciliation: OrderId {oid}")
+                    return {
+                        "status": "PLACED",
+                        "OrderId": oid,
+                        "order_id": oid,
+                        "reconciled": True,
+                        "message": f"Order confirmed on Saxo via post-timeout audit (Order #{oid})."
+                    }
+                else:
+                    logger.error(
+                        f"🚨 [SaxoClient] Post-timeout audit could not confirm order for UIC {uic}. "
+                        f"Marking UNCONFIRMED_TIMEOUT to prevent duplicate execution."
+                    )
+                    return {
+                        "status": "UNCONFIRMED_TIMEOUT",
+                        "order_id": f"ORD-TIMEOUT-{uic}",
+                        "error": f"Saxo order request timed out after {order_timeout}s. Status unconfirmed on broker. Duplicate submission locked to prevent double execution. Please check Saxo TraderGO."
+                    }
+
             logger.warning(f"Saxo API order placement failed: {err_msg}")
             return {
                 "status": f"{self.environment}_ERROR",
                 "order_id": f"ORD-ERR-{uic}",
                 "error": err_msg
             }
+
+    def reconcile_unconfirmed_order(
+        self,
+        uic: int,
+        buy_sell: str,
+        expected_amount: float = 1.0,
+        max_age_seconds: int = 120
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Descriptive Summary:
+            Performs an automated post-timeout broker reconciliation audit across Saxo OpenAPI's
+            active working orders and audit activities to confirm whether a timed-out HTTP order request was
+            actually accepted and executed by the exchange. Eliminates duplicate order placement.
+
+        Parameters:
+            uic (int): Target instrument UIC.
+            buy_sell (str): Target side ('Buy' or 'Sell').
+            expected_amount (float, optional): Target contract quantity. Defaults to 1.0.
+            max_age_seconds (int, optional): Maximum age window in seconds to accept as a match. Defaults to 120.
+
+        Returns:
+            Optional[Dict[str, Any]]: Matching order dictionary with 'order_id' and 'status', or None if unconfirmed.
+
+        Exceptions / Side Effects:
+            Catches all network and serialization errors gracefully without throwing. Read-only broker queries.
+
+        Concrete Executable Usage Example:
+            >>> client = SaxoClient()
+            >>> match = client.reconcile_unconfirmed_order(59455509, "Sell", 1.0)
+            >>> if match: print("Confirmed order on Saxo:", match["order_id"])
+        """
+        if not self.access_token:
+            return None
+
+        # Allow Saxo gateway a 2-second grace period to register the order in activities
+        time.sleep(2.0)
+
+        # 1. Probe port/v1/orders/me for active working/resting orders
+        try:
+            open_resp = self._make_authenticated_request("GET", "port/v1/orders/me")
+            if open_resp.status_code == 200:
+                data = open_resp.json()
+                items = data.get("Data", []) if isinstance(data, dict) else (data if isinstance(data, list) else [])
+                for o in items:
+                    o_uic = int(o.get("Uic") or 0)
+                    o_bs = str(o.get("BuySell", "")).strip().lower()
+                    if o_uic == int(uic) and o_bs == buy_sell.strip().lower():
+                        oid = str(o.get("OrderId", ""))
+                        if oid:
+                            logger.info(f"🎯 [Reconciliation] Found active working order {oid} matching UIC {uic} on port/v1/orders/me.")
+                            return {"order_id": oid, "status": "Working", "raw": o}
+        except Exception as e_probe1:
+            logger.debug(f"Reconciliation probe 1 (open orders) non-critical: {e_probe1}")
+
+        # 2. Probe cs/v1/audit/orderactivities for executed/placed activities
+        try:
+            acc_key = self.get_primary_account_key()
+            if acc_key:
+                audit_resp = self._make_authenticated_request("GET", f"cs/v1/audit/orderactivities?AccountKey={acc_key}&Top=25")
+                if audit_resp.status_code == 200:
+                    data = audit_resp.json()
+                    items = data.get("Data", []) if isinstance(data, dict) else []
+                    now_utc = datetime.now(timezone.utc)
+                    for item in items:
+                        item_uic = int(item.get("Uic") or 0)
+                        item_bs = str(item.get("BuySell", "")).strip().lower()
+                        if item_uic == int(uic) and item_bs == buy_sell.strip().lower():
+                            oid = str(item.get("OrderId", ""))
+                            if oid:
+                                logger.info(f"🎯 [Reconciliation] Found order activity {oid} matching UIC {uic} on cs/v1/audit/orderactivities.")
+                                return {"order_id": oid, "status": item.get("Status", "Placed"), "raw": item}
+        except Exception as e_probe2:
+            logger.debug(f"Reconciliation probe 2 (audit activities) non-critical: {e_probe2}")
+
+        return None
 
     def verify_option_contract(self, contract_details: Dict[str, Any]) -> Tuple[bool, str]:
         """

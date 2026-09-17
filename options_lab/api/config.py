@@ -105,8 +105,8 @@ class Settings:
 
     @cached_property
     def SAXO_TIMEOUT_SECONDS(self) -> int:
-        """HTTP connection and read timeout limit in seconds."""
-        return int(os.getenv("SAXO_TIMEOUT_SECONDS", "8"))
+        """HTTP connection and read timeout limit in seconds (increased to 30s to allow exchange margin routing)."""
+        return int(os.getenv("SAXO_TIMEOUT_SECONDS", "30"))
 
     @cached_property
     def SAXO_APP_NAME(self) -> str:
