@@ -743,11 +743,16 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
           * Expanded initial candidate discovery buffer to 16 symbols and allowed up to 2 candidates per sector during the discovery phase, allowing diverse sectors to compete for the 4 final Golden Trade slots.
         - **Frontend Executive Dialectical Challenge Banner**:
           * Added an interactive amber warning banner to `weekly-intelligence/page.tsx` displaying the exact monthly harvest gap, Allocator challenge statement, and dynamic contract breakdown when a target shortfall is detected.
-    19. **Finalized Institutional Wheel Execution Blueprint (Ready for Next Session Execution)**:
+    19. **Finalized Institutional Wheel Execution Blueprint — Dual-Mode Inter-Agent Debate Arena (Ready for Next Session)**:
+        - **Dual Strategic Allocation Modes**:
+          * **Mode 1 (Multi-Sector Basket)**: 4 trades × ~$250 = $1,000 across 4 distinct GICS sectors (strikes ≤ $125, ~$28k–$32k collateral).
+          * **Mode 2 (Mega-Cap Anchor Wheel)**: 1 Anchor ($750–$850, e.g. $390 MSFT or $150 GOOGL, ~$39k collateral) + 1 Satellite ($150–$250) = $1,000.
+        - **Inter-Mode Sub-Agent Cross-Examination Arena**:
+          * Financial Analyst, Risk Aggregator, and Executive Allocator formally cross-examine BOTH modes, weigh the specific pros/cons, expose hidden drawbacks (e.g. Mode 1: holding cyclical mid-caps with contract scaling drag vs Mode 2: 54% single-name cash concentration on tech), and output side-by-side agent conviction scorecards.
+          * UI provides an interactive Mode Selector toggle with comparative agent scorecards, allowing the user to inspect drawbacks and 1-click select/approve their preferred strategic direction.
         - **Strict Compliance Hard Cutoff**: `min_dte >= 30` (30 to 45 DTE). Rejects any cycle < 30 DTE. When current month's third Friday is < 30 DTE, advances to next standard OCC monthly cycle.
-        - **Probability of Allocation Guard**: Probability of Allocation (Assignment Probability) $\le 20.0\%$ ($|\Delta| \le 0.20$, $\text{PoP} \ge 80.0\%$) for regular CSP execution.
-        - **Dynamic 15-Day News Momentum Discovery**: Zero hardcoded stock lists! Candidates dynamically extracted from trailing 15 days of Google News RSS feeds and SQLite macro news memory (`get_weekly_macro_headlines(days=15)`), mapped to GICS sectors via `InstitutionalUniverseEngine`.
-        - **Weighted Intra-Sector Prioritization**: Ranks candidates within each sector using: $40\% \text{ Premium Sweet Spot} + 40\% \text{ Allocation Safety } (\le 20\%) + 20\% \text{ 15-Day News Momentum}$.
+        - **Probability of Allocation Guard**: Probability of Allocation (Assignment Probability) $\le 20.0\%$ ($|\Delta| \le 0.20$, $\text{PoP} \ge 80.0\%$) enforced in both modes.
+        - **Dynamic 15-Day News Momentum Discovery**: Zero hardcoded stock lists! Candidates dynamically extracted from trailing 15 days of Google News RSS feeds and SQLite macro news memory (`get_weekly_macro_headlines(days=15)`).
         - **50% Account Margin Utilization Cap**: Raised `max_margin_util_pct` from 15% to 50% across `MarginGuardian`, `SafetyShield`, and UI telemetry.
         - **Zero-Hardcoding Invariant Test Suite**: Refactored `test_dialectical_consensus.py` asserting purely on mathematical and compliance invariants.
 
