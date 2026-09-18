@@ -829,7 +829,7 @@ def set_saxo_cache(key: str, data: Any) -> None:
     """
     try:
         now_iso = datetime.now(timezone.utc).isoformat()
-        serialized = json.dumps(data)
+        serialized = json.dumps(data, default=str)
         with _get_conn() as conn:
             conn.execute(
                 """

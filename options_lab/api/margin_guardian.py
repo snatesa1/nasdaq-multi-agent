@@ -174,11 +174,11 @@ class MarginGuardian:
     def __init__(
         self,
         saxo_client: Optional[SaxoClient] = None,
-        max_margin_util_pct: float = 15.0,
+        max_margin_util_pct: float = 50.0,
         max_cash_collateral_pct: float = 50.0
     ):
         self.saxo_client = saxo_client or SaxoClient()
-        self.max_margin_util_pct = float(max_margin_util_pct)  # Hard user constraint (15%)
+        self.max_margin_util_pct = float(max_margin_util_pct)  # Hard user constraint (50%)
         self.max_cash_collateral_pct = float(max_cash_collateral_pct)  # Hard user constraint (50% cash collateral cap)
 
     def get_current_margin_status(self) -> Dict[str, Any]:

@@ -133,6 +133,19 @@ async def start_token_heartbeat():
                 logger.warning(f"⚠️ [Token Heartbeat] Auto-refresh non-critical: {e}")
     asyncio.create_task(_heartbeat())
 
+    async def _prewarm_weekly_intelligence():
+        try:
+            await asyncio.sleep(2)
+            current_week = f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
+            cached = database.get_saxo_cache(f"briefing_{current_week}")
+            if not cached or not isinstance(cached, dict) or not cached.get("wheel_harvest_blotter", {}).get("mode_1"):
+                logger.info(f"⚡ [Background Intelligence Pre-warmer] Warming weekly briefing for {current_week}...")
+                await asyncio.to_thread(weekly_intelligence.analyze_weekly_macro_and_edges, week_label=current_week, force_refresh=True)
+                logger.info(f"✅ [Background Intelligence Pre-warmer] Weekly briefing warmed and cached for {current_week}!")
+        except Exception as e_prewarm:
+            logger.warning(f"⚠️ [Background Intelligence Pre-warmer] Non-critical: {e_prewarm}")
+    asyncio.create_task(_prewarm_weekly_intelligence())
+
 # ── Health Check & Frontend-Backend Handshake ─────────────────────────────
 @app.get("/health")
 @app.get("/api/health")
@@ -1384,7 +1397,9 @@ def check_order_behavioral_safety(
 
 # ── Weekly Intelligence & Live Trade Staging / Approval Endpoints ──────────
 
+@app.get("/intelligence/weekly-briefing")
 @app.get("/api/intelligence/weekly-briefing")
+@app.get("/api/weekly-intelligence/briefing")
 async def get_weekly_intelligence_briefing(
     week_label: Optional[str] = None,
     force_refresh: bool = False,
@@ -1392,14 +1407,13 @@ async def get_weekly_intelligence_briefing(
 ):
     """
     Analyzes Monday-Friday macroeconomic events, news feed, watchlist, and trade history.
-    Identifies edge setups (e.g. COIN Clarity Act spike) and stages trade recommendations.
-    Uses asyncio.wait_for with a 40-second timeout guard to prevent connection hanging.
+    Identifies edge setups, evaluates 4D Macro Direction Compass, and stages Dual-Mode $1,000/mo Wheel Harvest Blotters.
     """
     resolved_week = week_label or f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
     try:
         res = await asyncio.wait_for(
             asyncio.to_thread(
-                adk_workflow_engine.run_pipeline,
+                weekly_intelligence.analyze_weekly_macro_and_edges,
                 week_label=resolved_week,
                 force_refresh=force_refresh
             ),
@@ -1407,21 +1421,21 @@ async def get_weekly_intelligence_briefing(
         )
         return res
     except asyncio.TimeoutError:
-        logger.warning(f"ADK pipeline synthesis timed out for {resolved_week}. Attempting cached fallback.")
+        logger.warning(f"Weekly intelligence synthesis timed out for {resolved_week}. Attempting cached fallback.")
         cached = (
-            database.get_saxo_cache(f"adk_briefing_{resolved_week}")
-            or database.get_saxo_cache(f"adk_workflow_briefing_{resolved_week}")
-            or database.get_saxo_cache("adk_workflow_briefing_current")
+            database.get_saxo_cache(f"briefing_{resolved_week}")
+            or database.get_saxo_cache(f"adk_briefing_{resolved_week}")
+            or database.get_saxo_cache("briefing_current")
         )
         if cached and isinstance(cached, dict):
             cached["warning"] = "Live pipeline synthesis took longer than expected; serving last synchronized briefing."
             return cached
         raise HTTPException(
             status_code=504, 
-            detail="ADK Macro Intelligence synthesis timed out. Background workers are continuing; please retry."
+            detail="Weekly Macro Intelligence synthesis timed out. Background workers are continuing; please retry."
         )
     except Exception as e:
-        logger.error(f"Failed to generate weekly intelligence briefing via ADK: {e}")
+        logger.error(f"Failed to generate weekly intelligence briefing: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

@@ -755,6 +755,23 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
         - **Dynamic 15-Day News Momentum Discovery**: Zero hardcoded stock lists! Candidates dynamically extracted from trailing 15 days of Google News RSS feeds and SQLite macro news memory (`get_weekly_macro_headlines(days=15)`).
         - **50% Account Margin Utilization Cap**: Raised `max_margin_util_pct` from 15% to 50% across `MarginGuardian`, `SafetyShield`, and UI telemetry.
         - **Zero-Hardcoding Invariant Test Suite**: Refactored `test_dialectical_consensus.py` asserting purely on mathematical and compliance invariants.
+    20. **Weekly Intelligence Dual-Mode Overhaul, Latency Reduction & SQLite Cache Serialization Fix (2026-09-18)**:
+        - **SQLite Cache Serialization Fix (`db.py`)**:
+          * Fixed `TypeError: Object of type datetime is not JSON serializable` in `set_saxo_cache` by supplying `json.dumps(data, default=str)`. Previously, unhandled `datetime` objects caused every cache write to silently fail, leaving SQLite `saxo_cache` empty and forcing continuous 504 timeouts.
+          * Multi-key caching: Synchronously caches across `briefing_{week_label}`, `adk_briefing_{week_label}`, and `briefing_current` for robust cache hits.
+        - **Timeout Alignment & Background Pre-Warmer (`main.py`)**:
+          * Increased `get_weekly_intelligence_briefing` server timeout from 40.0s to 75.0s, matching the Next.js client's 75-second budget.
+          * Added non-blocking background startup pre-warmer `_prewarm_weekly_intelligence()` to compute and seed the current weekly briefing into SQLite cache immediately upon application boot.
+          * Added route aliases (`/intelligence/weekly-briefing`, `/api/intelligence/weekly-briefing`, `/api/weekly-intelligence/briefing`).
+        - **Candidate Pool Curation & Non-US / Dot-Notation Sanitization (`weekly_intelligence.py`)**:
+          * Filtered out non-US symbols (e.g. `ES3`, `O9A`) that caused Alpaca 400 errors and Yahoo Finance 404 retry loops.
+          * Filtered dot-notation tickers (e.g. `BRK.B`) to prevent Saxo contract mismatch warnings.
+          * Curated evaluation pool to 12-16 high-conviction US liquid options tickers stratified across Mega-Caps (`MSFT`, `GOOGL`, `NVDA`, `AAPL`) and cross-sector staples (`INTC`, `BAC`, `KO`, `NEM`, `ABT`, `SO`, `CVX`, `CSCO`), slashing evaluation time from 45.6s to ~33s.
+        - **Deterministic 4-Sector Backfilling for Mode 1**:
+          * Added multi-tier fallback to guarantee Mode 1 strictly yields 4 distinct candidates across 4 sectors with dynamic contract sizing and full reserve backfill.
+        - **Frontend Mode 1 vs Mode 2 Display Isolation (`page.tsx`)**:
+          * Fixed candidate fallback in `page.tsx` so selecting Mode 2 isolates `wheelBlotter?.mode_2?.candidates` without leaking Mode 1 trades.
+          * Upgraded KPI cards to use nullish coalescing (`??`) to accurately show computed projected harvest instead of defaulting to static placeholders.
 
 ## 📊 Antigravity Usage Stats
 > Last Updated: 2026-09-13 15:05:00 SGT

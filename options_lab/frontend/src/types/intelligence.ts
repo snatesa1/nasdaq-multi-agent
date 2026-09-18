@@ -194,7 +194,50 @@ export interface StagedTrade {
   };
 }
 
+export interface HarvestModeData {
+  mode_id: 'MODE_1_MULTI_SECTOR' | 'MODE_2_MEGA_CAP_ANCHOR' | string;
+  title: string;
+  subtitle: string;
+  target_monthly_harvest: number;
+  projected_monthly_harvest_dollars: number;
+  total_collateral_required: number;
+  total_staged_contracts: number;
+  candidates_count: number;
+  candidates: StagedTrade[];
+}
+
+export interface DebateAgentAnalysis {
+  agent_name: string;
+  mode_1_score: number;
+  mode_2_score: number;
+  mode_1_critique: string;
+  mode_2_critique: string;
+  recommendation: string;
+}
+
+export interface TradeOffMatrixRow {
+  metric: string;
+  mode_1: string;
+  mode_2: string;
+  edge: string;
+}
+
+export interface DebateArenaData {
+  financial_analyst: DebateAgentAnalysis;
+  risk_aggregator: DebateAgentAnalysis;
+  executive_allocator: {
+    agent_name: string;
+    recommended_mode: string;
+    decision_statement: string;
+    trade_off_matrix: TradeOffMatrixRow[];
+    mode_1_composite_score: number;
+    mode_2_composite_score: number;
+  };
+  evaluated_at: string;
+}
+
 export interface WheelHarvestBlotter {
+  selected_mode?: 'MODE_1_MULTI_SECTOR' | 'MODE_2_MEGA_CAP_ANCHOR' | string;
   monthly_harvest_target: number;
   target_premium_band: string;
   total_staged_contracts: number;
@@ -211,6 +254,9 @@ export interface WheelHarvestBlotter {
   allocator_shortfall_dollars?: number;
   allocator_challenge_statement?: string;
   candidates: StagedTrade[];
+  mode_1?: HarvestModeData;
+  mode_2?: HarvestModeData;
+  debate_arena?: DebateArenaData;
 }
 
 export interface MarginStatus {

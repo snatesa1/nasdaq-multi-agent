@@ -20,10 +20,10 @@ class BehavioralSafetyShield:
     def __init__(self):
         self.max_single_ticker_exposure_pct = 15.0  # Max 15% of equity per stock
         self.min_dte_entry = 28                     # Hard floor: No selling options < 28 DTE (Gamma & illiquid weekly guard)
-        self.max_dte_wheel = 42                     # Standard 28-42 DTE window for Wheel CSP & CC (Target ~35 DTE monthly)
+        self.max_dte_wheel = 45                     # Standard 28-45 DTE window for Wheel CSP & CC (Target ~35 DTE monthly)
         self.max_delta_high_beta = 0.18             # Max delta on growth/momentum
         self.revenge_cooldown_hours = 24            # Lockout period after major loss
-        self.max_margin_utilization_pct = 15.0      # Hard 10-15% margin utilization cap
+        self.max_margin_utilization_pct = 50.0      # Hard 50% account margin utilization cap
         self.earnings_blackout_days = 7             # Expiry must not fall within ±7 days of earnings
 
     def evaluate_order(

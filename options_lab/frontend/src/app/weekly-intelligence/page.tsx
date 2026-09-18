@@ -89,6 +89,7 @@ export default function WeeklyIntelligencePage() {
 
   // Cockpit Tab Navigation
   const [activeTab, setActiveTab] = useState<'blotter' | 'compass' | 'interlink' | 'scenarios' | 'briefing' | 'corpus'>('blotter');
+  const [selectedHarvestMode, setSelectedHarvestMode] = useState<'mode_1' | 'mode_2'>('mode_1');
   const [selectedScenario, setSelectedScenario] = useState<string>('60_40');
   const [selectedChallenger, setSelectedChallenger] = useState<string | null>(null);
   const [expandedStoryIds, setExpandedStoryIds] = useState<string[]>(['story-01']);
@@ -397,7 +398,11 @@ export default function WeeklyIntelligencePage() {
   const interlink = briefing?.interlink_cockpit;
   const wheelBlotter = briefing?.wheel_harvest_blotter;
   const scenarios = briefing?.capital_allocation_scenarios || [];
-  const stagedTrades = wheelBlotter?.candidates || briefing?.potential_trades || [];
+  const activeModeData = selectedHarvestMode === 'mode_1' ? wheelBlotter?.mode_1 : wheelBlotter?.mode_2;
+  const stagedTrades = activeModeData?.candidates 
+    ? activeModeData.candidates 
+    : (selectedHarvestMode === 'mode_1' ? (wheelBlotter?.candidates || briefing?.potential_trades || []) : []);
+  const debateArena = wheelBlotter?.debate_arena;
   const provenance = briefing?.balance_provenance || scenarios[0]?.balance_provenance;
 
   return (
@@ -676,6 +681,161 @@ export default function WeeklyIntelligencePage() {
         {/* ═══════════════════════════════════════════════════════════════════ */}
         {activeTab === 'blotter' && (
           <div className="space-y-6">
+            {/* Dual Strategic Allocation Mode Switcher */}
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 bg-white border border-slate-200 rounded-2xl shadow-xs">
+              <div className="space-y-0.5">
+                <span className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Sliders className="h-4 w-4 text-[#4051B5]" /> Strategic Harvest Mode Selector
+                </span>
+                <p className="text-[11px] text-slate-500">
+                  Switch between 4-Sector Diversified Basket and High-Conviction Mega-Cap Anchor Wheel.
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setSelectedHarvestMode('mode_1')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                    selectedHarvestMode === 'mode_1'
+                      ? 'bg-[#4051B5] text-white shadow-sm'
+                      : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200'
+                  }`}
+                >
+                  <span>🌐 Mode 1: Multi-Sector Basket</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                    selectedHarvestMode === 'mode_1' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    4 Trades • $250/slot
+                  </span>
+                </button>
+
+                <button
+                  onClick={() => setSelectedHarvestMode('mode_2')}
+                  className={`px-4 py-2 rounded-xl text-xs font-bold transition flex items-center gap-2 cursor-pointer ${
+                    selectedHarvestMode === 'mode_2'
+                      ? 'bg-[#4051B5] text-white shadow-sm'
+                      : 'bg-slate-50 hover:bg-slate-100 text-slate-600 border border-slate-200'
+                  }`}
+                >
+                  <span>👑 Mode 2: Mega-Cap Anchor</span>
+                  <span className={`px-1.5 py-0.5 rounded text-[10px] font-mono ${
+                    selectedHarvestMode === 'mode_2' ? 'bg-white/20 text-white' : 'bg-slate-200 text-slate-700'
+                  }`}>
+                    1 Anchor + 1 Satellite
+                  </span>
+                </button>
+              </div>
+            </div>
+
+            {/* 🏛️ Inter-Agent Dialectical Debate Arena */}
+            {debateArena && (
+              <div className="p-5 bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-2xl shadow-md border border-indigo-800/50 space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-indigo-800/60 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
+                      <Sparkles className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                        Sub-Agent Cross-Examination Arena: Mode 1 vs. Mode 2
+                      </h3>
+                      <p className="text-[11px] text-indigo-200/70">
+                        Formal dialectical interrogation of sector diversification vs. single-name cash concentration.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 text-xs">
+                    <span className="px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-200 font-mono text-[11px] border border-indigo-400/30">
+                      Allocated Recommendation: {debateArena.executive_allocator?.recommended_mode === 'MODE_1_MULTI_SECTOR' ? 'Mode 1 (Multi-Sector)' : 'Mode 2 (Mega-Cap Anchor)'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* 3-Agent Cards Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
+                  {/* Financial Analyst */}
+                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                      <span className="font-bold text-emerald-400 flex items-center gap-1.5">
+                        👨‍💼 {debateArena.financial_analyst?.agent_name}
+                      </span>
+                      <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                        <span className="text-slate-400">M1: <strong className="text-white">{debateArena.financial_analyst?.mode_1_score}</strong></span>
+                        <span className="text-slate-500">|</span>
+                        <span className="text-slate-400">M2: <strong className="text-emerald-300">{debateArena.financial_analyst?.mode_2_score}</strong></span>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 text-[11px] text-slate-300">
+                      <p><strong className="text-indigo-300">Mode 1:</strong> {debateArena.financial_analyst?.mode_1_critique}</p>
+                      <p><strong className="text-emerald-300">Mode 2:</strong> {debateArena.financial_analyst?.mode_2_critique}</p>
+                    </div>
+                  </div>
+
+                  {/* Risk Aggregator */}
+                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                      <span className="font-bold text-amber-400 flex items-center gap-1.5">
+                        🛡️ {debateArena.risk_aggregator?.agent_name}
+                      </span>
+                      <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                        <span className="text-slate-400">M1: <strong className="text-amber-300">{debateArena.risk_aggregator?.mode_1_score}</strong></span>
+                        <span className="text-slate-500">|</span>
+                        <span className="text-slate-400">M2: <strong className="text-white">{debateArena.risk_aggregator?.mode_2_score}</strong></span>
+                      </div>
+                    </div>
+                    <div className="space-y-1.5 text-[11px] text-slate-300">
+                      <p><strong className="text-amber-300">Mode 1:</strong> {debateArena.risk_aggregator?.mode_1_critique}</p>
+                      <p><strong className="text-rose-300">Mode 2:</strong> {debateArena.risk_aggregator?.mode_2_critique}</p>
+                    </div>
+                  </div>
+
+                  {/* Executive Allocator */}
+                  <div className="p-4 bg-indigo-500/10 border border-indigo-400/20 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
+                      <span className="font-bold text-indigo-300 flex items-center gap-1.5">
+                        🏛️ {debateArena.executive_allocator?.agent_name}
+                      </span>
+                      <div className="flex items-center gap-1.5 font-mono text-[10px]">
+                        <span className="text-slate-400">M1: <strong className="text-indigo-300">{debateArena.executive_allocator?.mode_1_composite_score}</strong></span>
+                        <span className="text-slate-500">|</span>
+                        <span className="text-slate-400">M2: <strong className="text-white">{debateArena.executive_allocator?.mode_2_composite_score}</strong></span>
+                      </div>
+                    </div>
+                    <p className="text-[11px] text-indigo-100/90 leading-relaxed font-medium">
+                      {debateArena.executive_allocator?.decision_statement}
+                    </p>
+                  </div>
+                </div>
+
+                {/* Side-by-Side Trade-Off Matrix */}
+                {debateArena.executive_allocator?.trade_off_matrix && (
+                  <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/20">
+                    <table className="w-full text-left text-[11px]">
+                      <thead>
+                        <tr className="border-b border-white/10 text-indigo-300 font-bold bg-white/5">
+                          <th className="p-2.5">Evaluation Dimension</th>
+                          <th className="p-2.5">Mode 1 (Multi-Sector Basket)</th>
+                          <th className="p-2.5">Mode 2 (Mega-Cap Anchor Wheel)</th>
+                          <th className="p-2.5 text-right">Strategic Advantage</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5 font-mono text-slate-300">
+                        {debateArena.executive_allocator.trade_off_matrix.map((row, idx) => (
+                          <tr key={idx} className="hover:bg-white/5 transition">
+                            <td className="p-2.5 font-sans font-semibold text-white">{row.metric}</td>
+                            <td className="p-2.5">{row.mode_1}</td>
+                            <td className="p-2.5">{row.mode_2}</td>
+                            <td className="p-2.5 text-right font-sans font-bold text-indigo-300">{row.edge}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
             {/* Aggregate Wheel Harvest KPI Ribbon */}
             <div className="p-6 bg-gradient-to-br from-emerald-50/50 via-white to-indigo-50/30 border border-emerald-200/80 rounded-2xl shadow-sm">
               <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-emerald-100 pb-4">
@@ -686,10 +846,14 @@ export default function WeeklyIntelligencePage() {
                     </div>
                     <div>
                       <h2 className="text-base font-bold text-slate-800">
-                        Institutional $1,000/Month Systematic Wheel Harvest Blotter
+                        {selectedHarvestMode === 'mode_1'
+                          ? 'Mode 1: Multi-Sector $1,000/Month Systematic Wheel Harvest Blotter'
+                          : 'Mode 2: Mega-Cap Anchor $1,000/Month Systematic Wheel Harvest Blotter'}
                       </h2>
                       <p className="text-xs text-slate-500">
-                        Strict sweet-spot targeting: $2.00–$3.00 premium ($200–$300/contract) across strictly 4 high-conviction sector-diversified candidates.
+                        {selectedHarvestMode === 'mode_1'
+                          ? 'Strict sweet-spot targeting: $2.00–$3.00 premium ($200–$300/contract) across 4 high-conviction sector-diversified candidates.'
+                          : 'High-conviction Mega-Cap Anchor ($750–$850) + 1 Satellite ($150–$250) targeting $1,000 total premium.'}
                       </p>
                     </div>
                   </div>
@@ -697,10 +861,10 @@ export default function WeeklyIntelligencePage() {
 
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="px-3 py-1 rounded-lg bg-indigo-50 text-[#4051B5] font-mono text-xs font-bold border border-indigo-200">
-                    Strict 4-Candidate Cap (Cross-Sector)
+                    {selectedHarvestMode === 'mode_1' ? 'Strict 4-Candidate Cap (Cross-Sector)' : '2-Position Anchor Structure'}
                   </span>
                   <span className="px-3 py-1 rounded-lg bg-emerald-100/80 text-emerald-800 font-mono text-xs font-bold border border-emerald-300">
-                    Monthly 30–35 DTE (3rd Week Friday)
+                    Monthly 28–45 DTE (3rd Week Friday)
                   </span>
                   <span className="px-3 py-1 rounded-lg bg-amber-50 text-amber-800 font-mono text-xs font-bold border border-amber-200">
                     100% Cash Secured ($K * 100)
@@ -716,19 +880,19 @@ export default function WeeklyIntelligencePage() {
                 <div className="p-3 bg-white rounded-xl border border-slate-200/70 shadow-2xs">
                   <span className="text-[10px] text-slate-400 font-bold uppercase block">Projected Harvest</span>
                   <span className="text-base font-mono font-bold text-emerald-700">
-                    ${wheelBlotter?.projected_monthly_harvest_dollars?.toFixed(2) || '1,050.00'}
+                    ${(activeModeData?.projected_monthly_harvest_dollars ?? wheelBlotter?.projected_monthly_harvest_dollars ?? 0.0).toFixed(2)}
                   </span>
                 </div>
                 <div className="p-3 bg-white rounded-xl border border-slate-200/70 shadow-2xs">
-                  <span className="text-[10px] text-slate-400 font-bold uppercase block">Candidates Cap</span>
+                  <span className="text-[10px] text-slate-400 font-bold uppercase block">Active Candidates</span>
                   <span className="text-base font-mono font-bold text-[#4051B5]">
-                    {stagedTrades.length} / 4 Strict Cap
+                    {stagedTrades.length} Candidates ({activeModeData?.total_staged_contracts ?? stagedTrades.length} Contracts)
                   </span>
                 </div>
                 <div className="p-3 bg-white rounded-xl border border-slate-200/70 shadow-2xs">
                   <span className="text-[10px] text-slate-400 font-bold uppercase block">Total Cash Collateral</span>
                   <span className="text-base font-mono font-bold text-slate-800">
-                    ${wheelBlotter?.total_collateral_required?.toLocaleString('en-US', { minimumFractionDigits: 2 }) || '$39,500.00'}
+                    ${(activeModeData?.total_collateral_required ?? wheelBlotter?.total_collateral_required ?? 0.0).toLocaleString('en-US', { minimumFractionDigits: 2 })}
                   </span>
                 </div>
                 <div className="p-3 bg-white rounded-xl border border-slate-200/70 shadow-2xs">
