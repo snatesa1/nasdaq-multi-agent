@@ -217,6 +217,7 @@ export default function Dashboard() {
       const clipText = await navigator.clipboard.readText();
       if (!clipText || !clipText.trim()) {
         throw new Error('Clipboard is empty! Copy the authorization URL or code from the browser window first.');
+      }
       const trimmed = clipText.trim();
       if (typeof window !== 'undefined') {
         sessionStorage.removeItem('optionslab_disconnect_suppressed');
