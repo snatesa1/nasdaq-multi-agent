@@ -1,6 +1,7 @@
 import os
 import time
 import logging
+import threading
 import requests
 from requests.adapters import HTTPAdapter
 
@@ -232,6 +233,8 @@ class SaxoClient:
 
         self.needs_reauth = False  # Set True when refresh token is expired/consumed
         self.token_acquired_at = None  # Track when we last got a valid token
+        self._instrument_cache: Dict[str, Dict[str, Any]] = {}  # In-memory UIC metadata cache
+        self._token_refresh_lock = threading.Lock()  # Thread-safe lock to prevent single-use token burn
 
         # Configure resilient session with connection pooling & retries
         self.session = requests.Session()
@@ -288,37 +291,62 @@ class SaxoClient:
         return data
 
     def refresh_access_token(self) -> Dict[str, Any]:
-        """Refreshes an expired access_token using the refresh_token."""
+        """
+        Descriptive Summary:
+            Renews expired Saxo OpenAPI access token via OAuth refresh token flow in a thread-safe manner,
+            preventing race conditions and single-use refresh token invalidation across concurrent requests.
+
+        Parameters:
+            None. Encapsulates self.refresh_token, self.app_key, self.app_secret, and self._token_refresh_lock.
+
+        Returns:
+            Dict[str, Any]: Parsed JSON response containing new access_token, refresh_token, and expiry.
+
+        Exceptions / Side Effects:
+            Raises ValueError if refresh_token is missing.
+            Raises requests.HTTPError on failed renewal.
+            Mutates self.access_token, self.refresh_token, and persists updated tokens to SQLite/JSON backup.
+
+        Usage Example:
+            >>> client = SaxoClient()
+            >>> # token_data = client.refresh_access_token()
+        """
         if not self.refresh_token:
             # Attempt to pull refresh token from DB before giving up
             self._token_from_db()
             if not self.refresh_token:
                 raise ValueError("No refresh token available to renew Saxo session.")
-        
-        payload = {
-            "grant_type": "refresh_token",
-            "refresh_token": self.refresh_token,
-            "client_id": self.app_key,
-            "client_secret": self.app_secret
-        }
-        headers = {"Content-Type": "application/x-www-form-urlencoded"}
-        try:
-            response = self.session.post(self.token_endpoint, data=payload, headers=headers, timeout=self.timeout)
-            response.raise_for_status()
-            data = response.json()
-            self.access_token = data.get("access_token")
-            if data.get("refresh_token"):
-                self.refresh_token = data.get("refresh_token")
-            self.needs_reauth = False
-            self.token_acquired_at = datetime.now()
-            self._persist_tokens()
-            logger.info("Saxo OAuth access token successfully renewed.")
-            return data
-        except Exception as e:
-            logger.warning(f"Saxo token renewal failed: {e}. Session requires re-authorization.")
-            self.refresh_token = None
-            self.needs_reauth = True
-            raise
+
+        with self._token_refresh_lock:
+            # Fast-path: if another concurrent thread refreshed within the last 30 seconds, reuse token
+            if self.token_acquired_at and (datetime.now() - self.token_acquired_at).total_seconds() < 30:
+                logger.info("Token was recently renewed by concurrent thread; reusing existing valid session.")
+                return {"access_token": self.access_token, "refresh_token": self.refresh_token}
+
+            payload = {
+                "grant_type": "refresh_token",
+                "refresh_token": self.refresh_token,
+                "client_id": self.app_key,
+                "client_secret": self.app_secret
+            }
+            headers = {"Content-Type": "application/x-www-form-urlencoded"}
+            try:
+                response = self.session.post(self.token_endpoint, data=payload, headers=headers, timeout=self.timeout)
+                response.raise_for_status()
+                data = response.json()
+                self.access_token = data.get("access_token")
+                if data.get("refresh_token"):
+                    self.refresh_token = data.get("refresh_token")
+                self.needs_reauth = False
+                self.token_acquired_at = datetime.now()
+                self._persist_tokens()
+                logger.info("Saxo OAuth access token successfully renewed.")
+                return data
+            except Exception as e:
+                logger.warning(f"Saxo token renewal failed: {e}. Session requires re-authorization.")
+                self.refresh_token = None
+                self.needs_reauth = True
+                raise
 
 
     def set_token(self, access_token: str, refresh_token: Optional[str] = None):
@@ -649,10 +677,17 @@ class SaxoClient:
                 order_id = str(ord_item.get("OrderId", f"ORD-{ord_item.get('Uic', 'UNK')}"))
                 uic = int(ord_item.get("Uic", 0))
                 asset_type = ord_item.get("AssetType", "StockOption")
-                inst = self.get_instrument_details(uic, asset_type)
-                sym = inst.get("Symbol") or ord_item.get("DisplayAndFormat", {}).get("Symbol", ord_item.get("Symbol", "UNKNOWN"))
-                clean_sym = sym.split(":")[0].split("/")[0]
-                desc = inst.get("Description") or ord_item.get("DisplayAndFormat", {}).get("Description", clean_sym)
+                disp = ord_item.get("DisplayAndFormat", {})
+                sym_raw = disp.get("Symbol") or ord_item.get("Symbol")
+                desc_raw = disp.get("Description") or ord_item.get("Description")
+                if sym_raw and desc_raw:
+                    clean_sym = sym_raw.split(":")[0].split("/")[0]
+                    desc = desc_raw
+                else:
+                    inst = self.get_instrument_details(uic, asset_type)
+                    sym = inst.get("Symbol") or sym_raw or "UNKNOWN"
+                    clean_sym = sym.split(":")[0].split("/")[0]
+                    desc = inst.get("Description") or desc_raw or clean_sym
                 
                 buy_sell = ord_item.get("BuySell", "Buy")
                 order_type = ord_item.get("OrderType", "Limit")
@@ -691,10 +726,17 @@ class SaxoClient:
                         if audit_id and not any(o["order_id"] == audit_id for o in normalized_orders):
                             uic = int(item.get("Uic", 0))
                             asset_type = item.get("AssetType", "StockOption")
-                            inst = self.get_instrument_details(uic, asset_type)
-                            sym = inst.get("Symbol") or item.get("Symbol", "UNKNOWN")
-                            clean_sym = sym.split(":")[0].split("/")[0]
-                            desc = inst.get("Description") or item.get("Description", clean_sym)
+                            disp = item.get("DisplayAndFormat", {})
+                            sym_raw = disp.get("Symbol") or item.get("Symbol")
+                            desc_raw = disp.get("Description") or item.get("Description")
+                            if sym_raw and desc_raw:
+                                clean_sym = sym_raw.split(":")[0].split("/")[0]
+                                desc = desc_raw
+                            else:
+                                inst = self.get_instrument_details(uic, asset_type)
+                                sym = inst.get("Symbol") or sym_raw or "UNKNOWN"
+                                clean_sym = sym.split(":")[0].split("/")[0]
+                                desc = inst.get("Description") or desc_raw or clean_sym
                             
                             status_raw = str(item.get("Status", ""))
                             sub_status = str(item.get("SubStatus", ""))
@@ -1048,10 +1090,17 @@ class SaxoClient:
                                 continue
                             uic = int(ord_item.get("Uic", 0))
                             atype = ord_item.get("AssetType", "StockOption")
-                            inst = self.get_instrument_details(uic, atype)
-                            sym = inst.get("Symbol") or ord_item.get("DisplayAndFormat", {}).get("Symbol", "UNKNOWN")
-                            clean_sym = sym.split(":")[0].split("/")[0]
-                            desc = inst.get("Description") or ord_item.get("DisplayAndFormat", {}).get("Description", clean_sym)
+                            disp = ord_item.get("DisplayAndFormat", {})
+                            sym_raw = disp.get("Symbol") or ord_item.get("Symbol")
+                            desc_raw = disp.get("Description") or ord_item.get("Description")
+                            if sym_raw and desc_raw:
+                                clean_sym = sym_raw.split(":")[0].split("/")[0]
+                                desc = desc_raw
+                            else:
+                                inst = self.get_instrument_details(uic, atype)
+                                sym = inst.get("Symbol") or sym_raw or "UNKNOWN"
+                                clean_sym = sym.split(":")[0].split("/")[0]
+                                desc = inst.get("Description") or desc_raw or clean_sym
                             
                             raw_dur = ord_item.get("Duration") or ord_item.get("OrderDuration")
                             if isinstance(raw_dur, dict):
@@ -1126,10 +1175,17 @@ class SaxoClient:
 
                             uic = int(item.get("Uic", 0))
                             atype = item.get("AssetType", "StockOption")
-                            inst = self.get_instrument_details(uic, atype)
-                            sym = inst.get("Symbol") or item.get("Symbol", "UNKNOWN")
-                            clean_sym = sym.split(":")[0].split("/")[0]
-                            desc = inst.get("Description") or item.get("Description") or f"{clean_sym} {atype}"
+                            disp = item.get("DisplayAndFormat", {})
+                            sym_raw = disp.get("Symbol") or item.get("Symbol")
+                            desc_raw = disp.get("Description") or item.get("Description")
+                            if sym_raw and desc_raw:
+                                clean_sym = sym_raw.split(":")[0].split("/")[0]
+                                desc = desc_raw
+                            else:
+                                inst = self.get_instrument_details(uic, atype)
+                                sym = inst.get("Symbol") or sym_raw or "UNKNOWN"
+                                clean_sym = sym.split(":")[0].split("/")[0]
+                                desc = inst.get("Description") or desc_raw or f"{clean_sym} {atype}"
                             
                             raw_dur = item.get("Duration") or item.get("OrderDuration")
                             if isinstance(raw_dur, dict):
@@ -1207,28 +1263,56 @@ class SaxoClient:
         }
 
     # ── Reference & Instrument Search Endpoints ────────────────────────────────
-    def get_instrument_details(self, uic: int, asset_type: str = "Stock") -> Dict[str, Any]:
-        """Fetches detailed instrument metadata (symbol, description, currency) with local caching."""
+    def get_instrument_details(self, uic: int, asset_type: str = "StockOption") -> Dict[str, Any]:
+        """
+        Descriptive Summary:
+            Retrieves authentic instrument metadata (Description, ExpiryDate, StrikePrice, PutCall, Symbol, Exchange)
+            from Saxo OpenAPI 'ref/v1/instruments/details/{uic}/{asset_type}' with in-memory caching to eliminate
+            redundant network round-trips and prevent latency spikes during position and order ingestion.
+
+        Parameters:
+            uic (int): Saxo OpenAPI Instrument Unique Identifier (UIC).
+            asset_type (str, optional): Asset category (e.g. 'StockOption', 'Stock', 'CfdOnStock'). Defaults to 'StockOption'.
+
+        Returns:
+            Dict[str, Any]: Detailed instrument dictionary containing Description, Symbol, CurrencyCode, TickSizeScheme.
+                Guaranteed non-None; returns a structured fallback dictionary if UIC is invalid or API lookup fails.
+
+        Exceptions / Side Effects:
+            Catches and logs HTTP errors; updates internal self._instrument_cache with live or fallback metadata.
+
+        Usage Example:
+            >>> client = SaxoClient()
+            >>> details = client.get_instrument_details(108844, "Stock")
+            >>> details.get("Symbol")
+            'AAPL'
+        """
         if not hasattr(self, "_instrument_cache"):
             self._instrument_cache = {}
-        
+
         cache_key = f"{uic}_{asset_type}"
         if cache_key in self._instrument_cache:
             return self._instrument_cache[cache_key]
 
+        fallback = {"Symbol": f"INST-{uic}", "Description": f"Instrument {uic}", "CurrencyCode": "USD", "is_fallback": True}
         if not self.access_token or uic <= 0:
-            return {"Symbol": f"INST-{uic}", "Description": f"Instrument {uic}", "CurrencyCode": "USD"}
+            return fallback
 
         try:
-            response = self._make_authenticated_request("GET", f"ref/v1/instruments/details/{uic}/{asset_type}")
+            response = self._make_authenticated_request(
+                "GET",
+                f"ref/v1/instruments/details/{uic}/{asset_type}",
+                timeout=5.0
+            )
             if response.status_code == 200:
                 data = response.json()
-                self._instrument_cache[cache_key] = data
-                return data
+                if isinstance(data, dict):
+                    self._instrument_cache[cache_key] = data
+                    return data
         except Exception as e:
             logger.debug(f"Instrument lookup for UIC {uic} failed: {e}")
 
-        fallback = {"Symbol": f"INST-{uic}", "Description": f"Instrument {uic}", "CurrencyCode": "USD"}
+        # Cache fallback to prevent repeated failing requests for the same UIC
         self._instrument_cache[cache_key] = fallback
         return fallback
 
@@ -1718,49 +1802,42 @@ class SaxoClient:
         )
         return meta["contract_uic"] if meta else None
 
-    def get_instrument_details(self, uic: int, asset_type: str = "StockOption") -> Optional[Dict[str, Any]]:
-        """
-        Descriptive Summary:
-            Retrieves authentic instrument details (Description, ExpiryDate, StrikePrice, PutCall, Symbol, Exchange)
-            from Saxo OpenAPI 'ref/v1/instruments/details/{uic}/{asset_type}'.
-
-        Parameters:
-            uic (int): Saxo instrument UIC.
-            asset_type (str, optional): Instrument asset type. Defaults to 'StockOption'.
-
-        Returns:
-            Optional[Dict[str, Any]]: Full instrument details dictionary, or None if request fails.
-        """
-        if not self.access_token or not uic:
-            return None
-        try:
-            resp = self._make_authenticated_request("GET", f"ref/v1/instruments/details/{uic}/{asset_type}")
-            if resp.status_code == 200:
-                return resp.json()
-        except Exception as e:
-            logger.debug(f"Failed to fetch instrument details for UIC {uic}: {e}")
-        return None
-
     def get_tick_size(self, uic: int, asset_type: str = "StockOption", price: float = 0.0) -> float:
         """
-        Resolves the exact exchange tick size increment for an instrument.
-        Queries Saxo OpenAPI TickSizeScheme with OCC / CBOE standard fallbacks.
+        Descriptive Summary:
+            Resolves the exact exchange tick size increment for an instrument by querying
+            cached Saxo OpenAPI TickSizeScheme with OCC / CBOE standard fallbacks.
+
+        Parameters:
+            uic (int): Saxo OpenAPI Instrument Unique Identifier.
+            asset_type (str, optional): Instrument asset type. Defaults to 'StockOption'.
+            price (float, optional): Proposed order price for threshold-dependent tick schemes. Defaults to 0.0.
+
+        Returns:
+            float: Tick increment (e.g. 0.05, 0.10, or 0.01).
+
+        Exceptions / Side Effects:
+            Catches internal exceptions; defaults cleanly to standard OCC/CBOE institutional ticks.
+
+        Usage Example:
+            >>> client = SaxoClient()
+            >>> tick = client.get_tick_size(108844, "StockOption", price=2.50)
+            >>> isinstance(tick, float)
+            True
         """
         try:
             if self.access_token and uic:
-                resp = self._make_authenticated_request("GET", f"ref/v1/instruments/details/{uic}/{asset_type}")
-                if resp.status_code == 200:
-                    d = resp.json()
-                    scheme = d.get("TickSizeScheme")
-                    if isinstance(scheme, dict):
-                        default_tick = float(scheme.get("DefaultTickSize", 0.05))
-                        elements = scheme.get("Elements", [])
-                        if isinstance(elements, list):
-                            for elem in elements:
-                                high_p = float(elem.get("HighPrice", 0.0))
-                                if price <= high_p:
-                                    return float(elem.get("TickSize", default_tick))
-                        return default_tick
+                d = self.get_instrument_details(uic, asset_type)
+                scheme = d.get("TickSizeScheme") if isinstance(d, dict) else None
+                if isinstance(scheme, dict):
+                    default_tick = float(scheme.get("DefaultTickSize", 0.05))
+                    elements = scheme.get("Elements", [])
+                    if isinstance(elements, list):
+                        for elem in elements:
+                            high_p = float(elem.get("HighPrice", 0.0))
+                            if price <= high_p:
+                                return float(elem.get("TickSize", default_tick))
+                    return default_tick
         except Exception as e:
             logger.debug(f"Tick size lookup non-critical: {e}")
 
@@ -1803,7 +1880,7 @@ class SaxoClient:
         clean_price = self.quantize_order_price(price=order_price, uic=uic, asset_type=asset_type)
 
         # 1. LIVE SAFETY SHIELD: Block any live execution if safety lock is active
-        if self.environment == "LIVE" and not settings.BROKER_ALLOW_LIVE_EXECUTION:
+        if self.environment == "LIVE" and not (getattr(self, "allow_live_execution", True) and settings.BROKER_ALLOW_LIVE_EXECUTION):
             logger.error(f"🛡️ LIVE ORDER BLOCKED: Live execution safety shield is active (BROKER_ALLOW_LIVE_EXECUTION=False).")
             return {
                 "status": "LIVE_EXECUTION_BLOCKED_BY_SAFETY_SHIELD",
@@ -2410,9 +2487,14 @@ class SaxoClient:
                         pos_id = str(item.get("ClosedPositionId", item.get("PositionId", f"CL-{len(closed_list)+1}")))
                         uic = int(item.get("Uic", 0))
                         asset_type = item.get("AssetType", "StockOption")
-                        inst = self.get_instrument_details(uic, asset_type)
-                        sym = inst.get("Symbol") or item.get("Symbol", "UNKNOWN")
-                        clean_sym = sym.split(":")[0].split("/")[0]
+                        disp = item.get("DisplayAndFormat", {})
+                        sym_raw = disp.get("Symbol") or item.get("Symbol")
+                        if sym_raw:
+                            clean_sym = sym_raw.split(":")[0].split("/")[0]
+                        else:
+                            inst = self.get_instrument_details(uic, asset_type)
+                            sym = inst.get("Symbol") or "UNKNOWN"
+                            clean_sym = sym.split(":")[0].split("/")[0]
                         
                         open_price = float(item.get("OpenPrice", 0.0))
                         close_price = float(item.get("ClosePrice", 0.0))
@@ -2452,8 +2534,14 @@ class SaxoClient:
                         ord_id = str(item.get("OrderId", f"ORD-{len(closed_list)+1}"))
                         uic = int(item.get("Uic", 0))
                         asset_type = item.get("AssetType", "StockOption")
-                        inst = self.get_instrument_details(uic, asset_type)
-                        sym = inst.get("Symbol") or item.get("Symbol", "UNKNOWN")
+                        disp = item.get("DisplayAndFormat", {})
+                        sym_raw = disp.get("Symbol") or item.get("Symbol")
+                        if sym_raw:
+                            clean_sym = sym_raw.split(":")[0].split("/")[0]
+                        else:
+                            inst = self.get_instrument_details(uic, asset_type)
+                            sym = inst.get("Symbol") or "UNKNOWN"
+                            clean_sym = sym.split(":")[0].split("/")[0]
                         closed_list.append({
                             "id": ord_id,
                             "symbol": clean_sym,

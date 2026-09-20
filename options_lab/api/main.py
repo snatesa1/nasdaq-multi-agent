@@ -1045,25 +1045,25 @@ async def force_refresh_broker(user=Depends(verify_firebase_token)):
         async def _fetch_acc():
             return await asyncio.wait_for(
                 asyncio.to_thread(saxo_broker_client.get_account_balances),
-                timeout=10.0
+                timeout=15.0
             )
 
         async def _fetch_pos():
             return await asyncio.wait_for(
                 asyncio.to_thread(saxo_broker_client.get_positions),
-                timeout=10.0
+                timeout=15.0
             )
 
         async def _fetch_blotter():
             return await asyncio.wait_for(
                 asyncio.to_thread(saxo_broker_client.get_order_blotter),
-                timeout=12.0
+                timeout=18.0
             )
 
         async def _fetch_orders():
             return await asyncio.wait_for(
                 asyncio.to_thread(saxo_broker_client.get_orders),
-                timeout=10.0
+                timeout=15.0
             )
 
         raw_results = await asyncio.gather(
@@ -1076,12 +1076,18 @@ async def force_refresh_broker(user=Depends(verify_firebase_token)):
 
         acc_res, pos_res, blotter_res, orders_res = raw_results
 
+        def _err_label(err: Any) -> str:
+            if isinstance(err, asyncio.TimeoutError):
+                return "timed out"
+            s = str(err).strip()
+            return s if s else type(err).__name__
+
         # 1. Process Account
         if isinstance(acc_res, Exception):
             cached = database.get_saxo_cache("account_summary")
             results["account"] = cached
             results["sync_metadata"]["account"] = {"source": "CACHE", "is_stale": True}
-            results["warnings"].append(f"Account: Saxo API slow ({acc_res}); served cached snapshot.")
+            results["warnings"].append(f"Account: Saxo API slow ({_err_label(acc_res)}); served cached snapshot.")
         else:
             database.set_saxo_cache("account_summary", acc_res)
             results["account"] = acc_res
@@ -1092,7 +1098,7 @@ async def force_refresh_broker(user=Depends(verify_firebase_token)):
             cached = database.get_saxo_cache("positions")
             results["positions"] = cached
             results["sync_metadata"]["positions"] = {"source": "CACHE", "is_stale": True}
-            results["warnings"].append(f"Positions: Saxo API slow ({pos_res}); served cached snapshot.")
+            results["warnings"].append(f"Positions: Saxo API slow ({_err_label(pos_res)}); served cached snapshot.")
         else:
             database.set_saxo_cache("positions", pos_res)
             results["positions"] = pos_res
@@ -1103,7 +1109,7 @@ async def force_refresh_broker(user=Depends(verify_firebase_token)):
             cached = database.get_saxo_cache("order_blotter")
             results["order_blotter"] = cached
             results["sync_metadata"]["order_blotter"] = {"source": "CACHE", "is_stale": True}
-            results["warnings"].append(f"Order Blotter: Saxo API slow ({blotter_res}); served cached snapshot.")
+            results["warnings"].append(f"Order Blotter: Saxo API slow ({_err_label(blotter_res)}); served cached snapshot.")
         else:
             database.set_saxo_cache("order_blotter", blotter_res)
             results["order_blotter"] = blotter_res
@@ -1114,7 +1120,7 @@ async def force_refresh_broker(user=Depends(verify_firebase_token)):
             cached = database.get_saxo_cache("orders")
             results["orders"] = cached
             results["sync_metadata"]["orders"] = {"source": "CACHE", "is_stale": True}
-            results["warnings"].append(f"Orders: Saxo API slow ({orders_res}); served cached snapshot.")
+            results["warnings"].append(f"Orders: Saxo API slow ({_err_label(orders_res)}); served cached snapshot.")
         else:
             database.set_saxo_cache("orders", orders_res)
             results["orders"] = orders_res

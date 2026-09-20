@@ -276,13 +276,13 @@ class TradeStagingEngine:
             if uic and int(uic) > 0:
                 uic = int(uic)
                 details = self.saxo_client.get_instrument_details(uic, "StockOption")
-                if details:
+                if details and not details.get("is_fallback"):
                     contract_desc = details.get("Description", "")
-                    contract_expiry = str(details.get("ExpiryDate", "")).split("T")[0]
+                    contract_expiry = str(details.get("ExpiryDate", "")).split("T")[0] if details.get("ExpiryDate") else ""
                     contract_sym = str(details.get("Symbol", "")).split(":")[0].split("/")[0].upper()
 
                     # Audit Expiry Date match
-                    if expected_expiry and contract_expiry != expected_expiry:
+                    if expected_expiry and contract_expiry and contract_expiry != expected_expiry:
                         error_msg = (
                             f"CONTRACT INTEGRITY FAILURE: Staged expiry is '{expected_expiry}', but resolved Saxo contract "
                             f"'{contract_desc}' (UIC: {uic}) expires on '{contract_expiry}'. Order execution blocked to prevent wrong-month execution."
@@ -298,7 +298,7 @@ class TradeStagingEngine:
                         }
 
                     # Audit Underlying Ticker match
-                    if contract_sym and not (contract_sym == symbol.upper() or contract_sym.startswith(symbol.upper())):
+                    if contract_sym and not contract_sym.startswith("INST-") and not (contract_sym == symbol.upper() or contract_sym.startswith(symbol.upper())):
                         error_msg = (
                             f"CONTRACT TICKER MISMATCH: Expected underlying ticker '{symbol}', but resolved Saxo contract "
                             f"'{contract_desc}' (UIC: {uic}) belongs to '{contract_sym}'. Order execution blocked."

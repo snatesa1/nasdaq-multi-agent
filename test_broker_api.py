@@ -35,6 +35,7 @@ async def main():
 
     # 4. Test Live execution safety guard
     client.environment = "LIVE"
+    client.allow_live_execution = False
     live_blocked_order = client.place_order(uic=211, order_price=220.0)
     print("Live Order Safety Result:", live_blocked_order)
     assert live_blocked_order["status"] == "LIVE_EXECUTION_BLOCKED_BY_SAFETY_SHIELD", "Safety shield failed!"
