@@ -396,8 +396,12 @@ class SaxoClient:
         try:
             if self.access_token:
                 os.environ["SAXO_ACCESS_TOKEN"] = self.access_token
+            else:
+                os.environ.pop("SAXO_ACCESS_TOKEN", None)
             if self.refresh_token:
                 os.environ["SAXO_REFRESH_TOKEN"] = self.refresh_token
+            else:
+                os.environ.pop("SAXO_REFRESH_TOKEN", None)
 
             env_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env"))
             lines = []

@@ -16,11 +16,12 @@ interface AuthContextType {
   user: User | DemoUser | null;
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
+  enterAsDemoUser: () => void;
   logout: () => Promise<void>;
   getIdToken: () => Promise<string | null>;
 }
 
-const defaultDemoUser: DemoUser = {
+export const defaultDemoUser: DemoUser = {
   displayName: 'Sathish',
   email: 'sathish84@gmail.com',
   photoURL: null,
@@ -28,20 +29,29 @@ const defaultDemoUser: DemoUser = {
   getIdToken: async () => 'demo-id-token-12345',
 };
 
-
 const AuthContext = createContext<AuthContextType>({
   user: defaultDemoUser,
   loading: false,
   signInWithGoogle: async () => {},
+  enterAsDemoUser: () => {},
   logout: async () => {},
   getIdToken: async () => 'demo-id-token-12345',
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [user, setUser] = useState<User | DemoUser | null>(defaultDemoUser);
-  const [loading, setLoading] = useState(false);
+  const [user, setUser] = useState<User | DemoUser | null>(null);
+  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    const isSignedOut = typeof window !== 'undefined' && 
+      (localStorage.getItem('optionslab_signed_out') === 'true' || sessionStorage.getItem('optionslab_signed_out') === 'true');
+
+    if (isSignedOut) {
+      setUser(null);
+      setLoading(false);
+      return;
+    }
+
     try {
       const unsubscribe = onAuthStateChanged(auth, (firebaseUser) => {
         if (firebaseUser) {
@@ -61,19 +71,36 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async () => {
     try {
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('optionslab_signed_out');
+        sessionStorage.removeItem('optionslab_signed_out');
+      }
       await signInWithPopup(auth, googleProvider);
     } catch (err) {
       console.error('Google Sign-In failed, continuing as demo user:', err);
+      setUser(defaultDemoUser);
     }
+  };
+
+  const enterAsDemoUser = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('optionslab_signed_out');
+      sessionStorage.removeItem('optionslab_signed_out');
+    }
+    setUser(defaultDemoUser);
   };
 
   const logout = async () => {
     try {
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('optionslab_signed_out', 'true');
+        sessionStorage.setItem('optionslab_signed_out', 'true');
+      }
       await signOut(auth);
     } catch (err) {
       console.error('Logout error:', err);
     }
-    setUser(defaultDemoUser);
+    setUser(null);
   };
 
   const getIdToken = async (): Promise<string | null> => {
@@ -84,7 +111,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ user, loading, signInWithGoogle, logout, getIdToken }}>
+    <AuthContext.Provider value={{ user, loading, signInWithGoogle, enterAsDemoUser, logout, getIdToken }}>
       {children}
     </AuthContext.Provider>
   );

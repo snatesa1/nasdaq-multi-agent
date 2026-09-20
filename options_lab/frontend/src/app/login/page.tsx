@@ -6,7 +6,7 @@ import { useAuth } from '@/context/AuthContext';
 import { LogIn, ShieldCheck, Loader, TrendingUp, UserCheck } from 'lucide-react';
 
 export default function LoginPage() {
-  const { user, loading, signInWithGoogle } = useAuth();
+  const { user, loading, signInWithGoogle, enterAsDemoUser } = useAuth();
   const router = useRouter();
   const [signingIn, setSigningIn] = useState(false);
 
@@ -23,6 +23,7 @@ export default function LoginPage() {
       router.push('/');
     } catch (err) {
       console.error('Sign-in failed, proceeding as Demo user:', err);
+      enterAsDemoUser();
       router.push('/');
     } finally {
       setSigningIn(false);
@@ -30,6 +31,7 @@ export default function LoginPage() {
   };
 
   const handleDemoAccess = () => {
+    enterAsDemoUser();
     router.push('/');
   };
 

@@ -144,16 +144,19 @@ export default function Header() {
                 onClick={async () => {
                   setShowUserMenu(false);
                   try {
+                    if (typeof window !== 'undefined') {
+                      sessionStorage.setItem('optionslab_disconnect_suppressed', 'true');
+                    }
                     await optionsApi.disconnectBroker();
                   } catch (e) {
                     console.error("Failed to disconnect broker:", e);
                   }
                   await logout();
                   if (typeof window !== 'undefined') {
-                    window.location.href = '/';
+                    window.location.href = '/login';
                   }
                 }}
-                className="w-full text-left flex items-center gap-2 px-4 py-2 text-rose-600 hover:bg-rose-50 transition font-medium"
+                className="w-full text-left flex items-center gap-2 px-4 py-2 text-rose-600 hover:bg-rose-50 transition font-medium cursor-pointer"
               >
                 <LogOut className="h-3.5 w-3.5" /> Sign Out (Disconnect Bot)
               </button>

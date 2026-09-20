@@ -199,6 +199,14 @@ export const optionsApi = {
   getBrokerAuthUrl: (): Promise<{ auth_url: string; app_name: string; redirect_url: string }> => apiRequest('/api/broker/oauth/auth-url'),
   setBrokerToken: (payload: { token?: string; code?: string; refresh_token?: string }) => apiRequest('/api/broker/oauth/set-token', 'POST', payload),
   disconnectBroker: () => apiRequest('/api/broker/oauth/disconnect', 'POST'),
+  getBrokerCachedSnapshot: (): Promise<{
+    status: string;
+    account?: any;
+    positions?: any;
+    orders?: any;
+    order_blotter?: any;
+    updated_at?: string | null;
+  }> => apiRequest('/api/broker/cache'),
   getBrokerAccount: (): Promise<BrokerAccountSummary> => apiRequest('/api/broker/account'),
 
   getBrokerPositions: (): Promise<BrokerPositionsResponse> => apiRequest('/api/broker/positions'),

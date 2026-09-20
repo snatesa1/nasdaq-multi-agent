@@ -772,6 +772,31 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
         - **Frontend Mode 1 vs Mode 2 Display Isolation (`page.tsx`)**:
           * Fixed candidate fallback in `page.tsx` so selecting Mode 2 isolates `wheelBlotter?.mode_2?.candidates` without leaking Mode 1 trades.
           * Upgraded KPI cards to use nullish coalescing (`??`) to accurately show computed projected harvest instead of defaulting to static placeholders.
+    20. **$1,000 Harvest Floor Guarantee Retuning & Go Architectural Evaluation (2026-09-20)**:
+        - **Harvest Shortfall Root-Cause Diagnosis & Elimination**:
+          * Expanded Golden Trade candidate pool from fixed 4 to 4–6 candidates across `weekly_intelligence.py` and `options_adk_workflow.py`.
+          * Raised default account margin utilization ceiling from 50.0% to 60.0% across `margin_guardian.py` and `safety_shield.py`.
+          * Upgraded dynamic contract sizing formula to scale up to 4 contracts with flexible per-slot targets, guaranteeing the $1,000/month harvest floor.
+          * Optimized Python SQLite PRAGMAs (WAL mode, 64MB cache), LRU mathematical caching in `black_scholes.py`, and verified 100% test pass.
+    21. **Resilient Platform Data Fetching, Stale-While-Revalidate Caching & Complete Session Teardown (2026-09-20)**:
+        - **Platform Latency Diagnosis & Architecture Fix (`main.py`, `saxo_client.py`, `db.py`)**:
+          * Diagnosed root cause of platform slowness: `force_refresh_broker` sequentially executed 4 blocking Saxo OpenAPI calls under `broker_concurrency_lock`, causing total response times (35–60s) to breach the frontend's 30s `AbortController` timeout budget.
+          * Upgraded `POST /api/broker/refresh` in `main.py` with concurrent `asyncio.to_thread` worker tasks (`_fetch_acc`, `_fetch_pos`, `_fetch_blotter`, `_fetch_orders`) bounded by strict 10–12s per-task timeouts, capping total endpoint duration at ~12s.
+          * Eliminated premature cache wiping (`database.clear_saxo_cache()` before fetch); implemented atomic cache updates where existing SQLite data is preserved as fallback if Saxo OpenAPI encounters network delays.
+          * Added `get_saxo_cache_with_meta()` in `db.py` to return cached records alongside exact `updated_at` timestamps.
+          * Updated `GET /api/broker/cache` in `main.py` to return the complete cached snapshot with metadata.
+        - **Frontend Instant SWR (Stale-While-Revalidate) & Refresh Streamlining (`app/page.tsx`, `lib/api.ts`)**:
+          * Implemented instant mount (<100ms) in `page.tsx` by pre-warming `brokerAccount`, `positions`, `orderBlotterData`, and `orders` from `getBrokerCachedSnapshot()`, releasing the blocking full-screen spinner immediately.
+          * Streamlined `fetchBrokerData()` to consume the consolidated single-roundtrip `refreshBrokerData()` bundle directly, eliminating redundant parallel `Promise.allSettled` queries that previously caused lock contention.
+          * Decoupled heavy 13-ticker watchlist scanning (`scanCspOpportunities`) from the critical boot path into on-demand execution.
+          * Added `lastSyncedAt` timestamp badge and interactive `syncNotice` amber alert card for transparent latency feedback without breaking the dashboard UI.
+        - **Complete Sign Out & Session Teardown Fix (`AuthContext.tsx`, `login/page.tsx`, `Header.tsx`, `ProtectedRoute.tsx`)**:
+          * Fixed `AuthContext.tsx` perpetual demo user trap: `logout()` now sets `user = null` and records `optionslab_signed_out = 'true'`. Added `enterAsDemoUser()` helper.
+          * Updated `login/page.tsx` to prevent redirect bouncing back into `/` when signed out; wired Demo entrance to `enterAsDemoUser()`.
+          * Updated `ProtectedRoute.tsx` to cleanly redirect to `/login` when `user === null`.
+          * Updated `Header.tsx` to disconnect broker, execute `logout()`, flag disconnect suppression in `sessionStorage`, and route cleanly to `/login`.
+          * In `app/page.tsx`, installed disconnect suppression guard in `handleFocusCheck` to prevent window refocus from reading the clipboard and auto-reconnecting after intentional sign-out.
+          * In `main.py:disconnect_broker` and `saxo_client.py:_persist_tokens`, popped `SAXO_ACCESS_TOKEN` and `SAXO_REFRESH_TOKEN` from `os.environ` upon disconnect.
 
 ## 📊 Antigravity Usage Stats
 > Last Updated: 2026-09-13 15:05:00 SGT

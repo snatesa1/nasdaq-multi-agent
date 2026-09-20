@@ -888,6 +888,12 @@ def disconnect_broker(user=Depends(verify_firebase_token)):
     saxo_broker_client.refresh_token = None
     saxo_broker_client.needs_reauth = True
     saxo_broker_client.token_acquired_at = None
+
+    # Wipe environment variables
+    os.environ.pop("SAXO_ACCESS_TOKEN", None)
+    os.environ.pop("SAXO_REFRESH_TOKEN", None)
+    
+    # Persist the cleared state to SQLite, JSON, and .env
     saxo_broker_client._persist_tokens()
     
     # Wipe SQLite persistent tokens and backup JSON
@@ -972,57 +978,152 @@ async def get_broker_orders(user=Depends(verify_firebase_token)):
 
 @app.get("/api/broker/cache")
 def get_broker_cached_snapshot(user=Depends(verify_firebase_token)):
-    """Returns the full offline/cached snapshot of Saxo accounts, positions, and orders from SQLite."""
+    """
+    Returns the full offline/cached snapshot of Saxo accounts, positions, and orders from SQLite
+    with updated_at timestamps for instantaneous SWR rendering without network latency.
+    """
+    account_meta = database.get_saxo_cache_with_meta("account_summary")
+    positions_meta = database.get_saxo_cache_with_meta("positions")
+    orders_meta = database.get_saxo_cache_with_meta("orders")
+    blotter_meta = database.get_saxo_cache_with_meta("order_blotter")
+
     return {
-        "account": database.get_saxo_cache("account_summary"),
-        "positions": database.get_saxo_cache("positions"),
-        "orders": database.get_saxo_cache("orders"),
-        "order_blotter": database.get_saxo_cache("order_blotter")
+        "status": "CACHED_SNAPSHOT",
+        "account": account_meta.get("data") if account_meta else None,
+        "positions": positions_meta.get("data") if positions_meta else None,
+        "orders": orders_meta.get("data") if orders_meta else None,
+        "order_blotter": blotter_meta.get("data") if blotter_meta else None,
+        "updated_at": (
+            account_meta.get("updated_at") if account_meta else
+            (positions_meta.get("updated_at") if positions_meta else None)
+        )
     }
 
 @app.post("/api/broker/refresh")
 async def force_refresh_broker(user=Depends(verify_firebase_token)):
     """
-    Purges stale SQLite caches, ensures session token validity, and pulls
-    fresh account balance, positions, open orders, and blotter directly from Saxo OpenAPI.
+    Descriptive Summary:
+        Resilient, non-blocking broker synchronization endpoint.
+        Executes concurrent gathering of account balances, open positions, order blotter,
+        and working orders using individual per-task timeouts. Atomically updates SQLite
+        cache on success and provides graceful fallback to cached records if external
+        Saxo OpenAPI experiences network or server-side latency.
+
+    Parameters:
+        user: Authenticated Firebase/Demo user context dependency.
+
+    Returns:
+        Dict[str, Any]: Consolidated synchronized telemetry bundle:
+            - status (str): "REFRESHED" or "PARTIAL_REFRESH"
+            - account (Dict): Live or cached account equity and cash.
+            - positions (Dict): Live or cached positions list.
+            - order_blotter (Dict): Live or cached blotter orders.
+            - orders (Dict): Live or cached active orders.
+            - sync_metadata (Dict): Provenance flags and per-component freshness.
+            - warnings (List[str]): Actionable notices for timed-out components.
+            - errors (List[str]): Unhandled exceptions.
+            - updated_at (str): ISO 8601 timestamp.
+
+    Exceptions / Side Effects:
+        Acquires broker_concurrency_lock. Updates saxo_cache table in SQLite atomically.
     """
     async with broker_concurrency_lock:
-        database.clear_saxo_cache()
-        results: Dict[str, Any] = {"status": "REFRESHED", "errors": []}
-        
-        # 1. Fetch account
-        try:
-            acc = saxo_broker_client.get_account_balances()
-            database.set_saxo_cache("account_summary", acc)
-            results["account"] = acc
-        except Exception as e:
-            results["errors"].append(f"Account: {e}")
-            
-        # 2. Fetch positions
-        try:
-            pos = saxo_broker_client.get_positions()
-            database.set_saxo_cache("positions", pos)
-            results["positions"] = pos
-        except Exception as e:
-            results["errors"].append(f"Positions: {e}")
+        now_iso = datetime.now().isoformat()
+        results: Dict[str, Any] = {
+            "status": "REFRESHED",
+            "account": None,
+            "positions": None,
+            "order_blotter": None,
+            "orders": None,
+            "sync_metadata": {},
+            "warnings": [],
+            "errors": [],
+            "updated_at": now_iso
+        }
 
-        # 3. Fetch order blotter
-        try:
-            blotter = saxo_broker_client.get_order_blotter()
-            database.set_saxo_cache("order_blotter", blotter)
-            results["order_blotter"] = blotter
-        except Exception as e:
-            results["errors"].append(f"Order Blotter: {e}")
+        # Helper sub-tasks with dedicated individual timeouts
+        async def _fetch_acc():
+            return await asyncio.wait_for(
+                asyncio.to_thread(saxo_broker_client.get_account_balances),
+                timeout=10.0
+            )
 
-        # 4. Fetch orders
-        try:
-            ords = saxo_broker_client.get_orders()
-            database.set_saxo_cache("orders", ords)
-            results["orders"] = ords
-        except Exception as e:
-            results["errors"].append(f"Orders: {e}")
+        async def _fetch_pos():
+            return await asyncio.wait_for(
+                asyncio.to_thread(saxo_broker_client.get_positions),
+                timeout=10.0
+            )
 
-        log_progress("Force Broker Refresh", "SUCCESS", "Purged cache and synchronized fresh broker telemetry.")
+        async def _fetch_blotter():
+            return await asyncio.wait_for(
+                asyncio.to_thread(saxo_broker_client.get_order_blotter),
+                timeout=12.0
+            )
+
+        async def _fetch_orders():
+            return await asyncio.wait_for(
+                asyncio.to_thread(saxo_broker_client.get_orders),
+                timeout=10.0
+            )
+
+        raw_results = await asyncio.gather(
+            _fetch_acc(),
+            _fetch_pos(),
+            _fetch_blotter(),
+            _fetch_orders(),
+            return_exceptions=True
+        )
+
+        acc_res, pos_res, blotter_res, orders_res = raw_results
+
+        # 1. Process Account
+        if isinstance(acc_res, Exception):
+            cached = database.get_saxo_cache("account_summary")
+            results["account"] = cached
+            results["sync_metadata"]["account"] = {"source": "CACHE", "is_stale": True}
+            results["warnings"].append(f"Account: Saxo API slow ({acc_res}); served cached snapshot.")
+        else:
+            database.set_saxo_cache("account_summary", acc_res)
+            results["account"] = acc_res
+            results["sync_metadata"]["account"] = {"source": "LIVE", "is_stale": False}
+
+        # 2. Process Positions
+        if isinstance(pos_res, Exception):
+            cached = database.get_saxo_cache("positions")
+            results["positions"] = cached
+            results["sync_metadata"]["positions"] = {"source": "CACHE", "is_stale": True}
+            results["warnings"].append(f"Positions: Saxo API slow ({pos_res}); served cached snapshot.")
+        else:
+            database.set_saxo_cache("positions", pos_res)
+            results["positions"] = pos_res
+            results["sync_metadata"]["positions"] = {"source": "LIVE", "is_stale": False}
+
+        # 3. Process Order Blotter
+        if isinstance(blotter_res, Exception):
+            cached = database.get_saxo_cache("order_blotter")
+            results["order_blotter"] = cached
+            results["sync_metadata"]["order_blotter"] = {"source": "CACHE", "is_stale": True}
+            results["warnings"].append(f"Order Blotter: Saxo API slow ({blotter_res}); served cached snapshot.")
+        else:
+            database.set_saxo_cache("order_blotter", blotter_res)
+            results["order_blotter"] = blotter_res
+            results["sync_metadata"]["order_blotter"] = {"source": "LIVE", "is_stale": False}
+
+        # 4. Process Working Orders
+        if isinstance(orders_res, Exception):
+            cached = database.get_saxo_cache("orders")
+            results["orders"] = cached
+            results["sync_metadata"]["orders"] = {"source": "CACHE", "is_stale": True}
+            results["warnings"].append(f"Orders: Saxo API slow ({orders_res}); served cached snapshot.")
+        else:
+            database.set_saxo_cache("orders", orders_res)
+            results["orders"] = orders_res
+            results["sync_metadata"]["orders"] = {"source": "LIVE", "is_stale": False}
+
+        if any(m.get("is_stale") for m in results["sync_metadata"].values()):
+            results["status"] = "PARTIAL_REFRESH"
+
+        log_progress("Force Broker Refresh", "SUCCESS", f"Synchronized broker telemetry. Status: {results['status']}; Warnings: {len(results['warnings'])}")
         return results
 
 @app.post("/api/broker/orders")

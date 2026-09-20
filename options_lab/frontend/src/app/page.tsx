@@ -70,6 +70,8 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState<string | null>(null);
   
   // Authenticated State
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -90,11 +92,12 @@ export default function Dashboard() {
   const [scannerLoading, setScannerLoading] = useState(false);
   const [dynamicCspWatchlist, setDynamicCspWatchlist] = useState<any[]>([]);
 
-  // Fetch all live data from Saxo Bank API
-  // Fetch all live data from Saxo Bank API
+  // Resilient Data Fetching with Single Round-Trip Sync
   const fetchBrokerData = async (forceSpinner = false) => {
     if (forceSpinner) setActionLoading(true);
     setErrorMsg(null);
+    setSyncNotice(null);
+
     try {
       // 1. Fetch status first
       const statusRes = await optionsApi.getBrokerStatus().catch(() => null);
@@ -108,6 +111,7 @@ export default function Dashboard() {
         setBrokerAccount(null);
         setPositions([]);
         setOrders([]);
+        setOrderBlotterData(null);
         const authUrlRes = await optionsApi.getBrokerAuthUrl().catch(() => null);
         if (authUrlRes?.auth_url) {
           setAuthUrl(authUrlRes.auth_url);
@@ -119,49 +123,37 @@ export default function Dashboard() {
 
       setIsAuthenticated(true);
 
-      // 2. Fetch account, positions, blotter and watchlists
-      if (forceSpinner) {
-        try {
-          const refRes = await optionsApi.refreshBrokerData();
-          if (refRes?.account) setBrokerAccount(refRes.account);
-          if (refRes?.positions?.positions) setPositions(refRes.positions.positions);
-          if (refRes?.order_blotter?.orders) setOrderBlotterData(refRes.order_blotter);
-        } catch (e) {
-          console.warn('Force refresh fallback to parallel query:', e);
-        }
-      }
-
-      const [accountRes, positionsRes, blotterRes, wlRes] = await Promise.allSettled([
-        optionsApi.getBrokerAccount(),
-        optionsApi.getBrokerPositions(),
-        optionsApi.getBrokerOrderBlotter(),
-        optionsApi.getBrokerWatchlists()
-      ]);
-
-      if (accountRes.status === 'fulfilled' && accountRes.value) {
-        setBrokerAccount(accountRes.value);
-      }
-
-      if (positionsRes.status === 'fulfilled' && positionsRes.value?.positions) {
-        setPositions(positionsRes.value.positions);
-      }
-
-      if (blotterRes.status === 'fulfilled' && blotterRes.value?.orders) {
-        setOrderBlotterData(blotterRes.value);
-      }
-
-      if (wlRes.status === 'fulfilled' && wlRes.value?.watchlists) {
-        setSaxoWatchlists(wlRes.value.watchlists);
-      }
-
-      // 3. Scan live CSP opportunities in background
+      // 2. Fetch fresh broker telemetry via consolidated single round-trip endpoint
       try {
-        const scanRes = await optionsApi.scanCspOpportunities('saxo', selectedWatchlistId);
-        if (scanRes?.opportunities && scanRes.opportunities.length > 0) {
-          setDynamicCspWatchlist(scanRes.opportunities);
+        const refRes = await optionsApi.refreshBrokerData();
+        if (refRes?.account) setBrokerAccount(refRes.account);
+        if (refRes?.positions?.positions) setPositions(refRes.positions.positions);
+        if (refRes?.order_blotter?.orders) setOrderBlotterData(refRes.order_blotter);
+        if (refRes?.orders?.orders) setOrders(refRes.orders.orders);
+        if (refRes?.updated_at) setLastSyncedAt(refRes.updated_at);
+
+        if (refRes?.warnings && refRes.warnings.length > 0) {
+          setSyncNotice(refRes.warnings.join(' | '));
         }
-      } catch (e) {
-        console.warn('Saxo watchlist scan non-critical:', e);
+      } catch (refErr: any) {
+        console.warn('Live broker sync delayed, falling back to cached snapshot:', refErr);
+        // Fall back gracefully to cached SQLite snapshot
+        const cachedSnap = await optionsApi.getBrokerCachedSnapshot().catch(() => null);
+        if (cachedSnap?.account) setBrokerAccount(cachedSnap.account);
+        if (cachedSnap?.positions?.positions) setPositions(cachedSnap.positions.positions);
+        if (cachedSnap?.order_blotter?.orders) setOrderBlotterData(cachedSnap.order_blotter);
+        if (cachedSnap?.updated_at) setLastSyncedAt(cachedSnap.updated_at);
+        setSyncNotice('Saxo OpenAPI response delayed. Displaying verified local cache.');
+      }
+
+      // 3. Lazy load watchlists if empty
+      if (saxoWatchlists.length === 0) {
+        try {
+          const wlRes = await optionsApi.getBrokerWatchlists();
+          if (wlRes?.watchlists) setSaxoWatchlists(wlRes.watchlists);
+        } catch (wlErr) {
+          console.debug('Watchlist fetch non-critical:', wlErr);
+        }
       }
       
     } catch (err: any) {
@@ -225,8 +217,10 @@ export default function Dashboard() {
       const clipText = await navigator.clipboard.readText();
       if (!clipText || !clipText.trim()) {
         throw new Error('Clipboard is empty! Copy the authorization URL or code from the browser window first.');
-      }
       const trimmed = clipText.trim();
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('optionslab_disconnect_suppressed');
+      }
       await optionsApi.setBrokerToken({ token: trimmed });
       setDevTokenInput('');
       await fetchBrokerData(false);
@@ -237,11 +231,33 @@ export default function Dashboard() {
     }
   };
 
+  // Instant SWR Cache Pre-warm & Background Synchronization
   useEffect(() => {
-    fetchBrokerData();
+    let isMounted = true;
+
+    // 1. Instant Cache Render (<100ms)
+    optionsApi.getBrokerCachedSnapshot().then((cached) => {
+      if (!isMounted || !cached) return;
+      if (cached.account) setBrokerAccount(cached.account);
+      if (cached.positions?.positions) setPositions(cached.positions.positions);
+      if (cached.order_blotter?.orders) setOrderBlotterData(cached.order_blotter);
+      if (cached.orders?.orders) setOrders(cached.orders.orders);
+      if (cached.updated_at) setLastSyncedAt(cached.updated_at);
+      
+      // If cached data is present, release full-screen blocking spinner immediately
+      if (cached.account || (cached.positions?.positions && cached.positions.positions.length > 0)) {
+        setLoading(false);
+      }
+    }).catch((e) => console.debug('Offline cache pre-warm non-critical:', e));
+
+    // 2. Background Revalidation
+    fetchBrokerData(false);
 
     const handleAuthMessage = (e: MessageEvent) => {
       if (e.data?.type === 'SAXO_AUTH_SUCCESS') {
+        if (typeof window !== 'undefined') {
+          sessionStorage.removeItem('optionslab_disconnect_suppressed');
+        }
         fetchBrokerData(false);
       }
     };
@@ -250,6 +266,11 @@ export default function Dashboard() {
     // Auto-detect authorization code on tab focus after user finishes MFA
     const handleFocusCheck = async () => {
       try {
+        // Prevent auto-reconnect if user explicitly clicked Disconnect or Sign Out
+        const isDisconnected = typeof window !== 'undefined' && 
+          sessionStorage.getItem('optionslab_disconnect_suppressed') === 'true';
+        if (isDisconnected) return;
+
         if (!isAuthenticated && navigator.clipboard && document.hasFocus()) {
           const clipText = await navigator.clipboard.readText();
           if (clipText && (clipText.includes('code=') || clipText.includes('Akpegis-Agent.com.sg') || (clipText.trim().length === 36 && clipText.includes('-')))) {
@@ -268,10 +289,24 @@ export default function Dashboard() {
     window.addEventListener('focus', handleFocusCheck);
 
     return () => {
+      isMounted = false;
       window.removeEventListener('message', handleAuthMessage);
       window.removeEventListener('focus', handleFocusCheck);
     };
-  }, [isAuthenticated]);
+  }, []);
+
+  // Lazy load CSP watchlist scanner on-demand
+  useEffect(() => {
+    if (isAuthenticated && selectedWatchlistId && dynamicCspWatchlist.length === 0) {
+      optionsApi.scanCspOpportunities('saxo', selectedWatchlistId)
+        .then((scanRes) => {
+          if (scanRes?.opportunities && scanRes.opportunities.length > 0) {
+            setDynamicCspWatchlist(scanRes.opportunities);
+          }
+        })
+        .catch((e) => console.debug('Saxo watchlist scan non-critical:', e));
+    }
+  }, [isAuthenticated, selectedWatchlistId]);
 
   // Handle Developer Token manual configuration
   const handleSetDevToken = async (e: React.FormEvent) => {
@@ -281,6 +316,9 @@ export default function Dashboard() {
     setActionLoading(true);
     setErrorMsg(null);
     try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.removeItem('optionslab_disconnect_suppressed');
+      }
       await optionsApi.setBrokerToken({ token: devTokenInput.trim() });
       setDevTokenInput('');
       await fetchBrokerData(false);
@@ -291,19 +329,25 @@ export default function Dashboard() {
     }
   };
 
-  // Disconnect Broker connection (clear token)
+  // Disconnect Broker connection (clear token and suppress clipboard auto-reconnect)
   const handleDisconnect = async () => {
     const confirm = window.confirm('Are you sure you want to disconnect from Saxo Live Platform?');
     if (!confirm) return;
 
     setActionLoading(true);
     setErrorMsg(null);
+    setSyncNotice(null);
     try {
+      if (typeof window !== 'undefined') {
+        sessionStorage.setItem('optionslab_disconnect_suppressed', 'true');
+      }
       await optionsApi.disconnectBroker();
       setIsAuthenticated(false);
       setBrokerAccount(null);
       setPositions([]);
       setOrders([]);
+      setOrderBlotterData(null);
+      setDynamicCspWatchlist([]);
       // Reload authentication URL
       const authUrlRes = await optionsApi.getBrokerAuthUrl().catch(() => null);
       if (authUrlRes?.auth_url) {
@@ -451,40 +495,64 @@ export default function Dashboard() {
         {/* Top Header Bar */}
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div>
-            <h1 className="text-xl font-bold text-slate-800 tracking-tight">OPTIONS LAB GATEWAY</h1>
+            <div className="flex items-center gap-2">
+              <h1 className="text-xl font-bold text-slate-800 tracking-tight">OPTIONS LAB GATEWAY</h1>
+              {lastSyncedAt && (
+                <span className="hidden md:inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold bg-slate-100 text-slate-600 border border-slate-200">
+                  <Clock className="h-3 w-3 text-slate-400" />
+                  Synced {new Date(lastSyncedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-400 font-medium">Saxo Live Production Portfolio &amp; Strategy Center</p>
           </div>
           <div className="flex items-center gap-3">
             {actionLoading && <RefreshCw className="h-4 w-4 text-indigo-600 animate-spin" />}
             <button
               onClick={() => router.push('/weekly-intelligence')}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold transition shadow-sm cursor-pointer"
             >
               <Sparkles className="h-3.5 w-3.5" /> Weekly Intelligence
             </button>
             <button 
               onClick={() => fetchBrokerData(true)}
               disabled={actionLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 disabled:bg-slate-100 rounded-lg text-slate-700 text-xs font-bold transition shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 hover:bg-slate-50 disabled:bg-slate-100 rounded-lg text-slate-700 text-xs font-bold transition shadow-sm cursor-pointer"
             >
-              <RefreshCw className="h-3.5 w-3.5" /> Refresh Data
+              <RefreshCw className={`h-3.5 w-3.5 ${actionLoading ? 'animate-spin text-indigo-600' : ''}`} /> Refresh Data
             </button>
             <button 
               onClick={handleDisconnect}
               disabled={actionLoading}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-lg text-xs font-bold transition shadow-sm"
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 rounded-lg text-xs font-bold transition shadow-sm cursor-pointer"
             >
               <LogOut className="h-3.5 w-3.5" /> Disconnect
             </button>
             <button 
-              onClick={() => window.location.reload()}
-              className="flex items-center justify-center p-1.5 border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-800 rounded-lg transition shadow-sm"
-              title="Reload App Window"
+              onClick={() => fetchBrokerData(true)}
+              className="flex items-center justify-center p-1.5 border border-slate-200 hover:bg-slate-50 text-slate-500 hover:text-slate-800 rounded-lg transition shadow-sm cursor-pointer"
+              title="Force Sync Live Data"
             >
-              <MoreVertical className="h-4 w-4" />
+              <RefreshCw className="h-4 w-4" />
             </button>
           </div>
         </div>
+
+        {syncNotice && (
+          <div className="p-3 bg-amber-50 border border-amber-200 text-amber-800 text-xs rounded-xl flex items-center gap-2">
+            <AlertTriangle className="h-4 w-4 flex-shrink-0 text-amber-600" />
+            <div className="flex-1">
+              <span className="font-semibold">Notice: </span>
+              <span>{syncNotice}</span>
+            </div>
+            <button
+              onClick={() => fetchBrokerData(true)}
+              className="px-2 py-1 bg-amber-200 hover:bg-amber-300 text-amber-900 rounded font-bold text-[10px] cursor-pointer"
+            >
+              Retry Sync
+            </button>
+          </div>
+        )}
 
         {errorMsg && (
           <div className="p-4 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">

@@ -913,6 +913,48 @@ def get_saxo_cache(key: str) -> Optional[Any]:
         logger.error(f"Failed to read saxo cache for {key}: {e}")
     return None
 
+def get_saxo_cache_with_meta(key: str) -> Optional[Dict[str, Any]]:
+    """
+    Descriptive Summary:
+        Retrieves cached broker data from SQLite by key along with the exact `updated_at`
+        timestamp ISO string. Supports alias fallback between 'balances' and 'account_summary'.
+
+    Parameters:
+        key (str): Primary cache key to query (e.g. 'account_summary', 'balances', 'positions').
+
+    Returns:
+        Optional[Dict[str, Any]]: Dictionary containing:
+            - 'data' (Any): Deserialized JSON payload.
+            - 'updated_at' (str): ISO 8601 timestamp string when the record was cached.
+        Returns None if key is not found in cache.
+
+    Exceptions / Side Effects:
+        Catches and logs deserialization or database exceptions gracefully. Read-only operation.
+
+    Concrete Executable Usage Example:
+        >>> res = get_saxo_cache_with_meta('account_summary')
+        >>> if res:
+        ...     print(res['updated_at'], res['data'].get('currency'))
+    """
+    try:
+        with _get_conn() as conn:
+            row = conn.execute("SELECT data, updated_at FROM saxo_cache WHERE key = ?", (key,)).fetchone()
+            if row:
+                return {"data": json.loads(row["data"]), "updated_at": row["updated_at"]}
+            
+            # Intelligent alias fallback between account_summary and balances
+            if key == "balances":
+                row_alt = conn.execute("SELECT data, updated_at FROM saxo_cache WHERE key = 'account_summary'").fetchone()
+                if row_alt:
+                    return {"data": json.loads(row_alt["data"]), "updated_at": row_alt["updated_at"]}
+            elif key == "account_summary":
+                row_alt = conn.execute("SELECT data, updated_at FROM saxo_cache WHERE key = 'balances'").fetchone()
+                if row_alt:
+                    return {"data": json.loads(row_alt["data"]), "updated_at": row_alt["updated_at"]}
+    except Exception as e:
+        logger.error(f"Failed to read saxo cache with metadata for {key}: {e}")
+    return None
+
 def clear_saxo_cache() -> None:
     """
     Descriptive Summary:
