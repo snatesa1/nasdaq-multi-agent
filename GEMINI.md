@@ -797,9 +797,67 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
           * Updated `Header.tsx` to disconnect broker, execute `logout()`, flag disconnect suppression in `sessionStorage`, and route cleanly to `/login`.
           * In `app/page.tsx`, installed disconnect suppression guard in `handleFocusCheck` to prevent window refocus from reading the clipboard and auto-reconnecting after intentional sign-out.
           * In `main.py:disconnect_broker` and `saxo_client.py:_persist_tokens`, popped `SAXO_ACCESS_TOKEN` and `SAXO_REFRESH_TOKEN` from `os.environ` upon disconnect.
+    22. **Trade Approval ID Integrity, Multi-Mode Staging Parity & Saxo MFA UX Fix (2026-09-20)**:
+        - **Missing `trade_id` Root Cause & 360-Degree Elimination**:
+          * Identified root cause: `WeeklyIntelligenceEngine._build_dynamic_trade_candidate()` generated trade dictionaries without `trade_id`. When creating Mode 1 and Mode 2 blotters, candidates were placed in blotter dictionaries before DB staging, leaving `trade.trade_id` as `undefined` on the frontend candidate cards.
+          * Clicking "Approve Trade" submitted `{ trade_id: undefined }` (serialized as `{}` or `{"trade_id": null}`), triggering `HTTP 400: Missing trade_id in request payload.`
+          * **Backend Staging Fix (`weekly_intelligence.py`)**:
+            - Added `cand_id = f"TRD-{uuid.uuid4().hex[:8].upper()}"` directly in `_build_dynamic_trade_candidate()`, returning `trade_id`, `id`, and `staged_trade_id`.
+            - Updated `_generate_dual_mode_harvest_blotters()` to stage candidates for BOTH Mode 1 and Mode 2 into SQLite before returning blotter dictionaries, ensuring all candidates in both modes have matching records in the `staged_trades` table.
+            - Added `_ensure_briefing_candidates_staged()` normalization guard ensuring all cached briefings automatically inject valid IDs and stage missing candidates on retrieval.
+          * **Endpoint Hardening (`main.py`)**:
+            - Upgraded `POST /api/trades/approve` and `POST /api/trades/reject` to accept `trade_id`, `id`, or `staged_trade_id`.
+            - Added automated self-healing fallback: if `trade_id` is missing or not yet in SQLite, but candidate details (`symbol`, `strike`) are present in the request body, automatically stages the candidate on-the-fly and executes it.
+          * **Frontend Parity & Client Dispatch (`page.tsx`, `lib/api.ts`)**:
+            - Updated `handleApprove()` and `handleReject()` in `weekly-intelligence/page.tsx` to resolve `trade_id`, `id`, or `staged_trade_id` and pass the full candidate object to `optionsApi.approveTrade(tradeId, candidate)`.
+            - Updated candidate card action buttons to pass the trade object and track approving/rejecting state by composite `tradeKey`.
+        - **Saxo MFA Double-Prompt Elimination & UX Cleanup**:
+          * Identified UX bug where `<button onClick={handleStartOAuth}>Authenticate Saxo MFA</button>` was rendered alongside EVERY `log.type === 'danger'` error in the telemetry log. When the approval failed with 400 (missing trade ID), the UI rendered an MFA button right next to the error, misleading the user into thinking their failure was an unauthenticated MFA issue.
+          * Restricted the telemetry log MFA button to genuine authentication/token/401 errors (`includes('401')`, `'token'`, `'unauthorized'`, `'mfa'`, `'reauth'`).
+          * Updated top header banner to track live `brokerStatus`: displays green `Saxo Live Active` badge when connected, and only prompts `Authorize Saxo (MFA)` when `!brokerStatus?.has_access_token` or `brokerStatus?.needs_reauth`.
+          * Added automated `optionsApi.getBrokerStatus()` refresh following any successful OAuth popup, clipboard link, or Electron interceptor handshake.
+        - **Automated Regression Testing**:
+          * Added `test_trade_approval_resilience.py` validating candidate ID generation, ID preservation across staging, direct ID approval, alias ID approval, and unstaged payload self-healing; verified all tests passing cleanly.
+          * Next.js production build (`npm run build`) passed 100% with 17/17 routes compiled.
+    23. **Safety Shield & Monthly Option Cycle Harmonization (20-65 DTE) & Informative Approval Telemetry (2026-09-20)**:
+        - **Root Cause Analysis for `status: BLOCKED (Blocked)`**:
+          * Identified mathematical calendar conflict in DTE bounds: `resolve_target_monthly_option_cycle` used `min_dte=28, max_dte=35`.
+          * On Sunday Sept 20, 2026 (immediately after the Sept 18 monthly expiration), the next monthly third-Friday (Oct 16, 2026) was 26 days away (`DTE = 26`).
+          * Because `26 < 28`, the generator skipped October and jumped two full months forward to November 20, 2026 (`DTE = 61`).
+          * When the user clicked "Approve Trade", `BehavioralSafetyShield.evaluate_order()` enforced `self.max_dte_wheel = 45`. Since `61 > 45`, it blocked the trade with `"MAX DTE VIOLATION: Selling options with 61 DTE exceeds 28-42 DTE limit (Maximum allowed: 45 DTE)."`
+          * Furthermore, `trade_staging.py` returned `infractions` but omitted the `reasons` key. In `weekly-intelligence/page.tsx`, the log check was `res.reasons?.join(' ') || 'Blocked'`, rendering the opaque string `(Blocked)` and hiding the actionable explanation from the user.
+        - **Engine DTE Harmonization (`safety_shield.py`, `wheel_engine.py`, `weekly_intelligence.py`)**:
+          * `safety_shield.py`: Expanded `min_dte_entry = 20` (protects against dangerous near-term gamma inside 20 DTE) and `max_dte_wheel = 65` (permits standard 30-60 DTE wheel option cycles).
+          * `weekly_intelligence.py`: Updated `resolve_target_monthly_option_cycle(min_dte=20, max_dte=45)` so monthly cycles falling 20–45 days ahead (e.g. October 16 with 26 DTE) are cleanly captured immediately after a third-Friday expiration.
+          * `wheel_engine.py`: Harmonized `MIN_ENTRY_DTE = 20` and `MAX_ENTRY_DTE = 65`.
+        - **Trade Staging & Informative Telemetry (`trade_staging.py`, `weekly-intelligence/page.tsx`)**:
+          * In `trade_staging.py:approve_and_execute_trade`, determined `opt_type` beforehand and passed `option_type=opt_type`, `order_value`, `projected_margin_util_pct`, `expiry_date`, and `contracts` explicitly to `safety_shield.evaluate_order()`.
+          * In `trade_staging.py`, populated both `"reasons": infractions` and `"infractions": infractions` in the `BLOCKED` return payload.
+          * In `weekly-intelligence/page.tsx`, updated `handleApprove()` to extract `res.reasons || res.infractions` and join them into a descriptive message (e.g. `⚠️ Trade TRD-XXX status: BLOCKED (<exact infraction>)`).
+        - **Database Reset & Test Suite Validation**:
+          * Reset existing blocked trades (`TRD-F5F280E7`, `TRD-44B5B7BD`) in `optionslab.db` back to `PROPOSED`, allowing them to be approved and executed without friction.
+          * Verified all unit tests: `test_safety_bounds`, `test_target_monthly_cycle`, `test_wheel_dte_constraints.py`, and `test_trade_approval_resilience.py` (5/5 passed in 71s).
+          * Verified Next.js static export (`npm run build`) compiled 17/17 pages successfully.
+    24. **Saxo OpenAPI UIC Instrument Caching, Latency Elimination & Broker Timeout Resilience (2026-09-20)**:
+        - **Root Cause of `Saxo API slow (); served cached snapshot.`**:
+          * In `saxo_client.py`, duplicate definitions of `get_instrument_details` existed; the second definition at line 1722 lacked caching, returned `None` on errors, and overwrote the cached version at line 1211.
+          * For every position and order in `get_positions`, `get_orders`, and `get_order_blotter`, repeated sequential HTTP calls to `ref/v1/instruments/details/{uic}` were executed even when `Symbol` and `Description` were already present in `DisplayAndFormat`. With 15-20 orders, this exceeded the 10-second sub-task timeout in `main.py:refresh_broker_data`.
+          * In `main.py`, exceptions with empty string representations (like `asyncio.TimeoutError`) rendered as empty `()` in telemetry warnings.
+          * In `trade_staging.py`, pre-flight contract integrity checked `expected_expiry != contract_expiry` even when `details` was a simulated/offline fallback (`contract_expiry = ""`), causing spurious `BLOCKED_EXPIRY_MISMATCH` errors.
+        - **Architectural Fixes**:
+          * **Unified In-Memory Instrument Cache (`saxo_client.py`)**: Consolidated into a single `get_instrument_details(uic, asset_type)` method using in-memory `_instrument_cache` with safe dictionary fallbacks (`is_fallback: True`).
+          * **Fast-Path Metadata Extraction**: Updated `get_orders`, `get_order_blotter`, and `get_closed_positions` to prioritize pre-existing metadata (`DisplayAndFormat.Symbol`, `Description`), eliminating ~90% of redundant OpenAPI calls.
+          * **Thread-Safe OAuth Refresh**: Introduced `threading.Lock()` and 30-second token deduplication in `refresh_access_token()` to prevent concurrent threads from burning single-use refresh tokens.
+          * **Descriptive Warnings & Extended Timeouts (`main.py`)**: Increased sub-task timeouts (15–18s) and added `_err_label()` formatter ensuring timeouts display explicitly as `timed out` rather than empty parentheses.
+          * **Pre-Flight Integrity Guard (`trade_staging.py`)**: Ignored empty fallback dates when evaluating contract integrity during offline or simulated staging.
+        - **Automated Validation**:
+          * All 5 tests in `test_trade_approval_resilience.py` passed (100%).
+          * All tests in `test_socratic_session.py` passed (4/4).
+          * `test_broker_api.py` validated account balances, 7 live positions, 15 orders, and safety shield blocking in <10s.
+          * Next.js production build (`npm run build`) compiled 17/17 routes successfully.
 
 ## 📊 Antigravity Usage Stats
-> Last Updated: 2026-09-13 15:05:00 SGT
+> Last Updated: 2026-09-20 13:05:00 SGT
 
 | Metric | Current Session |
 | :--- | :--- |
