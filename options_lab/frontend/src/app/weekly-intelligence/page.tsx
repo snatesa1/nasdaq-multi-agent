@@ -373,8 +373,12 @@ export default function WeeklyIntelligencePage() {
           ...prev
         ]);
       } else {
+        const reasonsList = res.reasons || res.infractions;
+        const reasonsText = Array.isArray(reasonsList) && reasonsList.length > 0
+          ? reasonsList.join('; ')
+          : (res.detail ? (typeof res.detail === 'string' ? res.detail : JSON.stringify(res.detail)) : 'Blocked');
         setActionLog(prev => [
-          { id: tradeId, msg: `⚠️ Trade ${tradeId} status: ${res.status} (${res.reasons?.join(' ') || 'Blocked'})`, time: nowTime, type: 'danger' },
+          { id: tradeId, msg: `⚠️ Trade ${tradeId} status: ${res.status} (${reasonsText})`, time: nowTime, type: 'danger' },
           ...prev
         ]);
       }

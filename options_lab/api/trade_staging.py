@@ -218,31 +218,37 @@ class TradeStagingEngine:
                 "record": record
             }
 
+        # Determine buy/sell action and derivative type
+        buy_sell = "Sell" if ("CSP" in strategy or "CC" in strategy or "SHORT" in strategy) else "Buy"
+        asset_type = "StockOption" if ("CSP" in strategy or "CC" in strategy or "OPTION" in strategy) else "Stock"
+        opt_type = "Put" if "CSP" in strategy else ("Call" if "CC" in strategy else "Put")
+
         # 2. Final Live Safety Shield Audit
         safety_eval = self.safety_shield.evaluate_order(
             symbol=symbol,
-            asset_type="StockOption",
-            buy_sell="Sell" if "CSP" in strategy or "CC" in strategy else "Buy",
+            asset_type=asset_type,
+            buy_sell=buy_sell,
+            option_type=opt_type,
             strike=strike,
             delta=delta,
             dte=dte,
-            projected_margin_util_pct=margin_eval.get("projected_margin_util_pct", 0.0)
+            order_value=float(record.get("order_value", 0.0) or 0.0),
+            projected_margin_util_pct=float(margin_eval.get("projected_margin_util_pct", 0.0) or 0.0),
+            expiry_date=record.get("expiration_date"),
+            contracts=contracts
         )
         if not safety_eval["approved"]:
             record["status"] = "BLOCKED"
             record["safety_check_result"] = json.dumps(safety_eval)
             database.save_staged_trade(record)
+            infractions = safety_eval.get("infractions", [])
             return {
                 "status": "BLOCKED",
                 "trade_id": trade_id,
-                "infractions": safety_eval.get("infractions", []),
+                "infractions": infractions,
+                "reasons": infractions,
                 "record": record
             }
-
-        # Determine buy/sell action and derivative type
-        buy_sell = "Sell" if ("CSP" in strategy or "CC" in strategy or "SHORT" in strategy) else "Buy"
-        asset_type = "StockOption" if ("CSP" in strategy or "CC" in strategy or "OPTION" in strategy) else "Stock"
-        opt_type = "Put" if "CSP" in strategy else ("Call" if "CC" in strategy else "Put")
 
         # 3. Resolve & Verify Contract UIC with Zero-Guessing Integrity Guard
         uic = record.get("contract_uic") or record.get("uic")

@@ -51,9 +51,9 @@ class WheelEngine:
     MAX_PORTFOLIO_ALLOCATION_PCT = 0.05   # 5% max capital per underlying
     PROFIT_TARGET_PCT = 0.50             # 50% profit-taking target
     GAMMA_DTE_THRESHOLD = 21             # 21 DTE roll threshold
-    MIN_ENTRY_DTE = 28                   # Hard floor: 28 DTE minimum (no illiquid weeklies / immediate gamma)
-    TARGET_ENTRY_DTE = 35                # Standard monthly baseline target (~35 DTE)
-    MAX_ENTRY_DTE = 42                   # 42 DTE hard maximum ceiling
+    MIN_ENTRY_DTE = 20                   # Floor: 20 DTE minimum (prevents dangerous gamma inside 20 DTE)
+    TARGET_ENTRY_DTE = 35                # Standard monthly baseline target (~30-45 DTE)
+    MAX_ENTRY_DTE = 65                   # 65 DTE maximum ceiling (supports standard 30-60 DTE wheel cycles)
     EARNINGS_BUFFER_DAYS = 7             # Exclude expiries +-7 days from earnings
 
     def __init__(self):
@@ -168,11 +168,11 @@ class WheelEngine:
         if signal_score < 0.55:
             violations.append(f"Signal score ({signal_score:.2f}) is below minimum threshold (0.55).")
 
-        # 4. Standard 28-42 DTE check (Hard 28 DTE floor to avoid illiquid weeklies and gamma cliff)
+        # 4. Standard 20-65 DTE check (20 DTE floor to avoid illiquid weeklies and gamma cliff)
         if proposed_dte is not None:
             if proposed_dte > self.MAX_ENTRY_DTE:
                 violations.append(
-                    f"Proposed DTE ({proposed_dte}d) exceeds maximum {self.MAX_ENTRY_DTE} DTE threshold (allowed 28-42 DTE)."
+                    f"Proposed DTE ({proposed_dte}d) exceeds maximum {self.MAX_ENTRY_DTE} DTE threshold (allowed 20-65 DTE)."
                 )
             elif proposed_dte < self.MIN_ENTRY_DTE:
                 violations.append(

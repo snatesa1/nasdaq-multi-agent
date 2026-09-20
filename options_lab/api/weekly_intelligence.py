@@ -94,20 +94,20 @@ COMPANY_TICKER_MAP = {
 
 def resolve_target_monthly_option_cycle(
     ref_date: Optional[datetime] = None,
-    min_dte: int = 28,
-    max_dte: int = 35
+    min_dte: int = 20,
+    max_dte: int = 45
 ) -> Tuple[datetime, int]:
     """
     Descriptive Summary:
         Calculates the authentic monthly options expiration date (third Friday of the month,
-        falling in the third week) and exact DTE strictly targeting the 28 to 35 DTE window
-        (specifically targeting 30 to 35 days). Guarantees adherence to standard monthly OCC
-        expiration cycles without exposure to illiquid weeklies or gamma cliffs.
+        falling in the third week) and exact DTE targeting the 20 to 45 DTE window
+        (specifically targeting 25 to 45 days). Guarantees adherence to standard monthly OCC
+        expiration cycles without exposure to illiquid weeklies or dangerous gamma cliffs.
 
     Parameters:
         ref_date (Optional[datetime]): Anchor date to calculate forward expiration from. Defaults to datetime.now().
-        min_dte (int): Lower bound days to expiration. Defaults to 28.
-        max_dte (int): Upper bound days to expiration. Defaults to 35.
+        min_dte (int): Lower bound days to expiration. Defaults to 20.
+        max_dte (int): Upper bound days to expiration. Defaults to 45.
 
     Returns:
         Tuple[datetime, int]: Tuple containing:
@@ -421,7 +421,7 @@ class WeeklyIntelligenceEngine:
             direction = "NEUTRAL_BULLISH"
 
         # Resolve target monthly expiration date (standard third-Friday)
-        target_exp_date, target_dte = resolve_target_monthly_option_cycle(min_dte=28, max_dte=35)
+        target_exp_date, target_dte = resolve_target_monthly_option_cycle(min_dte=20, max_dte=45)
         target_exp_str = target_exp_date.strftime("%Y-%m-%d")
         dte = target_dte
 
@@ -1585,8 +1585,8 @@ class WeeklyIntelligenceEngine:
                 candidate_pool.append(t)
                 added_pos += 1
 
-        # Calculate exact monthly third-Friday options expiration date and DTE (30 to 45 days DTE)
-        target_monthly_expiry, target_monthly_dte = resolve_target_monthly_option_cycle(min_dte=28, max_dte=45)
+        # Calculate exact monthly third-Friday options expiration date and DTE (20 to 45 days DTE)
+        target_monthly_expiry, target_monthly_dte = resolve_target_monthly_option_cycle(min_dte=20, max_dte=45)
         logger.info(f"Targeting standard monthly third-Friday expiration: {target_monthly_expiry.strftime('%Y-%m-%d')} (DTE: {target_monthly_dte}). Candidate pool size: {len(candidate_pool)}")
 
         # Evaluate candidate metrics
