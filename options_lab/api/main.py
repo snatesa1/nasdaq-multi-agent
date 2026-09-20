@@ -1684,7 +1684,13 @@ async def approve_staged_trade_endpoint(
     Approves a staged recommendation, performs live margin headroom and safety shield validation,
     and places the order live on Saxo OpenAPI.
     """
-    trade_id = payload.get("trade_id")
+    trade_id = payload.get("trade_id") or payload.get("id") or payload.get("staged_trade_id")
+    
+    resolved_week = f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
+    if not trade_id and payload.get("symbol"):
+        staged = trade_staging.stage_recommendation(payload, week_label=resolved_week)
+        trade_id = staged.get("trade_id")
+
     if not trade_id:
         raise HTTPException(status_code=400, detail="Missing trade_id in request payload.")
 
@@ -1692,6 +1698,13 @@ async def approve_staged_trade_endpoint(
         result = trade_staging.approve_and_execute_trade(trade_id=trade_id)
         return result
     except ValueError as ve:
+        # If trade_id not found in DB but full candidate data is in payload, self-heal by staging and executing
+        if payload.get("symbol") and payload.get("strike"):
+            logger.info(f"Self-healing trade execution: staging candidate {payload.get('symbol')} on-the-fly")
+            staged = trade_staging.stage_recommendation(payload, week_label=resolved_week)
+            new_trade_id = staged.get("trade_id")
+            result = trade_staging.approve_and_execute_trade(trade_id=new_trade_id)
+            return result
         raise HTTPException(status_code=404, detail=str(ve))
     except Exception as e:
         logger.error(f"Failed to approve trade {trade_id}: {e}")
@@ -1703,8 +1716,13 @@ async def reject_staged_trade_endpoint(
     user=Depends(verify_firebase_token)
 ):
     """Rejects a staged trade recommendation."""
-    trade_id = payload.get("trade_id")
+    trade_id = payload.get("trade_id") or payload.get("id") or payload.get("staged_trade_id")
     reason = payload.get("reason", "User rejected position trade recommendation")
+    resolved_week = f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
+    if not trade_id and payload.get("symbol"):
+        staged = trade_staging.stage_recommendation(payload, week_label=resolved_week)
+        trade_id = staged.get("trade_id")
+
     if not trade_id:
         raise HTTPException(status_code=400, detail="Missing trade_id in request payload.")
 

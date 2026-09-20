@@ -81,6 +81,7 @@ export default function WeeklyIntelligencePage() {
   const [handshakeError, setHandshakeError] = useState<string | null>(null);
   const [loadingStep, setLoadingStep] = useState<string>('Verifying Backend Handshake...');
   const [authUrl, setAuthUrl] = useState<string | null>(null);
+  const [brokerStatus, setBrokerStatus] = useState<any>(null);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
@@ -186,6 +187,7 @@ export default function WeeklyIntelligencePage() {
   useEffect(() => {
     fetchBriefing(false);
     fetchCorpus();
+    optionsApi.getBrokerStatus().then(res => setBrokerStatus(res)).catch(() => null);
     optionsApi.getBrokerAuthUrl().then(res => {
       if (res?.auth_url) setAuthUrl(res.auth_url);
     }).catch(() => null);
@@ -196,6 +198,7 @@ export default function WeeklyIntelligencePage() {
           { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authentication Successful! Broker session is now active.', time: new Date().toLocaleTimeString(), type: 'success' },
           ...prev
         ]);
+        optionsApi.getBrokerStatus().then(res => setBrokerStatus(res)).catch(() => null);
         fetchBriefing(true);
       }
     };
@@ -242,6 +245,7 @@ export default function WeeklyIntelligencePage() {
         ...prev
       ]);
       await optionsApi.setBrokerToken({ token: clipText.trim() });
+      optionsApi.getBrokerStatus().then(res => setBrokerStatus(res)).catch(() => null);
       setActionLog(prev => [
         { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authenticated via Clipboard!', time: new Date().toLocaleTimeString(), type: 'success' },
         ...prev
@@ -266,6 +270,7 @@ export default function WeeklyIntelligencePage() {
             { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authenticated via Desktop Interceptor!', time: new Date().toLocaleTimeString(), type: 'success' },
             ...prev
           ]);
+          optionsApi.getBrokerStatus().then(res => setBrokerStatus(res)).catch(() => null);
           fetchBriefing(true);
         })
         .catch((err: any) => console.error('Electron OAuth error:', err));
@@ -333,10 +338,22 @@ export default function WeeklyIntelligencePage() {
     }
   };
 
-  const handleApprove = async (tradeId: string) => {
+  const handleApprove = async (tradeOrId: any) => {
+    const tradeObj = typeof tradeOrId === 'object' && tradeOrId !== null ? tradeOrId : null;
+    const tradeId = tradeObj ? (tradeObj.trade_id || tradeObj.id || tradeObj.staged_trade_id) : tradeOrId;
+
+    if (!tradeId) {
+      console.error('Cannot approve trade: missing trade_id in candidate', tradeOrId);
+      setActionLog(prev => [
+        { id: `ERR-${Date.now()}`, msg: '❌ Approval Error: Trade ID missing from candidate card.', time: new Date().toLocaleTimeString(), type: 'danger' },
+        ...prev
+      ]);
+      return;
+    }
+
     setApprovingId(tradeId);
     try {
-      const res = await optionsApi.approveTrade(tradeId);
+      const res = await optionsApi.approveTrade(tradeId, tradeObj || undefined);
       const nowTime = new Date().toLocaleTimeString();
       
       if (res.status === 'FILLED' || res.status === 'PLACED') {
@@ -374,10 +391,13 @@ export default function WeeklyIntelligencePage() {
     }
   };
 
-  const handleReject = async (tradeId: string) => {
+  const handleReject = async (tradeOrId: any) => {
+    const tradeObj = typeof tradeOrId === 'object' && tradeOrId !== null ? tradeOrId : null;
+    const tradeId = tradeObj ? (tradeObj.trade_id || tradeObj.id || tradeObj.staged_trade_id) : tradeOrId;
+    if (!tradeId) return;
     setRejectingId(tradeId);
     try {
-      await optionsApi.rejectTrade(tradeId, 'Rejected by user from Trade Command Center');
+      await optionsApi.rejectTrade(tradeId, 'Rejected by user from Trade Command Center', tradeObj || undefined);
       setActionLog(prev => [
         { id: tradeId, msg: `🚫 Trade ${tradeId} Rejected by user.`, time: new Date().toLocaleTimeString(), type: 'info' },
         ...prev
@@ -436,7 +456,12 @@ export default function WeeklyIntelligencePage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
-              {authUrl && (
+              {brokerStatus?.has_access_token && !brokerStatus?.needs_reauth ? (
+                <div className="flex items-center gap-1.5 px-3.5 py-2.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded-xl text-xs font-bold shadow-xs">
+                  <span className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Saxo Live Active</span>
+                </div>
+              ) : authUrl ? (
                 <>
                   <button
                     onClick={handleStartOAuth}
@@ -454,7 +479,7 @@ export default function WeeklyIntelligencePage() {
                     ⚡ Auto-Link
                   </button>
                 </>
-              )}
+              ) : null}
               <button
                 onClick={() => fetchBriefing(true)}
                 disabled={loading}
@@ -929,7 +954,8 @@ export default function WeeklyIntelligencePage() {
 
             {/* Candidate Cards Grid */}
             <div className="space-y-4">
-              {stagedTrades.map((trade) => {
+              {stagedTrades.map((trade, tIdx) => {
+                const tradeKey = trade.trade_id || trade.id || trade.staged_trade_id || `${trade.symbol}-${trade.strike}-${trade.strategy}-${tIdx}`;
                 const isApproved = trade.status === 'APPROVED' || trade.status === 'FILLED' || trade.status === 'PLACED' || trade.status === 'EXECUTING';
                 const isTimeoutLocked = trade.status === 'UNCONFIRMED_TIMEOUT';
                 const isRejected = trade.status === 'REJECTED';
@@ -937,7 +963,7 @@ export default function WeeklyIntelligencePage() {
 
                 return (
                   <div 
-                    key={trade.trade_id}
+                    key={tradeKey}
                     className={`p-6 bg-white border rounded-2xl shadow-sm transition-all space-y-4 ${
                       isApproved ? 'border-emerald-300 bg-emerald-50/20' :
                       isTimeoutLocked ? 'border-amber-300 bg-amber-50/20' :
@@ -1058,11 +1084,11 @@ export default function WeeklyIntelligencePage() {
                         ) : (
                           <div className="flex items-center gap-2">
                             <button
-                              onClick={() => handleApprove(trade.trade_id)}
-                              disabled={approvingId === trade.trade_id}
+                              onClick={() => handleApprove(trade)}
+                              disabled={approvingId === tradeKey || approvingId === trade.trade_id || approvingId === trade.id}
                               className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-bold transition shadow-xs flex items-center gap-1.5 disabled:opacity-50 cursor-pointer"
                             >
-                              {approvingId === trade.trade_id ? (
+                              {(approvingId === tradeKey || approvingId === trade.trade_id || approvingId === trade.id) ? (
                                 <RefreshCw className="h-3.5 w-3.5 animate-spin" />
                               ) : (
                                 <CheckCircle2 className="h-3.5 w-3.5" />
@@ -1071,8 +1097,8 @@ export default function WeeklyIntelligencePage() {
                             </button>
 
                             <button
-                              onClick={() => handleReject(trade.trade_id)}
-                              disabled={rejectingId === trade.trade_id}
+                              onClick={() => handleReject(trade)}
+                              disabled={rejectingId === tradeKey || rejectingId === trade.trade_id || rejectingId === trade.id}
                               className="px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
                             >
                               Reject
@@ -2467,22 +2493,31 @@ export default function WeeklyIntelligencePage() {
               Live Order Execution Telemetry Log
             </h3>
             <div className="space-y-1.5 font-mono text-xs max-h-40 overflow-y-auto">
-              {actionLog.map((log, idx) => (
-                <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between text-slate-700 border-b border-slate-100 pb-1.5 gap-1">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span className={log.type === 'danger' ? 'text-rose-600 font-bold' : log.type === 'success' ? 'text-emerald-600 font-bold' : 'text-slate-700'}>{log.msg}</span>
-                    {log.type === 'danger' && authUrl && (
-                      <button
-                        onClick={handleStartOAuth}
-                        className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[11px] font-bold hover:bg-emerald-100 transition inline-flex items-center gap-1 cursor-pointer"
-                      >
-                        <Key className="h-3 w-3" /> Authenticate Saxo MFA
-                      </button>
-                    )}
+              {actionLog.map((log, idx) => {
+                const isAuthError = log.type === 'danger' && authUrl && (
+                  log.msg.includes('401') ||
+                  log.msg.toLowerCase().includes('token') ||
+                  log.msg.toLowerCase().includes('unauthorized') ||
+                  log.msg.toLowerCase().includes('mfa') ||
+                  log.msg.toLowerCase().includes('reauth')
+                );
+                return (
+                  <div key={idx} className="flex flex-col sm:flex-row sm:items-center justify-between text-slate-700 border-b border-slate-100 pb-1.5 gap-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className={log.type === 'danger' ? 'text-rose-600 font-bold' : log.type === 'success' ? 'text-emerald-600 font-bold' : 'text-slate-700'}>{log.msg}</span>
+                      {isAuthError && (
+                        <button
+                          onClick={handleStartOAuth}
+                          className="px-2 py-0.5 bg-emerald-50 text-emerald-700 border border-emerald-200 rounded text-[11px] font-bold hover:bg-emerald-100 transition inline-flex items-center gap-1 cursor-pointer"
+                        >
+                          <Key className="h-3 w-3" /> Authenticate Saxo MFA
+                        </button>
+                      )}
+                    </div>
+                    <span className="text-slate-400 text-[10px]">{log.time}</span>
                   </div>
-                  <span className="text-slate-400 text-[10px]">{log.time}</span>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
         )}

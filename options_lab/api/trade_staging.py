@@ -36,7 +36,7 @@ class TradeStagingEngine:
         """
         symbol = rec.get("symbol", "UNKNOWN").upper()
         existing_prop = database.find_proposed_trade(symbol, week_label)
-        trade_id = existing_prop["trade_id"] if existing_prop else f"TRD-{uuid.uuid4().hex[:8].upper()}"
+        trade_id = rec.get("trade_id") or rec.get("id") or rec.get("staged_trade_id") or (existing_prop["trade_id"] if existing_prop else f"TRD-{uuid.uuid4().hex[:8].upper()}")
         now_iso = datetime.now().isoformat()
 
         strategy = rec.get("strategy", "CSP").upper()
@@ -95,6 +95,8 @@ class TradeStagingEngine:
 
         staged_record = {
             "trade_id": trade_id,
+            "id": trade_id,
+            "staged_trade_id": trade_id,
             "symbol": symbol,
             "name": rec.get("name", symbol),
             "sector": rec.get("sector", "Information Technology"),
@@ -146,6 +148,9 @@ class TradeStagingEngine:
 
         # Persist to SQLite database via db helper
         database.save_staged_trade(staged_record)
+        rec["trade_id"] = trade_id
+        rec["id"] = trade_id
+        rec["staged_trade_id"] = trade_id
         logger.info(f"Staged trade {trade_id} [{symbol} {strategy} ${strike}] for week {week_label}.")
         return staged_record
 

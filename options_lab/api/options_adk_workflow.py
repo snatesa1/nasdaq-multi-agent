@@ -722,6 +722,9 @@ def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
         trade["contracts"] = contracts
         trade["collateral_required"] = collateral
         record = trade_staging.stage_recommendation(trade, week_label=week_label)
+        trade["trade_id"] = record["trade_id"]
+        trade["id"] = record["trade_id"]
+        trade["staged_trade_id"] = record["trade_id"]
         record["golden_trade_rank"] = rank_idx + 1
         record["contracts"] = contracts
         record["collateral_required"] = collateral

@@ -2,6 +2,7 @@ import os
 import logging
 import json
 import asyncio
+import uuid
 from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone, timedelta
 
@@ -533,8 +534,12 @@ class WeeklyIntelligenceEngine:
             precheck_impact = precheck_res.get("estimated_cash_margin_impact", 0.0)
 
         sector = self.symbol_sector_map.get(symbol.upper(), normalize_gics_sector("", symbol))
+        cand_id = f"TRD-{uuid.uuid4().hex[:8].upper()}"
 
         return {
+            "trade_id": cand_id,
+            "id": cand_id,
+            "staged_trade_id": cand_id,
             "symbol": symbol,
             "name": name,
             "sector": sector,
@@ -1954,16 +1959,46 @@ class WeeklyIntelligenceEngine:
         # ─────────────────────────────────────────────────────────────────────────────
         # 🏛️ INTER-MODE SUB-AGENT DIALECTICAL DEBATE & SCORECARDS
         # ─────────────────────────────────────────────────────────────────────────────
+        # Stage candidates into DB for both Mode 1 and Mode 2 so all candidates are immediately actionable
+        database.purge_unapproved_staged_trades(week_label=week_label)
+        staged_trades_m1 = []
+        for rank_idx, trade in enumerate(scaled_basket_m1):
+            trade["status"] = "PROPOSED"
+            trade["golden_trade_rank"] = rank_idx + 1
+            staged = self.trade_staging.stage_recommendation(trade, week_label=week_label)
+            staged["golden_trade_rank"] = rank_idx + 1
+            staged["contracts"] = trade.get("contracts", 1)
+            staged["collateral_required"] = trade.get("collateral_required", 0.0)
+            staged["sub_agent_consensus"] = trade.get("sub_agent_consensus")
+            trade["trade_id"] = staged["trade_id"]
+            trade["id"] = staged["trade_id"]
+            trade["staged_trade_id"] = staged["trade_id"]
+            staged_trades_m1.append(staged)
+
+        staged_trades_m2 = []
+        for rank_idx, trade in enumerate(scaled_basket_m2):
+            trade["status"] = "PROPOSED"
+            trade["golden_trade_rank"] = rank_idx + 1
+            staged = self.trade_staging.stage_recommendation(trade, week_label=week_label)
+            staged["golden_trade_rank"] = rank_idx + 1
+            staged["contracts"] = trade.get("contracts", 1)
+            staged["collateral_required"] = trade.get("collateral_required", 0.0)
+            staged["sub_agent_consensus"] = trade.get("sub_agent_consensus")
+            trade["trade_id"] = staged["trade_id"]
+            trade["id"] = staged["trade_id"]
+            trade["staged_trade_id"] = staged["trade_id"]
+            staged_trades_m2.append(staged)
+
         mode_1_blotter = {
             "mode_id": "MODE_1_MULTI_SECTOR",
             "title": "Mode 1: Multi-Sector Basket",
-            "subtitle": f"{len(scaled_basket_m1)} Cross-Sector Trades (Dynamic Target / slot)",
+            "subtitle": f"{len(staged_trades_m1)} Cross-Sector Trades (Dynamic Target / slot)",
             "target_monthly_harvest": 1000.0,
             "projected_monthly_harvest_dollars": m1_harvest,
             "total_collateral_required": m1_collateral,
-            "total_staged_contracts": sum(t.get("contracts", 1) for t in scaled_basket_m1),
-            "candidates_count": len(scaled_basket_m1),
-            "candidates": scaled_basket_m1
+            "total_staged_contracts": sum(t.get("contracts", 1) for t in staged_trades_m1),
+            "candidates_count": len(staged_trades_m1),
+            "candidates": staged_trades_m1
         }
 
         mode_2_blotter = {
@@ -1973,9 +2008,9 @@ class WeeklyIntelligenceEngine:
             "target_monthly_harvest": 1000.0,
             "projected_monthly_harvest_dollars": m2_harvest,
             "total_collateral_required": m2_collateral,
-            "total_staged_contracts": sum(t.get("contracts", 1) for t in scaled_basket_m2),
-            "candidates_count": len(scaled_basket_m2),
-            "candidates": scaled_basket_m2
+            "total_staged_contracts": sum(t.get("contracts", 1) for t in staged_trades_m2),
+            "candidates_count": len(staged_trades_m2),
+            "candidates": staged_trades_m2
         }
 
         debate_arena = self.run_inter_mode_dialectical_debate(
@@ -1984,24 +2019,11 @@ class WeeklyIntelligenceEngine:
             margin_status=margin_status
         )
 
-        # Stage Mode 1 candidates into DB as primary default
-        database.purge_unapproved_staged_trades(week_label=week_label)
-        staged_trades = []
-        for rank_idx, trade in enumerate(scaled_basket_m1):
-            trade["status"] = "PROPOSED"
-            trade["golden_trade_rank"] = rank_idx + 1
-            staged = self.trade_staging.stage_recommendation(trade, week_label=week_label)
-            staged["golden_trade_rank"] = rank_idx + 1
-            staged["contracts"] = trade.get("contracts", 1)
-            staged["collateral_required"] = trade.get("collateral_required", 0.0)
-            staged["sub_agent_consensus"] = trade.get("sub_agent_consensus")
-            staged_trades.append(staged)
-
         return {
             "mode_1": mode_1_blotter,
             "mode_2": mode_2_blotter,
             "debate_arena": debate_arena,
-            "staged_trades": staged_trades
+            "staged_trades": staged_trades_m1
         }
 
     def run_inter_mode_dialectical_debate(
@@ -2381,6 +2403,48 @@ class WeeklyIntelligenceEngine:
 
         return scenarios
 
+    def _ensure_briefing_candidates_staged(self, briefing: Dict[str, Any], week_label: str) -> Dict[str, Any]:
+        """
+        Descriptive Summary:
+            Idempotency & Integrity Guard: Ensures every candidate in the briefing payload
+            has a valid trade_id, id, and staged_trade_id, and guarantees that each candidate
+            is actively persisted into SQLite staged_trades table so it can be approved without 400/404 errors.
+        """
+        if not isinstance(briefing, dict):
+            return briefing
+
+        candidates_to_check = []
+        wb = briefing.get("wheel_harvest_blotter")
+        if isinstance(wb, dict):
+            for mode_key in ["mode_1", "mode_2"]:
+                mode_data = wb.get(mode_key)
+                if isinstance(mode_data, dict) and isinstance(mode_data.get("candidates"), list):
+                    candidates_to_check.extend(mode_data["candidates"])
+            if isinstance(wb.get("candidates"), list):
+                candidates_to_check.extend(wb["candidates"])
+        if isinstance(briefing.get("potential_trades"), list):
+            candidates_to_check.extend(briefing["potential_trades"])
+
+        from . import db as database
+        for cand in candidates_to_check:
+            if not isinstance(cand, dict):
+                continue
+            tid = cand.get("trade_id") or cand.get("id") or cand.get("staged_trade_id")
+            if not tid:
+                tid = f"TRD-{uuid.uuid4().hex[:8].upper()}"
+            cand["trade_id"] = tid
+            cand["id"] = tid
+            cand["staged_trade_id"] = tid
+
+            try:
+                existing = database.get_staged_trade_by_id(tid)
+                if not existing and cand.get("symbol") and cand.get("strike"):
+                    self.trade_staging.stage_recommendation(cand, week_label=week_label)
+            except Exception as e_st:
+                logger.debug(f"Auto-staging check notice for {tid}: {e_st}")
+
+        return briefing
+
     def analyze_weekly_macro_and_edges(self, week_label: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:
         """
         Descriptive Summary:
@@ -2434,9 +2498,9 @@ class WeeklyIntelligenceEngine:
                 # Only serve cache if it was generated on today's calendar date
                 if gen_at and gen_at.startswith(today_str):
                     logger.info(f"Serving cached weekly intelligence briefing for {week_label} (generated today {today_str})")
-                    return cached
+                    return self._ensure_briefing_candidates_staged(cached, week_label)
                 elif not gen_at:
-                    return cached
+                    return self._ensure_briefing_candidates_staged(cached, week_label)
 
         self._sync_dynamic_universe()
         news_items = self.collect_weekly_news_events()
@@ -2729,4 +2793,4 @@ The macro landscape for **{current_date_str}** reflects steady equity consolidat
         except Exception as e_cache:
             logger.debug(f"Failed caching weekly briefing: {e_cache}")
 
-        return result
+        return self._ensure_briefing_candidates_staged(result, week_label)

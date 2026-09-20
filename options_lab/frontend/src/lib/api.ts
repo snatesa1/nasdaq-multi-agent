@@ -286,8 +286,21 @@ export const optionsApi = {
     const q = params.toString();
     return apiRequest(q ? `/api/trades/staged?${q}` : '/api/trades/staged');
   },
-  approveTrade: (tradeId: string) => apiRequest('/api/trades/approve', 'POST', { trade_id: tradeId }),
-  rejectTrade: (tradeId: string, reason?: string) => apiRequest('/api/trades/reject', 'POST', { trade_id: tradeId, reason }),
+  approveTrade: (tradeId: string, candidateData?: any) => 
+    apiRequest('/api/trades/approve', 'POST', { 
+      trade_id: tradeId,
+      id: tradeId,
+      staged_trade_id: tradeId,
+      ...(candidateData || {}) 
+    }),
+  rejectTrade: (tradeId: string, reason?: string, candidateData?: any) => 
+    apiRequest('/api/trades/reject', 'POST', { 
+      trade_id: tradeId,
+      id: tradeId,
+      staged_trade_id: tradeId,
+      reason,
+      ...(candidateData || {}) 
+    }),
   getMarginStatus: () => apiRequest('/api/margin/status'),
   runWheelBacktest: (params: {
     symbol: string;
