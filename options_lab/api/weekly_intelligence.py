@@ -1706,7 +1706,7 @@ class WeeklyIntelligenceEngine:
                 satellite_candidates.append(cand)
 
         # ─────────────────────────────────────────────────────────────────────────────
-        # 🎯 MODE 1: MULTI-SECTOR BASKET (4 TRADES × ~$250 = $1,000)
+        # 🎯 MODE 1: MULTI-SECTOR BASKET (4–6 TRADES × DYNAMIC TARGET = $1,000)
         # ─────────────────────────────────────────────────────────────────────────────
         sweet_spot_trades = [t for t in potential_trades_mode1 if 2.00 <= t.get("premium_estimate", 0.0) <= 3.00]
         other_valid_trades = [t for t in potential_trades_mode1 if t not in sweet_spot_trades]
@@ -1718,13 +1718,13 @@ class WeeklyIntelligenceEngine:
         selected_sectors_m1 = set()
 
         for cand in sorted_candidates_m1:
-            if len(active_m1) >= 4:
+            if len(active_m1) >= 6:
                 cand["status"] = "BENCH_RESERVE"
                 bench_m1.append(cand)
                 continue
 
             sec = cand.get("sector")
-            if sec in selected_sectors_m1 and len(selected_sectors_m1) < min(4, len(sorted_candidates_m1)):
+            if sec in selected_sectors_m1 and len(selected_sectors_m1) < min(6, len(sorted_candidates_m1)):
                 cand["status"] = "BENCH_RESERVE"
                 bench_m1.append(cand)
                 continue
@@ -1742,11 +1742,11 @@ class WeeklyIntelligenceEngine:
                 cand["rejection_reason"] = basket_audit.get("reasons", ["Cumulative basket limit exceeded"])[0]
                 bench_m1.append(cand)
 
-        if len(active_m1) < 4:
+        if len(active_m1) < 6:
             # Fallback 1: Backfill from bench_m1 passing basket audit
             existing_syms = {c.get("symbol") for c in active_m1}
             for cand in list(bench_m1):
-                if len(active_m1) >= 4:
+                if len(active_m1) >= 6:
                     break
                 if cand.get("symbol") in existing_syms:
                     continue
@@ -1761,11 +1761,11 @@ class WeeklyIntelligenceEngine:
                     existing_syms.add(cand.get("symbol"))
                     bench_m1.remove(cand)
 
-        if len(active_m1) < 4:
+        if len(active_m1) < 6:
             # Fallback 2: Backfill from any other evaluated candidates
             existing_syms = {c.get("symbol") for c in active_m1}
             for cand in evaluated_cands:
-                if len(active_m1) >= 4:
+                if len(active_m1) >= 6:
                     break
                 sym = cand.get("symbol")
                 prem = cand.get("premium_estimate", 0.0)
@@ -1777,11 +1777,13 @@ class WeeklyIntelligenceEngine:
 
         # Dynamic Sizing Optimization for Mode 1
         scaled_basket_m1: List[Dict[str, Any]] = []
-        for cand in active_m1[:4]:
+        n_active_trades = min(len(active_m1), 6)
+        target_per_slot = 1000.0 / max(n_active_trades, 4)  # $250 for 4, $200 for 5, ~$167 for 6
+        for cand in active_m1[:6]:
             cand_copy = dict(cand)
             prem = float(cand_copy.get("premium_estimate", 0.0))
             strike = float(cand_copy.get("strike", 0.0))
-            desired_contracts = max(1, min(3, round(250.0 / (prem * 100.0)))) if prem > 0 else 1
+            desired_contracts = max(1, min(4, round(target_per_slot / (prem * 100.0)))) if prem > 0 else 1
             cand_copy["contracts"] = desired_contracts
             cand_copy["collateral_required"] = strike * 100.0 * desired_contracts
             cand_copy["max_margin_impact_pct"] = round(desired_contracts * 1.5, 1)
@@ -1826,12 +1828,12 @@ class WeeklyIntelligenceEngine:
                 allocator_decision = (
                     f"ALLOCATOR TARGET DEFICIT ALERT: Mode 1 generates ${m1_harvest:,.2f} "
                     f"(-${m1_deficit:,.2f} vs $1,000 target). Financial Analyst selected {sym} at ${prem:.2f} "
-                    f"(sub-$2.00 sweet-spot); Risk Aggregator capped sizing to {contracts} contract(s) to protect the 50% cash ceiling. "
+                    f"(sub-$2.00 sweet-spot); Risk Aggregator capped sizing to {contracts} contract(s) to protect the 60% margin ceiling. "
                     f"Approved with documented target challenge for user decision."
                 )
             else:
                 allocator_status = "GOLDEN_TRADE_DESIGNATED"
-                allocator_label = f"Golden Trade #{rank_idx + 1} of 4"
+                allocator_label = f"Golden Trade #{rank_idx + 1} of {n_active_trades}"
                 allocator_decision = (
                     f"ALLOCATOR APPROVAL: Mode 1 target satisfied. Sized at {contracts} contract(s) generating ${contrib:,.2f} "
                     f"towards the $1,000 monthly harvest goal. Fully cleared against collateral and margin caps."
@@ -1955,7 +1957,7 @@ class WeeklyIntelligenceEngine:
         mode_1_blotter = {
             "mode_id": "MODE_1_MULTI_SECTOR",
             "title": "Mode 1: Multi-Sector Basket",
-            "subtitle": "4 Cross-Sector Trades ($250 / slot)",
+            "subtitle": f"{len(scaled_basket_m1)} Cross-Sector Trades (Dynamic Target / slot)",
             "target_monthly_harvest": 1000.0,
             "projected_monthly_harvest_dollars": m1_harvest,
             "total_collateral_required": m1_collateral,
@@ -2680,12 +2682,12 @@ The macro landscape for **{current_date_str}** reflects steady equity consolidat
             "allocator_challenge_active": total_monthly_harvest_dollars < 990.0,
             "allocator_shortfall_dollars": max(0.0, round(1000.0 - total_monthly_harvest_dollars, 2)),
             "allocator_challenge_statement": (
-                f"Executive Portfolio Allocator Challenge: The 4 Golden Trades generate ${total_monthly_harvest_dollars:,.2f}, "
+                f"Executive Portfolio Allocator Challenge: The {len(staged_trades)} Golden Trades generate ${total_monthly_harvest_dollars:,.2f}, "
                 f"falling ${1000.0 - total_monthly_harvest_dollars:,.2f} short of the $1,000.00 monthly mandate. "
                 f"Financial Analyst selected lower-premium defensive names to preserve capital; Risk Aggregator constrained sizing "
-                f"to protect the 50% cash collateral ceiling (${max_allowed_collat:,.0f}). User authorization required."
+                f"to protect the 60% margin ceiling (${max_allowed_collat:,.0f}). User authorization required."
                 if total_monthly_harvest_dollars < 990.0 else
-                "Executive Portfolio Allocator Consensus: 4 Golden Trades fully satisfy the $1,000 monthly harvest mandate within all risk boundaries."
+                f"Executive Portfolio Allocator Consensus: {len(staged_trades)} Golden Trades fully satisfy the $1,000 monthly harvest mandate within all risk boundaries."
             ),
             "average_pop_percent": avg_pop,
             "total_collateral_required": total_collateral,

@@ -1,10 +1,13 @@
 import numpy as np
 from typing import Dict, Any
+from functools import lru_cache
 
+@lru_cache(maxsize=8192)
 def std_normal_pdf(x: float) -> float:
     """Standard Normal probability density function."""
-    return np.exp(-0.5 * x**2) / np.sqrt(2 * np.pi)
+    return float(np.exp(-0.5 * x**2) / np.sqrt(2 * np.pi))
 
+@lru_cache(maxsize=8192)
 def std_normal_cdf(x: float) -> float:
     """
     Standard Normal cumulative distribution function.
@@ -30,6 +33,7 @@ def std_normal_cdf(x: float) -> float:
         return float(1.0 - cdf_abs)
 
 
+@lru_cache(maxsize=8192)
 def black_scholes_price(
     S: float,
     K: float,

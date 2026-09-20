@@ -1158,7 +1158,7 @@ export default function WeeklyIntelligencePage() {
                           </span>
                         </div>
                         <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40">
-                          {trade.sub_agent_consensus?.executive_allocator?.golden_trade_label || `Golden Trade #${trade.golden_trade_rank || 1} of 4`}
+                          {trade.sub_agent_consensus?.executive_allocator?.golden_trade_label || `Golden Trade #${trade.golden_trade_rank || 1}`}
                         </span>
                       </div>
 
@@ -1196,10 +1196,10 @@ export default function WeeklyIntelligencePage() {
                             </span>
                           </div>
                           <p className="text-[11px] text-slate-300 leading-snug">
-                            {trade.sub_agent_consensus?.risk_aggregator?.verdict || `Risk cleared. +${trade.max_margin_impact_pct?.toFixed(1) || '1.5'}% margin within 15% limit. 100% full cash collateral ($${(trade.collateral_required || trade.strike * 100).toLocaleString()}) within 50% budget.`}
+                            {trade.sub_agent_consensus?.risk_aggregator?.verdict || `Risk cleared. +${trade.max_margin_impact_pct?.toFixed(1) || '1.5'}% margin within limit. 100% full cash collateral ($${(trade.collateral_required || trade.strike * 100).toLocaleString()}) within budget.`}
                           </p>
                           <span className="text-[10px] text-amber-200 font-mono block">
-                            Sector: {trade.sub_agent_consensus?.risk_aggregator?.sector_clearance || `${trade.sector} (1 of 4)`}
+                            Sector: {trade.sub_agent_consensus?.risk_aggregator?.sector_clearance || `${trade.sector} (Cleared)`}
                           </span>
                         </div>
 

@@ -452,7 +452,7 @@ def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
     staged_sectors: set = set()
     for item in sorted_cand_records:
-        if len(potential_candidates) >= 4:
+        if len(potential_candidates) >= 6:
             break
         sym = item["sym"]
         sec = item["sec"]
@@ -502,7 +502,7 @@ def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
         potential_candidates.append(cand)
         staged_sectors.add(sec)
 
-    logger.info(f"🧠 [ADK Node: synthesizer] Produced {len(potential_candidates)} refined, sector-diversified candidates (Cap: 4).")
+    logger.info(f"🧠 [ADK Node: synthesizer] Produced {len(potential_candidates)} refined, sector-diversified candidates (Cap: 6).")
     return {
         **state,
         "potential_candidates": potential_candidates,
@@ -513,9 +513,9 @@ def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
 @node(name="margin_guardian_gate")
 def margin_guardian_gate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Deterministic Gate Node: Enforces hard 15% margin utilization cap,
+    Deterministic Gate Node: Enforces hard 60% margin utilization cap,
     strict cumulative cash collateral limit (<= 50% available cash),
-    and strictly 4 candidates max.
+    and strictly 6 candidates max.
     Outputs route: 'APPROVED' or 'REJECTED'.
     """
     margin_guardian: MarginGuardian = state.get("margin_guardian") or MarginGuardian()
@@ -527,8 +527,8 @@ def margin_guardian_gate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     rejected_trades: List[Dict[str, Any]] = []
 
     for cand in candidates:
-        if len(validated_trades) >= 4:
-            cand["rejection_reason"] = "STAGED TRADE CEILING: Strictly 4 candidates max."
+        if len(validated_trades) >= 6:
+            cand["rejection_reason"] = "STAGED TRADE CEILING: Strictly 6 candidates max."
             rejected_trades.append(cand)
             continue
 
@@ -580,7 +580,7 @@ def margin_guardian_gate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     route = "APPROVED" if len(validated_trades) > 0 else "REJECTED"
     return {
         **state,
-        "validated_trades": validated_trades[:4],
+        "validated_trades": validated_trades[:6],
         "rejected_trades": rejected_trades,
         "routing_decision": route,
         "step_completed": "margin_guardian_gate"
@@ -591,12 +591,12 @@ def margin_guardian_gate_node(state: Dict[str, Any]) -> Dict[str, Any]:
 def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     Human-In-The-Loop (HITL) Pause Node: Purges stale unapproved proposals and
-    stages strictly the 4 refined candidates into SQLite with 'PROPOSED' status.
+    stages strictly the 4-6 refined candidates into SQLite with 'PROPOSED' status.
     Suspends graph execution, awaiting user 1-click UI or Slack approval.
     """
     trade_staging: TradeStagingEngine = state.get("trade_staging") or TradeStagingEngine()
     week_label: str = state.get("week_label") or f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
-    validated_trades = state.get("validated_trades", [])[:4]
+    validated_trades = state.get("validated_trades", [])[:6]
 
     # Clean up any stale unapproved proposals for this week
     from . import db as database
@@ -604,15 +604,17 @@ def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
 
     # 🏛️ 3 Sub-Agent Dialectical Consensus & Dynamic Contract Sizing Engine
     target_monthly_harvest = 1000.0
-    initial_candidates = validated_trades[:4]
+    initial_candidates = validated_trades[:6]
 
     # Dynamic Sizing Optimization
+    n_active_trades = min(len(initial_candidates), 6)
+    target_per_slot = target_monthly_harvest / max(n_active_trades, 4)  # $250 for 4, $200 for 5, ~$167 for 6
     scaled_basket: List[Dict[str, Any]] = []
     for cand in initial_candidates:
         cand_copy = dict(cand)
         prem = float(cand_copy.get("premium_estimate", 0.0))
         strike = float(cand_copy.get("strike", 0.0))
-        desired_contracts = max(1, min(3, round(250.0 / (prem * 100.0)))) if prem > 0 else 1
+        desired_contracts = max(1, min(4, round(target_per_slot / (prem * 100.0)))) if prem > 0 else 1
         cand_copy["contracts"] = desired_contracts
         cand_copy["collateral_required"] = strike * 100.0 * desired_contracts
         cand_copy["max_margin_impact_pct"] = round(desired_contracts * 1.5, 1)
@@ -667,7 +669,7 @@ def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
             )
         else:
             allocator_status = "GOLDEN_TRADE_DESIGNATED"
-            allocator_label = f"Golden Trade #{rank_idx + 1} of 4"
+            allocator_label = f"Golden Trade #{rank_idx + 1} of {n_active_trades}"
             allocator_decision = (
                 f"ALLOCATOR APPROVAL: Target satisfied. Sized at {contracts} contract(s) generating ${contrib:,.2f} "
                 f"towards the $1,000 monthly harvest goal. Fully cleared against collateral and margin caps."
@@ -702,7 +704,7 @@ def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 "persona": "Risk Aggregator Agent",
                 "status": "APPROVED",
                 "verdict": ra_rationale,
-                "sector_clearance": f"Cleared ({sec} — 1 of 4 distinct GICS sectors)",
+                "sector_clearance": f"Cleared ({sec} — 1 of {n_active_trades} distinct GICS sectors)",
                 "margin_impact": f"+{margin_imp:.1f}%",
                 "collateral_status": f"100% Full Cash Reserved (${collateral:,.2f})"
             },
@@ -726,7 +728,7 @@ def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
         record["sub_agent_consensus"] = sub_agent_consensus
         staged_records.append(record)
 
-    logger.info(f"⏸️ [ADK HITL Node: hitl_staging_gate] Staged strictly {len(staged_records)} refined candidates in SQLite (Cap: 4). Pausing for human authorization.")
+    logger.info(f"⏸️ [ADK HITL Node: hitl_staging_gate] Staged strictly {len(staged_records)} refined candidates in SQLite (Cap: 6). Pausing for human authorization.")
     return {
         **state,
         "staged_trades": staged_records,
