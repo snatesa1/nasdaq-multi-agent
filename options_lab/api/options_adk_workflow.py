@@ -1069,7 +1069,7 @@ class OptionsADKWorkflowEngine:
             # Compute AI Corporate Interlink Cockpit
             interlink_cockpit = InterlinkGraphEngine(use_db_cache=True).synthesize_interlink_cockpit()
 
-            # Assemble $1,000/Month Systematic Wheel Harvest Blotter
+            # Assemble Open-Ended $1,500/Month Systematic Wheel Harvest Blotter
             staged_trades = s5.get("staged_trades", [])
             total_monthly_harvest_dollars = sum(
                 round(t.get("premium_estimate", 0.0) * 100.0 * t.get("contracts", 1), 2)
@@ -1086,12 +1086,12 @@ class OptionsADKWorkflowEngine:
             collateral_util_pct = round((total_collateral / cash_avail * 100.0), 1) if cash_avail > 0 else 0.0
 
             wheel_harvest_blotter = {
-                "monthly_harvest_target": 1000.0,
-                "target_premium_band": "$2.00 - $3.00 ($200 - $300 / contract)",
-                "total_staged_contracts": len(staged_trades),
-                "candidates_cap": 4,
+                "monthly_harvest_target": 1500.0,
+                "target_premium_band": "$1.50 - $3.50 / contract (Strict 30-35 DTE)",
+                "total_staged_contracts": sum(t.get("contracts", 1) for t in staged_trades),
+                "candidates_cap": None,
                 "projected_monthly_harvest_dollars": total_monthly_harvest_dollars,
-                "target_achievement_pct": round((total_monthly_harvest_dollars / 1000.0) * 100.0, 1) if total_monthly_harvest_dollars else 0.0,
+                "target_achievement_pct": round((total_monthly_harvest_dollars / 1500.0) * 100.0, 1) if total_monthly_harvest_dollars else 0.0,
                 "average_pop_percent": avg_pop,
                 "total_collateral_required": round(total_collateral, 2),
                 "max_allowed_collateral": max_allowed_collateral,

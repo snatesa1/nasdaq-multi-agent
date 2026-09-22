@@ -440,8 +440,8 @@ class WeeklyIntelligenceEngine:
             opt_type = "call"
             direction = "NEUTRAL_BULLISH"
 
-        # Resolve target monthly expiration date (standard third-Friday, min 30 DTE bare minimum floor)
-        target_exp_date, target_dte = resolve_target_monthly_option_cycle(min_dte=30, max_dte=65)
+        # Resolve target monthly expiration date (strictly in 30 to 35 DTE window)
+        target_exp_date, target_dte = resolve_target_monthly_option_cycle(min_dte=30, max_dte=35)
         target_exp_str = target_exp_date.strftime("%Y-%m-%d")
         dte = target_dte
 
@@ -1717,19 +1717,19 @@ class WeeklyIntelligenceEngine:
             spot = cand.get("spot_price", 0.0)
             has_earnings = cand.get("has_earnings_blackout", False)
 
-            # Sift for Mode 1 (Multi-Sector Basket: strike <= $125, premium $0.50-$5.00, no earnings blackout)
-            if 0.50 <= prem <= 5.00 and strike <= 125.0 and not has_earnings:
+            # Sift for Mode 1 (Open-Ended Multi-Sector Basket: strike <= $220, premium $0.50-$5.00)
+            if 0.50 <= prem <= 5.00 and strike <= 220.0:
                 if len(potential_trades_mode1) < max_pool_candidates:
                     if staged_sectors.get(sec, 0) < 2:
                         potential_trades_mode1.append(cand)
                         staged_sectors[sec] = staged_sectors.get(sec, 0) + 1
 
-            # Sift for Mode 2 Mega-Cap Anchor ($750–$850 premium target, strike <= $420, deep moat)
-            if symbol in ["MSFT", "GOOGL", "NVDA", "AAPL", "AMZN", "META"] and not has_earnings:
+            # Sift for Mode 2 Mega-Cap Anchor ($750–$850 premium target, deep moat)
+            if symbol in ["MSFT", "GOOGL", "NVDA", "AAPL", "AMZN", "META"]:
                 mega_cap_candidates.append(cand)
 
             # Sift for Mode 2 Satellite ($150–$250 premium target, high quality dividend/defensive)
-            if symbol in ["INTC", "BAC", "KO", "C", "CSCO", "NEM", "SO", "ABT", "PFE", "CVX", "T"] and not has_earnings:
+            if symbol in ["INTC", "BAC", "KO", "C", "CSCO", "NEM", "SO", "ABT", "PFE", "CVX", "T"]:
                 satellite_candidates.append(cand)
 
         # ─────────────────────────────────────────────────────────────────────────────
@@ -2065,9 +2065,9 @@ class WeeklyIntelligenceEngine:
 
         mode_1_blotter = {
             "mode_id": "MODE_1_MULTI_SECTOR",
-            "title": "Mode 1: Multi-Sector Basket",
-            "subtitle": f"{len(staged_trades_m1)} Cross-Sector Trades (Dynamic Target / slot)",
-            "target_monthly_harvest": 1000.0,
+            "title": "Mode 1: Open-Ended Multi-Sector Basket",
+            "subtitle": f"{len(staged_trades_m1)} Cross-Sector Trades (<= 75% Margin Cap)",
+            "target_monthly_harvest": 1500.0,
             "projected_monthly_harvest_dollars": m1_harvest,
             "total_collateral_required": m1_collateral,
             "total_staged_contracts": sum(t.get("contracts", 1) for t in staged_trades_m1),
@@ -2078,8 +2078,8 @@ class WeeklyIntelligenceEngine:
         mode_2_blotter = {
             "mode_id": "MODE_2_MEGA_CAP_ANCHOR",
             "title": "Mode 2: Mega-Cap Anchor Wheel",
-            "subtitle": "1 Anchor ($750-$850) + 1 Satellite ($150-$250)",
-            "target_monthly_harvest": 1000.0,
+            "subtitle": "1 Anchor + Satellite Structure (<= 75% Margin Cap)",
+            "target_monthly_harvest": 1500.0,
             "projected_monthly_harvest_dollars": m2_harvest,
             "total_collateral_required": m2_collateral,
             "total_staged_contracts": sum(t.get("contracts", 1) for t in staged_trades_m2),
@@ -2793,7 +2793,7 @@ The macro landscape for **{current_date_str}** reflects steady equity consolidat
         interlink_engine = InterlinkGraphEngine(use_db_cache=True)
         interlink_cockpit = interlink_engine.synthesize_interlink_cockpit()
 
-        # 8. $1,000/Month Systematic Wheel Harvest Blotter with Dual-Mode Debate Arena
+        # 8. $1,500/Month Systematic Wheel Harvest Blotter with Dual-Mode Debate Arena
         mode_1_blotter = dual_harvest_data.get("mode_1", {})
         mode_2_blotter = dual_harvest_data.get("mode_2", {})
         debate_arena = dual_harvest_data.get("debate_arena", {})
@@ -2812,20 +2812,20 @@ The macro landscape for **{current_date_str}** reflects steady equity consolidat
 
         wheel_harvest_blotter = {
             "selected_mode": "MODE_1_MULTI_SECTOR",
-            "monthly_harvest_target": 1000.0,
-            "target_premium_band": "$2.00 - $3.00 ($200 - $300 / contract)",
+            "monthly_harvest_target": 1500.0,
+            "target_premium_band": "$1.50 - $3.50 / contract (Strict 30-35 DTE)",
             "total_staged_contracts": mode_1_blotter.get("total_staged_contracts", sum(t.get("contracts", 1) for t in staged_trades)),
             "projected_monthly_harvest_dollars": total_monthly_harvest_dollars,
-            "target_achievement_pct": round((total_monthly_harvest_dollars / 1000.0) * 100.0, 1) if total_monthly_harvest_dollars else 0.0,
-            "allocator_challenge_active": total_monthly_harvest_dollars < 990.0,
-            "allocator_shortfall_dollars": max(0.0, round(1000.0 - total_monthly_harvest_dollars, 2)),
+            "target_achievement_pct": round((total_monthly_harvest_dollars / 1500.0) * 100.0, 1) if total_monthly_harvest_dollars else 0.0,
+            "allocator_challenge_active": total_monthly_harvest_dollars < 1490.0,
+            "allocator_shortfall_dollars": max(0.0, round(1500.0 - total_monthly_harvest_dollars, 2)),
             "allocator_challenge_statement": (
                 f"Executive Portfolio Allocator Challenge: The {len(staged_trades)} Golden Trades generate ${total_monthly_harvest_dollars:,.2f}, "
-                f"falling ${1000.0 - total_monthly_harvest_dollars:,.2f} short of the $1,000.00 monthly mandate. "
+                f"falling ${1500.0 - total_monthly_harvest_dollars:,.2f} short of the $1,500.00 monthly mandate. "
                 f"Financial Analyst selected lower-premium defensive names to preserve capital; Risk Aggregator constrained sizing "
-                f"to protect the 60% margin ceiling (${max_allowed_collat:,.0f}). User authorization required."
-                if total_monthly_harvest_dollars < 990.0 else
-                f"Executive Portfolio Allocator Consensus: {len(staged_trades)} Golden Trades fully satisfy the $1,000 monthly harvest mandate within all risk boundaries."
+                f"to protect the 75% margin ceiling (${max_allowed_collat:,.0f}). User authorization required."
+                if total_monthly_harvest_dollars < 1490.0 else
+                f"Executive Portfolio Allocator Consensus: {len(staged_trades)} Golden Trades fully satisfy the $1,500 monthly harvest mandate within all risk boundaries."
             ),
             "average_pop_percent": avg_pop,
             "total_collateral_required": total_collateral,

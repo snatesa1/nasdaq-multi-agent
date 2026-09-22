@@ -1712,14 +1712,14 @@ class SaxoClient:
                         selected_space_meta = item
                         break
 
-            # Priority 2: Standard third-week monthly Friday within 28-35 calendar DTE
+            # Priority 2: Option Friday strictly within 30-35 calendar DTE (closest to 32 DTE)
             if not selected_space_meta:
-                monthly_candidates = [
+                window_candidates = [
                     item for item in parsed_spaces
-                    if item["is_friday"] and item["is_third_week"] and 28 <= item["cal_dte"] <= 45
+                    if item["is_friday"] and 30 <= item["cal_dte"] <= 35
                 ]
-                if monthly_candidates:
-                    selected_space_meta = min(monthly_candidates, key=lambda x: abs(x["cal_dte"] - dte))
+                if window_candidates:
+                    selected_space_meta = min(window_candidates, key=lambda x: abs(x["cal_dte"] - 32))
 
             # Priority 3: Nearest calendar DTE >= 25 days
             if not selected_space_meta:
