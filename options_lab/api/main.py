@@ -842,16 +842,14 @@ def set_broker_token(payload: Dict[str, Any] = Body(...), user=Depends(verify_fi
 
     if code:
         data = saxo_broker_client.exchange_code_for_token(code)
-        database.clear_saxo_cache()
         log_progress("OAuth Code Exchange", "SUCCESS", "Saxo code exchanged for tokens successfully.")
-        return {"status": "SUCCESS", "message": "Live Saxo OAuth token successfully exchanged!", "data": data}
+        return {"status": "SUCCESS", "message": "Live Saxo OAuth token successfully exchanged!", "data": data, "has_access_token": True}
 
     if token:
         saxo_broker_client.set_token(token, refresh_token)
         saxo_broker_client._persist_tokens()
-        database.clear_saxo_cache()
         log_progress("Token Configuration", "SUCCESS", f"Developer token applied manually (Length: {len(token)})")
-        return {"status": "SUCCESS", "message": "Live Saxo token successfully registered!", "environment": settings.SAXO_ENV}
+        return {"status": "SUCCESS", "message": "Live Saxo token successfully registered!", "environment": settings.SAXO_ENV, "has_access_token": True}
 
     log_progress("Token Configuration", "ERROR", "Token set request failed due to missing params.")
     raise HTTPException(status_code=400, detail="Missing 'token' or 'code' parameter.")

@@ -855,9 +855,47 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
           * All tests in `test_socratic_session.py` passed (4/4).
           * `test_broker_api.py` validated account balances, 7 live positions, 15 orders, and safety shield blocking in <10s.
           * Next.js production build (`npm run build`) compiled 17/17 routes successfully.
+    25. **Saxo OpenAPI Instrument Resolution, Timeout Elimination, and Immediate Dashboard Navigation (2026-09-21)**:
+        - **Root Cause of `INST-` Identifiers & Timeout Cascades**:
+          * In `saxo_client.py:_make_authenticated_request`, `timeout=self.timeout` was hardcoded while also forwarding `**kwargs`. When `get_instrument_details` called it with `timeout=5.0`, Python raised `TypeError: requests.sessions.Session.request() got multiple values for keyword argument 'timeout'`.
+          * The exception handler caught this and returned `fallback = {"Symbol": f"INST-{uic}", ...}`, and permanently cached that fallback in `_instrument_cache`.
+          * When `get_positions` received `clean_sym = "INST-60098901"`, `resolve_accurate_position_pricing` attempted to query Yahoo Finance for each `INST-*` identifier. Each failed query hung for ~3s before 404-ing, causing an cumulative 21-second delay that breached the 15s asyncio timeout in `main.py:refresh_broker_data`.
+          * In `main.py:set_broker_token`, `database.clear_saxo_cache()` wiped the SQLite cache before live data was fetched, eliminating the fallback cache.
+          * In `page.tsx`, entering a developer token did not immediately navigate to the dashboard; it awaited the blocking `refreshBrokerData()` call, trapping the user on the connection screen if a timeout occurred.
+        - **Architectural Fixes**:
+          * **Kwargs Timeout Extraction (`saxo_client.py`)**: Updated `_make_authenticated_request` to extract `req_timeout = kwargs.pop("timeout", self.timeout)` so custom timeouts never cause parameter collision.
+          * **Multi-Tiered Instrument Resolution (`saxo_client.py`)**:
+            1. Fast-path `KNOWN_STOCK_UICS` (0ms).
+            2. Persistent SQLite instrument cache in `saxo_cache` (`inst_{uic}_{asset_type}`, <1ms).
+            3. Live OpenAPI query with HTTP 200 persistence.
+            4. Fallback `INST-{uic}` is NEVER cached in memory or database on transient failures.
+          * **Position Pricing Guard (`saxo_client.py`)**: Guarded `resolve_accurate_position_pricing` to immediately bypass Yahoo Finance when symbol starts with `INST-` or is invalid.
+          * **Cache Preservation on Token Set (`main.py`)**: Removed premature `database.clear_saxo_cache()` in `set_broker_token` so existing cache serves as an immediate safety net until overwritten by live data.
+          * **Optimistic Immediate Dashboard Navigation (`page.tsx`)**: In `handleSetDevToken`, `handleAutoLinkClipboard`, and `handleFocusCheck`, immediately set `setIsAuthenticated(true)` and `setLoading(false)` upon receiving successful token registration, delegating broker telemetry refresh to a non-blocking background task.
+          * **Corrupted Cache Purge**: Executed targeted cleanup of corrupted records containing `INST-` across `positions`, `orders`, `order_blotter`, and weekly briefings in `optionslab.db`.
+        - **Automated Validation**:
+          * Verified all 7 live positions resolve authentic tickers: `GOOGL`, `COIN`, `INTC`, `COIN`, `O9A`, `ES3`, `PLUG`.
+          * Verified live order blotter aggregates authentic tickers (`CSCO`, `INTC`, `BAC`, `NEM`, `PLTR_US`).
+          * Verified `asyncio.gather` concurrent broker refresh completes in ~4.8s with 0 timeouts, 0 warnings, and 0 errors.
+    26. **Autonomous Dialectical Multi-Agent Wheel Overhaul: Open-Ended $1,500/Mo Max-Harvest, <= 75% Margin Ceiling & Strict 30–35 DTE Window (2026-09-22)**:
+        - **Architectural & Business Logic Revamp**:
+          * **Open-Ended Max-Harvest Model**: Eliminated legacy 4-candidate and 6-candidate caps across `MarginGuardian`, `SafetyShield`, and `OptionsADKWorkflow`. The system now dynamically scales contract sizing (1 to 4+ contracts) and stages all qualifying sector candidates up to the **75.0% total capital portfolio margin ceiling** towards an ambitious **$1,500/month milestone** (scaled up from $1,000).
+          * **Strict 30–35 DTE Target Window**: Tightened options expiration scanning (`resolve_target_monthly_option_cycle(min_dte=30, max_dte=35)`) and Greeks evaluation. Searches all authentic Friday cycles within 30 to 35 DTE (targeting center at 32 DTE) to maximize theta time decay acceleration while minimizing assignment risk.
+          * **Winning Trade History & Watchlist Affinity Prioritization**: Integrated historical winning trades from `saxo_options_history` and `staged_trades` (e.g. profitable CSP repetitions on tickers like INTC or COIN) and active watchlist tickers (+35 winning bonus, +20 watchlist bonus). Relaxed rigid 1-trade-per-GICS-sector lockouts to permit up to 2 high-conviction trades per sector.
+          * **Trend & Momentum Alignment**: In `tech_volatility_node`, calculated 20-day EMA support levels, momentum scores, and price-to-trend ratios, penalizing falling knives while boosting upward-trending underlying assets.
+          * **3-Persona Dialectical Consensus Orchestration**: Calibrated the dialectical interplay between Financial Analyst, Risk Aggregator, and Executive Allocator to evaluate cumulative portfolio margin (<= 75%), cash buffer, and harvest milestones without premature rubber-stamping.
+        - **Frontend Cockpit Alignment (`weekly-intelligence/page.tsx`)**:
+          * Updated blotter tab, headers, badges, and Monthly Goal card to reflect `$1,500.00` monthly harvest goal.
+          * Calibrated margin utilization progress bar to 75.0% capacity ceiling with amber alert at 65.0%.
+          * Updated badges to `Open-Ended Harvesting (<= 75% Margin Cap)` and `Strict 30–35 DTE (Theta Acceleration)`.
+        - **Automated Validation**:
+          * `test_dialectical_consensus.py`: Passed 100%.
+          * `test_wheel_dte_constraints.py`: Passed 3/3 tests (safety shield, wheel engine, weekly intelligence).
+          * Full backend test suite: 13/13 tests passed cleanly (`test_socratic_session.py`, `test_trade_approval_resilience.py`, `test_dialectical_consensus.py`, `test_wheel_dte_constraints.py`).
+          * Next.js production build (`npm run build`): Successfully generated all 17 static pages with 0 errors.
 
 ## 📊 Antigravity Usage Stats
-> Last Updated: 2026-09-20 13:05:00 SGT
+> Last Updated: 2026-09-22 21:18:00 SGT
 
 | Metric | Current Session |
 | :--- | :--- |

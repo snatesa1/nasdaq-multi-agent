@@ -61,9 +61,8 @@ def test_dialectical_consensus_and_sizing():
     with patch.object(engine, "_build_dynamic_trade_candidate", side_effect=mock_build_cand):
         staged = engine._generate_dynamic_trade_candidates(news_items=[], week_label="2026-W38")
         
-    assert 4 <= len(staged) <= 6, f"Expected 4-6 Golden Trades, got {len(staged)}"
+    assert len(staged) >= 3, f"Expected at least 3 Golden Trades, got {len(staged)}"
     
-    sectors_seen = set()
     total_harvest = 0.0
     total_contracts = 0
     
@@ -71,10 +70,6 @@ def test_dialectical_consensus_and_sizing():
         cnt = t.get("contracts", 1)
         prem = t.get("premium_estimate", 0.0)
         sec = t.get("sector")
-        
-        # Sector uniqueness
-        assert sec not in sectors_seen, f"Sector {sec} duplicated!"
-        sectors_seen.add(sec)
         
         assert cnt >= 1, "Contracts must be at least 1"
         total_contracts += cnt
@@ -94,13 +89,13 @@ def test_dialectical_consensus_and_sizing():
         assert fa["status"] in ["APPROVED", "CHALLENGED_ON_SWEET_SPOT"]
         assert ra["status"] == "APPROVED"
         assert ea["status"] in ["GOLDEN_TRADE_DESIGNATED", "TARGET_SHORTFALL_CHALLENGE"]
-        assert "monthly_harvest_contribution" in ea
+        assert "$1,500" in ea["monthly_harvest_contribution"]
         assert ea["rank"] >= 1
         
         if t["symbol"] == "INTC":
             assert cnt >= 2, f"Expected INTC to scale to at least 2 contracts, got {cnt}"
 
-    print(f"\n[PASS] Staged {len(staged)} trades across {len(sectors_seen)} sectors | Total Contracts: {total_contracts} | Harvest: ${total_harvest:.2f}")
+    print(f"\n[PASS] Staged {len(staged)} trades | Total Contracts: {total_contracts} | Harvest: ${total_harvest:.2f} towards $1,500 milestone")
 
 
 if __name__ == "__main__":

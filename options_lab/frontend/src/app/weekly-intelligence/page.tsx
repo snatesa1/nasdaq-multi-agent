@@ -7,7 +7,7 @@
  *   Comprehensive institutional cockpit orchestrating weekly macroeconomic intelligence,
  *   a 4-Dimensional Macro Direction Compass, an AI Corporate Interlink Cockpit (GAAP DSI
  *   and 3-factor quantitative scores), 4-Tier Capital Allocation Scenarios (80/20, 60/40, 50/50, 20/80),
- *   and a disciplined $1,000/Month Systematic Wheel Harvest Blotter with pre-flight contract verification.
+ *   and an open-ended $1,500/Month Systematic Wheel Harvest Blotter with pre-flight contract verification.
  * 
  * Component Architecture & State Encapsulation:
  *   - activeTab ('blotter' | 'compass' | 'interlink' | 'scenarios' | 'briefing'): Controls active cockpit view.
@@ -455,7 +455,7 @@ export default function WeeklyIntelligencePage() {
                 Weekly Macro Intelligence &amp; <span className="text-[#4051B5]">Trade Command Center</span>
               </h1>
               <p className="text-slate-500 text-xs sm:text-sm leading-relaxed">
-                4-Dimensional Macro Compass, AI Corporate Interlink Contagion, 4-Tier Capital Scenarios, and $1,000/Mo Systematic Wheel Harvest ($2.00–$3.00 sweet spot) within strict 15% margin caps.
+                4-Dimensional Macro Compass, AI Corporate Interlink Contagion, 4-Tier Capital Scenarios, and Open-Ended $1,500/Mo Systematic Wheel Harvest within strict 75% margin caps.
               </p>
             </div>
 
@@ -559,43 +559,43 @@ export default function WeeklyIntelligencePage() {
             <span className="text-[11px] text-slate-400 block font-medium">Weighted 4-Factor Scale (-100 to +100)</span>
           </div>
 
-          {/* $1,000/Mo Wheel Harvest Target */}
+          {/* $1,500/Mo Wheel Harvest Target (Open-Ended) */}
           <div className="velzon-card p-5 bg-white border border-slate-200/80 rounded-xl shadow-sm space-y-1">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">$1,000/Mo Wheel Harvest</span>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">$1,500/Mo Wheel Harvest</span>
               <DollarSign className="h-5 w-5 text-emerald-600" />
             </div>
             <div className="flex items-baseline gap-2">
               <span className="text-2xl font-bold font-mono text-emerald-700">
-                ${wheelBlotter?.projected_monthly_harvest_dollars?.toFixed(2) || '1,050.00'}
+                ${wheelBlotter?.projected_monthly_harvest_dollars?.toFixed(2) || '1,500.00'}
               </span>
               <span className="text-xs font-semibold text-slate-500">
-                / $1,000 Goal ({wheelBlotter?.target_achievement_pct || 105.0}%)
+                / $1,500 Goal ({wheelBlotter?.target_achievement_pct || 100.0}%)
               </span>
             </div>
             <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
               <div 
                 className="h-full bg-emerald-500 transition-all duration-500"
-                style={{ width: `${Math.min(100, (wheelBlotter?.target_achievement_pct || 105.0))}%` }}
+                style={{ width: `${Math.min(100, (wheelBlotter?.target_achievement_pct || 100.0))}%` }}
               />
             </div>
           </div>
 
-          {/* Margin Utilization */}
+          {/* Margin Utilization (75% Max Cap) */}
           <div className="velzon-card p-5 bg-white border border-slate-200/80 rounded-xl shadow-sm space-y-2">
             <div className="flex items-center justify-between">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Margin Utilization</span>
               <ShieldCheck className="h-5 w-5 text-emerald-600" />
             </div>
             <div className="flex items-baseline gap-2">
-              <span className={`text-2xl font-bold font-mono ${marginPct > 15 ? 'text-rose-600' : 'text-emerald-600'}`}>
+              <span className={`text-2xl font-bold font-mono ${marginPct > maxLimitPct ? 'text-rose-600' : (marginPct > 65 ? 'text-amber-600' : 'text-emerald-600')}`}>
                 {marginPct.toFixed(1)}%
               </span>
               <span className="text-slate-400 text-xs font-medium">/ {maxLimitPct.toFixed(1)}% Cap</span>
             </div>
             <div className="w-full bg-slate-100 h-2 rounded-full overflow-hidden">
               <div 
-                className={`h-full transition-all duration-500 ${marginPct > 12 ? 'bg-amber-500' : 'bg-emerald-500'}`}
+                className={`h-full transition-all duration-500 ${marginPct > 65 ? 'bg-amber-500' : 'bg-emerald-500'}`}
                 style={{ width: `${Math.min(100, (marginPct / maxLimitPct) * 100)}%` }}
               />
             </div>
@@ -628,7 +628,7 @@ export default function WeeklyIntelligencePage() {
             }`}
           >
             <DollarSign className="h-4 w-4" />
-            <span>🎯 $1,000/Mo Wheel Harvest Blotter</span>
+            <span>🎯 $1,500/Mo Wheel Harvest Blotter</span>
             <span className={`px-2 py-0.5 rounded-full text-[10px] font-mono ${
               activeTab === 'blotter' ? 'bg-white/20 text-white' : 'bg-indigo-50 text-[#4051B5]'
             }`}>
@@ -706,7 +706,7 @@ export default function WeeklyIntelligencePage() {
         </div>
 
         {/* ═══════════════════════════════════════════════════════════════════ */}
-        {/* TAB 1: $1,000/MONTH SYSTEMATIC WHEEL HARVEST BLOTTER                 */}
+        {/* TAB 1: $1,500/MONTH SYSTEMATIC WHEEL HARVEST BLOTTER                 */}
         {/* ═══════════════════════════════════════════════════════════════════ */}
         {activeTab === 'blotter' && (
           <div className="space-y-6">
@@ -876,13 +876,13 @@ export default function WeeklyIntelligencePage() {
                     <div>
                       <h2 className="text-base font-bold text-slate-800">
                         {selectedHarvestMode === 'mode_1'
-                          ? 'Mode 1: Multi-Sector $1,000/Month Systematic Wheel Harvest Blotter'
-                          : 'Mode 2: Mega-Cap Anchor $1,000/Month Systematic Wheel Harvest Blotter'}
+                          ? 'Mode 1: Open-Ended $1,500/Month Systematic Wheel Harvest Blotter'
+                          : 'Mode 2: Mega-Cap Anchor $1,500/Month Systematic Wheel Harvest Blotter'}
                       </h2>
                       <p className="text-xs text-slate-500">
                         {selectedHarvestMode === 'mode_1'
-                          ? 'Strict sweet-spot targeting: $2.00–$3.00 premium ($200–$300/contract) across 4 high-conviction sector-diversified candidates.'
-                          : 'High-conviction Mega-Cap Anchor ($750–$850) + 1 Satellite ($150–$250) targeting $1,000 total premium.'}
+                          ? 'Strict 30–35 DTE targeting: Open-ended harvest scaled dynamically up to 75% margin ceiling with winning trade history & watchlist priority.'
+                          : 'High-conviction Mega-Cap Anchor + Satellite structure targeting $1,500 total premium.'}
                       </p>
                     </div>
                   </div>
@@ -890,10 +890,10 @@ export default function WeeklyIntelligencePage() {
 
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="px-3 py-1 rounded-lg bg-indigo-50 text-[#4051B5] font-mono text-xs font-bold border border-indigo-200">
-                    {selectedHarvestMode === 'mode_1' ? 'Strict 4-Candidate Cap (Cross-Sector)' : '2-Position Anchor Structure'}
+                    {selectedHarvestMode === 'mode_1' ? 'Open-Ended Harvesting (<= 75% Margin Cap)' : 'Anchor + Satellite Structure'}
                   </span>
                   <span className="px-3 py-1 rounded-lg bg-emerald-100/80 text-emerald-800 font-mono text-xs font-bold border border-emerald-300">
-                    Monthly 28–45 DTE (3rd Week Friday)
+                    Strict 30–35 DTE (Theta Acceleration)
                   </span>
                   <span className="px-3 py-1 rounded-lg bg-amber-50 text-amber-800 font-mono text-xs font-bold border border-amber-200">
                     100% Cash Secured ($K * 100)
@@ -904,7 +904,7 @@ export default function WeeklyIntelligencePage() {
               <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 pt-4 text-xs">
                 <div className="p-3 bg-white rounded-xl border border-slate-200/70 shadow-2xs">
                   <span className="text-[10px] text-slate-400 font-bold uppercase block">Monthly Goal</span>
-                  <span className="text-base font-mono font-bold text-slate-800">$1,000.00</span>
+                  <span className="text-base font-mono font-bold text-slate-800">$1,500.00</span>
                 </div>
                 <div className="p-3 bg-white rounded-xl border border-slate-200/70 shadow-2xs">
                   <span className="text-[10px] text-slate-400 font-bold uppercase block">Projected Harvest</span>
@@ -1252,7 +1252,7 @@ export default function WeeklyIntelligencePage() {
                           </p>
                           <div className="flex flex-wrap items-center justify-between gap-1 pt-1 border-t border-white/10">
                             <span className="text-[10px] text-emerald-300 font-mono font-bold">
-                              {trade.sub_agent_consensus?.executive_allocator?.monthly_harvest_contribution || `$${(trade.premium_estimate * 100).toFixed(2)} towards $1,000 goal`}
+                              {trade.sub_agent_consensus?.executive_allocator?.monthly_harvest_contribution || `$${(trade.premium_estimate * 100).toFixed(2)} towards $1,500 goal`}
                             </span>
                             {trade.sub_agent_consensus?.executive_allocator?.target_harvest_gap && (
                               <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-mono font-bold">
@@ -1988,7 +1988,7 @@ export default function WeeklyIntelligencePage() {
                         direction: "DOWN" as const,
                         bias: "NEUTRAL" as const,
                         driver: "Systemic equity implied volatility compressed near median levels, favoring disciplined net-seller premium harvesting.",
-                        options_stance: "Systematic Wheel Harvest targeting $1,000/mo ($200-$300/contract) with strict 15% portfolio margin limits."
+                        options_stance: "Open-Ended Wheel Harvest targeting $1,500/mo with strict 75% portfolio margin limits."
                       }
                     ]).map((row, idx) => {
                       const isUp = row.direction === 'UP';

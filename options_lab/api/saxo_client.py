@@ -103,7 +103,7 @@ def resolve_accurate_position_pricing(
         current_price = None
         if saxo_current_price and float(saxo_current_price) > 0.0:
             current_price = float(saxo_current_price)
-        else:
+        elif clean_sym and not clean_sym.startswith("INST-") and clean_sym != "UNKNOWN":
             try:
                 import yfinance as yf
                 from options_lab.engine.black_scholes import black_scholes_price
@@ -123,6 +123,8 @@ def resolve_accurate_position_pricing(
             except Exception as e_bs:
                 logger.debug(f"Option BS calculation fallback for {clean_sym}: {e_bs}")
                 current_price = open_price
+        else:
+            current_price = open_price
 
         if current_price is None:
             current_price = open_price
@@ -142,6 +144,11 @@ def resolve_accurate_position_pricing(
             market_val = current_price * amount
             pnl = float(saxo_pnl) if saxo_pnl is not None else (current_price - open_price) * amount
             pnl_pct = (pnl / cost_basis) * 100.0 if cost_basis > 0 else 0.0
+        elif not clean_sym or clean_sym.startswith("INST-") or clean_sym == "UNKNOWN":
+            current_price = open_price
+            market_val = round(open_price * amount, 2)
+            pnl = 0.0
+            pnl_pct = 0.0
         else:
             # Handle unpriced or synthetic closed-market zero marks (e.g. SGX ETFs O9A, ES3)
             lookup_sym = f"{clean_sym}.SI" if clean_sym in ["O9A", "ES3", "D05", "Z74", "U11", "O39"] else clean_sym
@@ -497,12 +504,13 @@ class SaxoClient:
             raise ValueError("Saxo session expired. Re-authorization required via OAuth.")
         self._ensure_valid_token()
         url = f"{self.base_url}{path}" if not path.startswith("http") else path
+        req_timeout = kwargs.pop("timeout", self.timeout)
         try:
-            response = self.session.request(method, url, headers=self._get_headers(), timeout=self.timeout, **kwargs)
+            response = self.session.request(method, url, headers=self._get_headers(), timeout=req_timeout, **kwargs)
             if response.status_code == 401 and self.refresh_token:
                 logger.info("Saxo API returned 401 Unauthorized. Auto-refreshing OAuth session...")
                 self.refresh_access_token()
-                response = self.session.request(method, url, headers=self._get_headers(), timeout=self.timeout, **kwargs)
+                response = self.session.request(method, url, headers=self._get_headers(), timeout=req_timeout, **kwargs)
             elif response.status_code == 401:
                 self.needs_reauth = True
                 logger.warning("Saxo API returned 401 and no refresh token available. Re-auth required.")
@@ -511,7 +519,7 @@ class SaxoClient:
             if ("401" in str(e) or "missing" in str(e).lower()) and self.refresh_token:
                 logger.info("Token issue caught. Auto-refreshing OAuth session...")
                 self.refresh_access_token()
-                return self.session.request(method, url, headers=self._get_headers(), timeout=self.timeout, **kwargs)
+                return self.session.request(method, url, headers=self._get_headers(), timeout=req_timeout, **kwargs)
             raise
 
 
@@ -1294,6 +1302,30 @@ class SaxoClient:
         if cache_key in self._instrument_cache:
             return self._instrument_cache[cache_key]
 
+        # Fast path 1: Pre-verified Saxo stock & ETF UIC mappings (0ms lookup)
+        for stock_sym, stock_data in self.KNOWN_STOCK_UICS.items():
+            if stock_data.get("uic") == uic:
+                res = {
+                    "Uic": uic,
+                    "Identifier": uic,
+                    "Symbol": stock_data.get("saxo_symbol", stock_sym),
+                    "Description": stock_data.get("name", f"{stock_sym} Stock"),
+                    "AssetType": asset_type,
+                    "CurrencyCode": "USD"
+                }
+                self._instrument_cache[cache_key] = res
+                return res
+
+        # Fast path 2: Query SQLite persistent instrument cache (<1ms lookup)
+        try:
+            from options_lab.api import db as database
+            db_cached = database.get_saxo_cache(f"inst_{cache_key}")
+            if db_cached and isinstance(db_cached, dict) and not db_cached.get("is_fallback"):
+                self._instrument_cache[cache_key] = db_cached
+                return db_cached
+        except Exception:
+            pass
+
         fallback = {"Symbol": f"INST-{uic}", "Description": f"Instrument {uic}", "CurrencyCode": "USD", "is_fallback": True}
         if not self.access_token or uic <= 0:
             return fallback
@@ -1308,12 +1340,16 @@ class SaxoClient:
                 data = response.json()
                 if isinstance(data, dict):
                     self._instrument_cache[cache_key] = data
+                    try:
+                        from options_lab.api import db as database
+                        database.set_saxo_cache(f"inst_{cache_key}", data)
+                    except Exception:
+                        pass
                     return data
         except Exception as e:
             logger.debug(f"Instrument lookup for UIC {uic} failed: {e}")
 
-        # Cache fallback to prevent repeated failing requests for the same UIC
-        self._instrument_cache[cache_key] = fallback
+        # Do not cache fallback in _instrument_cache to prevent permanent poisoning on transient errors
         return fallback
 
     # Authentic verified Saxo Stock UIC mappings for US equities & ETFs

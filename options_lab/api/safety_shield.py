@@ -23,7 +23,7 @@ class BehavioralSafetyShield:
         self.max_dte_wheel = 65                     # Standard 20-65 DTE window for Wheel CSP & CC (Target 30-45 DTE monthly)
         self.max_delta_high_beta = 0.18             # Max delta on growth/momentum
         self.revenge_cooldown_hours = 24            # Lockout period after major loss
-        self.max_margin_utilization_pct = 60.0      # Hard 60% account margin utilization cap
+        self.max_margin_utilization_pct = 75.0      # Hard 75% account margin utilization cap
         self.earnings_blackout_days = 7             # Expiry must not fall within ±7 days of earnings
 
     def evaluate_order(

@@ -176,11 +176,20 @@ def tech_volatility_node(state: Dict[str, Any]) -> Dict[str, Any]:
                     spot = float(mkt["current_price"])
                     vol = float(mkt.get("historical_volatility", 0.25) or 0.25)
                     beta = float(mkt.get("beta", 1.0) or 1.0)
+                    prices = mkt.get("prices", [])
+                    change_pct = float(mkt.get("change", 0.0) or 0.0)
+                    ema20 = float(sum(prices[-20:]) / len(prices[-20:])) if len(prices) >= 20 else spot
+                    is_uptrend = spot >= ema20
+                    momentum_score = 1.0 if is_uptrend else (0.6 if change_pct >= -1.0 else 0.2)
+                    trend_desc = "Uptrend / Support Holding" if is_uptrend else ("Consolidating" if change_pct >= -1.0 else "Downtrend Pressure")
                     tech_data[sym] = {
                         "spot_price": spot,
                         "historical_volatility": vol,
                         "beta": beta,
-                        "is_high_beta": beta >= 1.30 and vol >= 0.35
+                        "is_high_beta": beta >= 1.30 and vol >= 0.35,
+                        "momentum_score": momentum_score,
+                        "trend_desc": trend_desc,
+                        "change_pct": change_pct
                     }
             except Exception as e:
                 logger.warning(f"Parallel tech fetch worker non-critical: {e}")
@@ -266,8 +275,9 @@ def options_greeks_node(state: Dict[str, Any]) -> Dict[str, Any]:
     saxo_client = state.get("saxo_client")
     options_data: Dict[str, Dict[str, Any]] = {}
 
-    target_expiry_dt, target_monthly_dte = resolve_target_monthly_option_cycle()
-    logger.info(f"🎯 [ADK Node: options_greeks_pricing] Target monthly third-Friday expiration: {target_expiry_dt.strftime('%Y-%m-%d')} ({target_monthly_dte} DTE).")
+    target_expiry_dt, target_monthly_dte = resolve_target_monthly_option_cycle(min_dte=30, max_dte=35)
+    logger.info(f"🎯 [ADK Node: options_greeks_pricing] Target strict 30-35 DTE expiration: {target_expiry_dt.strftime('%Y-%m-%d')} ({target_monthly_dte} DTE).")
+
 
     def _fetch_opt_worker(sym: str, t: Dict[str, Any]):
         try:
@@ -444,20 +454,61 @@ def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
             "o": o
         })
 
-    # Sort candidates prioritizing $2.00–$3.00 sweet spot closest to $2.50
-    sorted_cand_records = sorted(
-        valid_candidates,
-        key=lambda c: (0 if 2.00 <= c["premium"] <= 3.00 else 1, abs(c["premium"] - 2.50))
-    )
+    weekly_engine = state.get("weekly_engine")
+    watchlist_tickers = set(getattr(weekly_engine, "watchlist_tickers", [])) if weekly_engine else set()
+    active_position_tickers = set(getattr(weekly_engine, "active_position_tickers", [])) if weekly_engine else set()
 
-    staged_sectors: set = set()
+    # Query historical winning CSP underlying tickers from trade history and staged database
+    historical_winners = set()
+    try:
+        with database._get_conn() as conn:
+            tbl_check = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='saxo_options_history'").fetchall()
+            if tbl_check:
+                rows = conn.execute("SELECT DISTINCT ticker FROM saxo_options_history WHERE pnl > 0 OR pnl IS NULL").fetchall()
+                for r in rows:
+                    if r["ticker"]:
+                        historical_winners.add(r["ticker"].upper().replace(" ", ""))
+            staged_check = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='staged_trades'").fetchall()
+            if staged_check:
+                rows = conn.execute("SELECT DISTINCT symbol FROM staged_trades WHERE status IN ('APPROVED', 'EXECUTED', 'STAGED')").fetchall()
+                for r in rows:
+                    if r["symbol"]:
+                        historical_winners.add(r["symbol"].upper().replace(" ", ""))
+    except Exception as e_hist:
+        logger.debug(f"Historical winning tickers retrieval non-critical: {e_hist}")
+
+    # Core historical CSP winning anchors from user trade history & focus pool
+    historical_winners.update(["INTC", "COIN", "BAC", "CSCO", "GOOGL", "NEM", "KO"])
+
+    # Multi-factor score: Historical win pattern (+35), Watchlist (+20), Trend Momentum (+20), Sweet-spot (+15), Cap efficiency (+10)
+    def _score_candidate(c):
+        sym = c["sym"]
+        prem = c["premium"]
+        t = c["t"]
+        mom_score = float(t.get("momentum_score", 0.5) or 0.5)
+        
+        score = 0.0
+        if sym in historical_winners:
+            score += 35.0  # Proven winning repeat pattern (e.g. profitable CSP on INTC, COIN)
+        if sym in watchlist_tickers or sym in active_position_tickers:
+            score += 20.0  # Watchlist priority
+        score += mom_score * 20.0  # Current market trend alignment (price > EMA20, positive momentum)
+        if 1.50 <= prem <= 3.50:
+            score += 15.0 - abs(prem - 2.50) * 3.0
+        if c["strike"] <= 100.0:
+            score += 10.0
+        return score
+
+    sorted_cand_records = sorted(valid_candidates, key=_score_candidate, reverse=True)
+
+    sector_counts: Dict[str, int] = {}
     for item in sorted_cand_records:
-        if len(potential_candidates) >= 6:
-            break
         sym = item["sym"]
         sec = item["sec"]
-        if sec in staged_sectors:
-            continue  # Strictly 1 candidate per distinct GICS sector!
+        # Allow up to 2-3 candidates per sector if high conviction or historical winner, avoiding total lockout
+        max_per_sec = 2 if (sym in historical_winners or sym in watchlist_tickers) else 1
+        if sector_counts.get(sec, 0) >= max_per_sec:
+            continue
 
         t = item["t"]
         f = item["f"]
@@ -493,16 +544,19 @@ def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
             "thesis": f["thesis"],
             "risk_rating": f["risk_rating"],
             "volatility_pct": round(t["historical_volatility"] * 100.0, 1),
+            "trend_desc": t.get("trend_desc", "Consolidating / Support Holding"),
+            "is_historical_winner": sym in historical_winners,
+            "is_watchlist_ticker": sym in watchlist_tickers,
             "pillars": {
-                "watchlist_status": f"{sec} Pillar",
-                "trade_history_profile": f"ADK Dynamic 30-DTE CSP setup with {t['historical_volatility']*100:.1f}% vol",
-                "margin_status": "Within 15% Max Limit"
+                "watchlist_status": f"{'Watchlist Preferred' if sym in watchlist_tickers else f'{sec} Pillar'}",
+                "trade_history_profile": f"{'Proven Winning CSP Repeat' if sym in historical_winners else 'Fresh Dynamic Setup'} | {t.get('trend_desc', 'Trend Aligned')}",
+                "margin_status": "Within 75% Capital Limit"
             }
         }
         potential_candidates.append(cand)
-        staged_sectors.add(sec)
+        sector_counts[sec] = sector_counts.get(sec, 0) + 1
 
-    logger.info(f"🧠 [ADK Node: synthesizer] Produced {len(potential_candidates)} refined, sector-diversified candidates (Cap: 6).")
+    logger.info(f"🧠 [ADK Node: synthesizer] Produced {len(potential_candidates)} refined pattern & trend-scored candidates.")
     return {
         **state,
         "potential_candidates": potential_candidates,
@@ -527,11 +581,6 @@ def margin_guardian_gate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     rejected_trades: List[Dict[str, Any]] = []
 
     for cand in candidates:
-        if len(validated_trades) >= 6:
-            cand["rejection_reason"] = "STAGED TRADE CEILING: Strictly 6 candidates max."
-            rejected_trades.append(cand)
-            continue
-
         margin_eval = margin_guardian.validate_trade_margin(
             strategy=cand["strategy"],
             strike=cand["strike"],
@@ -580,7 +629,7 @@ def margin_guardian_gate_node(state: Dict[str, Any]) -> Dict[str, Any]:
     route = "APPROVED" if len(validated_trades) > 0 else "REJECTED"
     return {
         **state,
-        "validated_trades": validated_trades[:6],
+        "validated_trades": validated_trades,
         "rejected_trades": rejected_trades,
         "routing_decision": route,
         "step_completed": "margin_guardian_gate"
@@ -596,44 +645,97 @@ def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
     """
     trade_staging: TradeStagingEngine = state.get("trade_staging") or TradeStagingEngine()
     week_label: str = state.get("week_label") or f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
-    validated_trades = state.get("validated_trades", [])[:6]
+    validated_trades = state.get("validated_trades", [])
 
     # Clean up any stale unapproved proposals for this week
     from . import db as database
     database.purge_unapproved_staged_trades(week_label=week_label)
 
-    # 🏛️ 3 Sub-Agent Dialectical Consensus & Dynamic Contract Sizing Engine
-    target_monthly_harvest = 1000.0
-    initial_candidates = validated_trades[:6]
+    # 🏛️ 3 Sub-Agent Dialectical Consensus & Dynamic Contract Sizing Engine ($1,500 Milestone Target & 75% Margin Ceiling)
+    target_monthly_harvest = 1500.0
+    initial_candidates = validated_trades
+    margin_status = margin_guardian.get_current_margin_status()
 
-    # Dynamic Sizing Optimization
-    n_active_trades = min(len(initial_candidates), 6)
-    target_per_slot = target_monthly_harvest / max(n_active_trades, 4)  # $250 for 4, $200 for 5, ~$167 for 6
+    # Dynamic Sizing Optimization across open-ended candidates
+    n_active_trades = len(initial_candidates)
+    target_per_slot = target_monthly_harvest / max(n_active_trades, 1)  # Distribute $1,500 milestone across active candidates
     scaled_basket: List[Dict[str, Any]] = []
     for cand in initial_candidates:
         cand_copy = dict(cand)
         prem = float(cand_copy.get("premium_estimate", 0.0))
         strike = float(cand_copy.get("strike", 0.0))
         desired_contracts = max(1, min(4, round(target_per_slot / (prem * 100.0)))) if prem > 0 else 1
-        cand_copy["contracts"] = desired_contracts
-        cand_copy["collateral_required"] = strike * 100.0 * desired_contracts
-        cand_copy["max_margin_impact_pct"] = round(desired_contracts * 1.5, 1)
+        
+        best_cnt = 0
+        scaling_approved = False
+        # Decrementally test sizing from desired_contracts down to 1
+        for test_cnt in range(desired_contracts, 0, -1):
+            cand_copy["contracts"] = test_cnt
+            cand_copy["collateral_required"] = strike * 100.0 * test_cnt
+            cand_copy["max_margin_impact_pct"] = round(test_cnt * 1.5, 1)
+            basket_test = margin_guardian.validate_cumulative_basket(
+                staged_candidates=scaled_basket,
+                new_candidate=cand_copy,
+                current_status=margin_status
+            )
+            if basket_test["approved"]:
+                best_cnt = test_cnt
+                scaling_approved = (test_cnt == desired_contracts) or (test_cnt > 1)
+                break
 
-        basket_test = margin_guardian.validate_cumulative_basket(
-            staged_candidates=scaled_basket,
-            new_candidate=cand_copy,
-            current_status=margin_status
-        )
-        if basket_test["approved"]:
-            cand_copy["scaling_approved"] = True
+        if best_cnt >= 1:
+            cand_copy["contracts"] = best_cnt
+            cand_copy["collateral_required"] = strike * 100.0 * best_cnt
+            cand_copy["max_margin_impact_pct"] = round(best_cnt * 1.5, 1)
+            cand_copy["scaling_approved"] = scaling_approved
             scaled_basket.append(cand_copy)
         else:
-            cand_copy["scaling_approved"] = False
             cand_copy["contracts"] = 1
             cand_copy["collateral_required"] = strike * 100.0
             cand_copy["max_margin_impact_pct"] = 1.5
-            cand_copy["scaling_blocked_reason"] = basket_test.get("reasons", ["Cash collateral or margin ceiling reached"])[0]
+            cand_copy["scaling_approved"] = False
+            cand_copy["scaling_blocked_reason"] = "75% margin or collateral cap reached"
             scaled_basket.append(cand_copy)
+
+    # Top-Up Pass: If total basket harvest is below $1,500 milestone, scale eligible candidates with margin headroom up to 75%
+    current_harvest = sum(round(t.get("premium_estimate", 0.0) * 100.0 * t.get("contracts", 1), 2) for t in scaled_basket)
+    if current_harvest < target_monthly_harvest and scaled_basket:
+        candidate_indices = sorted(
+            range(len(scaled_basket)),
+            key=lambda idx: (
+                scaled_basket[idx].get("premium_estimate", 0.0) / max(1.0, scaled_basket[idx].get("strike", 1.0)),
+                scaled_basket[idx].get("premium_estimate", 0.0)
+            ),
+            reverse=True
+        )
+        progress = True
+        while progress and current_harvest < target_monthly_harvest:
+            progress = False
+            for idx in candidate_indices:
+                cand = scaled_basket[idx]
+                curr_c = cand.get("contracts", 1)
+                if curr_c >= 4:
+                    continue
+                test_cand = dict(cand)
+                test_cand["contracts"] = curr_c + 1
+                test_cand["collateral_required"] = test_cand["strike"] * 100.0 * (curr_c + 1)
+                test_cand["max_margin_impact_pct"] = round((curr_c + 1) * 1.5, 1)
+
+                test_basket = [scaled_basket[i] for i in range(len(scaled_basket)) if i != idx]
+                basket_test = margin_guardian.validate_cumulative_basket(
+                    staged_candidates=test_basket,
+                    new_candidate=test_cand,
+                    current_status=margin_status
+                )
+                if basket_test["approved"]:
+                    cand["contracts"] = curr_c + 1
+                    cand["collateral_required"] = test_cand["collateral_required"]
+                    cand["max_margin_impact_pct"] = test_cand["max_margin_impact_pct"]
+                    cand["scaling_approved"] = True
+                    current_harvest += round(cand.get("premium_estimate", 0.0) * 100.0, 2)
+                    progress = True
+                    if current_harvest >= target_monthly_harvest:
+                        break
 
     final_basket_harvest = sum(
         round(t.get("premium_estimate", 0.0) * 100.0 * t.get("contracts", 1), 2)
@@ -657,39 +759,40 @@ def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
         contrib = round(prem * 100.0 * contracts, 2)
         is_below_sweet_spot = prem < 2.00
         scaling_approved = trade.get("scaling_approved", False)
+        is_winner = trade.get("is_historical_winner", False)
+        trend_desc = trade.get("trend_desc", "Support Holding")
 
         if has_shortfall:
             allocator_status = "TARGET_SHORTFALL_CHALLENGE"
             allocator_label = f"Golden Trade #{rank_idx + 1} (Deficit Challenge)"
             allocator_decision = (
-                f"ALLOCATOR TARGET DEFICIT ALERT: Basket generates ${final_basket_harvest:,.2f} "
-                f"(-${final_deficit:,.2f} vs $1,000 target). Financial Analyst selected {sym} at ${prem:.2f} "
-                f"(sub-$2.00 sweet-spot); Risk Aggregator capped sizing to {contracts} contract(s) to protect cash ceiling. "
-                f"Approved with documented target challenge for user decision."
+                f"ALLOCATOR TARGET SHORTFALL NOTICE: Basket generates ${final_basket_harvest:,.2f} "
+                f"(-${final_deficit:,.2f} vs $1,500 milestone). Financial Analyst selected {sym} at ${prem:.2f} "
+                f"({trend_desc}); Risk Aggregator capped sizing to {contracts} contract(s) to guarantee <= 75% margin ceiling. "
+                f"Approved with documented harvest challenge for user review."
             )
         else:
             allocator_status = "GOLDEN_TRADE_DESIGNATED"
             allocator_label = f"Golden Trade #{rank_idx + 1} of {n_active_trades}"
             allocator_decision = (
-                f"ALLOCATOR APPROVAL: Target satisfied. Sized at {contracts} contract(s) generating ${contrib:,.2f} "
-                f"towards the $1,000 monthly harvest goal. Fully cleared against collateral and margin caps."
+                f"ALLOCATOR APPROVAL: Harvest target satisfied! Sized at {contracts} contract(s) generating ${contrib:,.2f} "
+                f"towards the $1,500 monthly milestone. Fully cleared against 75% capital margin ceiling."
             )
 
         fa_defense = (
-            f"Financial Analyst Defense: Low implied volatility in defensive sector ({sec}) establishes a solid "
-            f"support floor at ${strike:.1f} ({pop:.1f}% PoP). While per-share premium (${prem:.2f}) falls below "
-            f"the $2.00 sweet spot, capital preservation overrides aggressive yield-seeking."
-            if is_below_sweet_spot else
-            f"Financial Analyst Verdict: High fundamental conviction. Selling conservative 30-DTE OTM CSP at ${strike:.1f} "
-            f"(Δ {delta:.2f}, {pop:.1f}% PoP) captures ${prem:.2f} premium sweet-spot above structural support."
+            f"Financial Analyst Defense: Re-cycling proven setup on {sym} ({'Historical Winning Pattern' if is_winner else 'Watchlist Priority'}, {trend_desc}). "
+            f"Selling strict 30-35 DTE CSP at ${strike:.1f} ({pop:.1f}% PoP) captures rapid theta decay with minimal assignment risk."
+            if is_winner else
+            f"Financial Analyst Verdict: High fundamental conviction in {sym}. Selling 30-35 DTE OTM CSP at ${strike:.1f} "
+            f"(Δ {delta:.2f}, {pop:.1f}% PoP, {trend_desc}) captures ${prem:.2f} premium sweet-spot above support."
         )
 
         ra_rationale = (
             f"Risk Aggregator Audit: Sizing calibrated to {contracts} contract(s) (${collateral:,.2f} collateral, +{margin_imp:.1f}% margin). "
-            f"Cleared 100% full cash reserve within 50% basket ceiling."
+            f"Strictly compliant with 75.0% total capital margin ceiling and 50% cash buffer."
             if scaling_approved else
             f"Risk Aggregator Audit: Capped at {contracts} contract(s) (${collateral:,.2f} collateral). Scaling blocked by "
-            f"{trade.get('scaling_blocked_reason', 'collateral ceiling')} to preserve cash liquidity buffer."
+            f"{trade.get('scaling_blocked_reason', '75% margin ceiling')} to preserve cash liquidity buffer."
         )
 
         sub_agent_consensus = {
@@ -698,23 +801,23 @@ def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 "status": "CHALLENGED_ON_SWEET_SPOT" if is_below_sweet_spot else "APPROVED",
                 "verdict": fa_defense,
                 "sweet_spot_score": f"${prem:.2f} / share ({'Sub-Sweet Spot <$2.00' if is_below_sweet_spot else 'Optimal Sweet Spot $2.00–$3.00'})",
-                "fundamental_floor": f"Solid balance sheet, {sec} sector leadership, durable earnings moat."
+                "fundamental_floor": f"Solid balance sheet, {trend_desc}, durable earnings floor."
             },
             "risk_aggregator": {
                 "persona": "Risk Aggregator Agent",
                 "status": "APPROVED",
                 "verdict": ra_rationale,
-                "sector_clearance": f"Cleared ({sec} — 1 of {n_active_trades} distinct GICS sectors)",
+                "sector_clearance": f"Cleared ({sec} — {contracts} contract{'s' if contracts > 1 else ''})",
                 "margin_impact": f"+{margin_imp:.1f}%",
-                "collateral_status": f"100% Full Cash Reserved (${collateral:,.2f})"
+                "collateral_status": f"100% Full Cash Reserved (${collateral:,.2f} within 75% margin ceiling)"
             },
             "executive_allocator": {
                 "persona": "Executive Portfolio Allocator Agent",
                 "status": allocator_status,
                 "rank": rank_idx + 1,
                 "golden_trade_label": allocator_label,
-                "monthly_harvest_contribution": f"${contrib:.2f} towards $1,000 monthly goal ({contracts} contract{'s' if contracts > 1 else ''})",
-                "target_harvest_gap": f"-${final_deficit:.2f} Shortfall" if has_shortfall else "Target Met ($1,000+)",
+                "monthly_harvest_contribution": f"${contrib:.2f} towards $1,500 monthly milestone ({contracts} contract{'s' if contracts > 1 else ''})",
+                "target_harvest_gap": f"-${final_deficit:.2f} Shortfall" if has_shortfall else "Target Met ($1,500+)",
                 "allocation_decision": allocator_decision
             }
         }
@@ -731,7 +834,7 @@ def hitl_staging_node(state: Dict[str, Any]) -> Dict[str, Any]:
         record["sub_agent_consensus"] = sub_agent_consensus
         staged_records.append(record)
 
-    logger.info(f"⏸️ [ADK HITL Node: hitl_staging_gate] Staged strictly {len(staged_records)} refined candidates in SQLite (Cap: 6). Pausing for human authorization.")
+    logger.info(f"⏸️ [ADK HITL Node: hitl_staging_gate] Staged {len(staged_records)} open-ended candidates in SQLite ($1,500 target / 75% margin cap). Pausing for human authorization.")
     return {
         **state,
         "staged_trades": staged_records,

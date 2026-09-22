@@ -224,7 +224,9 @@ export default function Dashboard() {
       }
       await optionsApi.setBrokerToken({ token: trimmed });
       setDevTokenInput('');
-      await fetchBrokerData(false);
+      setIsAuthenticated(true);
+      setLoading(false);
+      fetchBrokerData(false);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to auto-link token from clipboard.');
     } finally {
@@ -278,7 +280,9 @@ export default function Dashboard() {
             console.log('[OptionsLab] Detected Saxo authorization code in clipboard upon window focus! Auto-linking...');
             setActionLoading(true);
             await optionsApi.setBrokerToken({ token: clipText.trim() });
-            await fetchBrokerData(false);
+            setIsAuthenticated(true);
+            setLoading(false);
+            fetchBrokerData(false);
           }
         }
       } catch (e) {
@@ -322,7 +326,9 @@ export default function Dashboard() {
       }
       await optionsApi.setBrokerToken({ token: devTokenInput.trim() });
       setDevTokenInput('');
-      await fetchBrokerData(false);
+      setIsAuthenticated(true);
+      setLoading(false);
+      fetchBrokerData(false);
     } catch (err: any) {
       setErrorMsg(err.message || 'Failed to apply developer token.');
     } finally {

@@ -174,12 +174,12 @@ class MarginGuardian:
     def __init__(
         self,
         saxo_client: Optional[SaxoClient] = None,
-        max_margin_util_pct: float = 60.0,
+        max_margin_util_pct: float = 75.0,
         max_cash_collateral_pct: float = 50.0
     ):
         self.saxo_client = saxo_client or SaxoClient()
-        self.max_margin_util_pct = float(max_margin_util_pct)  # Hard user constraint (60%)
-        self.max_cash_collateral_pct = float(max_cash_collateral_pct)  # Hard user constraint (50% cash collateral cap)
+        self.max_margin_util_pct = float(max_margin_util_pct)  # Hard user constraint (75.0% margin cap)
+        self.max_cash_collateral_pct = float(max_cash_collateral_pct)  # Cash collateral cap (50.0%)
 
     def get_current_margin_status(self) -> Dict[str, Any]:
         """
@@ -457,18 +457,12 @@ class MarginGuardian:
 
         passed_collateral_cap = cumulative_collateral <= max_allowed_collateral
         passed_margin_cap = projected_margin_util_pct <= self.max_margin_util_pct
-        passed_count_cap = total_trades_count <= 4
 
-        approved = passed_collateral_cap and passed_margin_cap and passed_count_cap
+        approved = passed_collateral_cap and passed_margin_cap
 
         reasons = []
         status_str = "APPROVED"
 
-        if not passed_count_cap:
-            status_str = "MAX_STAGED_LIMIT_REACHED"
-            reasons.append(
-                f"STAGED TRADE CEILING: Total candidates ({total_trades_count}) exceeds the maximum active ceiling of 4 trades."
-            )
         if not passed_collateral_cap:
             status_str = "COLLATERAL_LIMIT_EXCEEDED"
             reasons.append(
