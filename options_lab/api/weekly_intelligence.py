@@ -1734,12 +1734,12 @@ class WeeklyIntelligenceEngine:
             if 0.50 <= prem <= 5.00 and strike <= 220.0:
                 potential_trades_mode1.append(cand)
 
-            # Sift for Mode 2 Mega-Cap Anchor ($750–$850 premium target, deep moat)
-            if symbol in ["MSFT", "GOOGL", "NVDA", "AAPL", "AMZN", "META"]:
+            # Sift for Mode 2 Mega-Cap Anchor ($750–$850 premium target, high market cap / nominal strike)
+            if (spot >= 150.0 or strike >= 150.0) and prem >= 2.0:
                 mega_cap_candidates.append(cand)
 
-            # Sift for Mode 2 Satellite ($150–$250 premium target, high quality dividend/defensive)
-            if symbol in ["INTC", "BAC", "KO", "C", "CSCO", "NEM", "SO", "ABT", "PFE", "CVX", "T"]:
+            # Sift for Mode 2 Satellite ($150–$250 premium target, high quality dividend/defensive cross-sector)
+            if (strike < 150.0 or sec in ["Financials", "Consumer Staples", "Utilities", "Health Care", "Materials", "Energy", "Industrials"]):
                 satellite_candidates.append(cand)
 
         # ─────────────────────────────────────────────────────────────────────────────

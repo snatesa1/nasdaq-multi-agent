@@ -111,6 +111,13 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
        - *Zero Silent Rubber-Stamping & Mandatory Tension Reporting*:
          The system is strictly prohibited from stamping "Approved" or "Golden Trade" on deficit portfolios without surfacing an explicit `TARGET_SHORTFALL_CHALLENGE` alert in the telemetry and UI. If risk constraints make reaching the target impossible, the Allocator must state its explicit dissent and present the exact trade-off to the user.
 
+    13. **Zero-Hardcoded Ticker Bias & Dynamic Market Universe Standard (Added 2026-09-23)**:
+        - *Prohibition on Example Hardcoding*: User-supplied tickers in chat (e.g. "for example INTC or COIN") MUST NEVER be converted into permanent scoring bonuses (`score += 50.0`), static candidate arrays, or fixed test expectations.
+        - *Dynamic Broad Universe Default*: All options screening, yield harvesting, and strategy blotters MUST dynamically query the broad liquid universe (40+ S&P 500 / NASDAQ liquid options constituents), live news catalysts, and authentic broker holdings.
+        - *Zero Hardcoded Dollar or Account Fallbacks in UI*: Never embed hardcoded numeric string literals (e.g., `"$102,192.51"`, `"+12.55% Total"`) into frontend components. All displayed equity, cash, and P&L metrics must strictly bind to dynamic state (`brokerAccount?.total_equity` or `auditData?.total_pnl`).
+        - *Execution Integrity & Unexecuted Day Order Sanitization*: Strategic campaign stitchers and P&L blotters MUST only aggregate authentic `Filled` / `Traded` executions and active `Working` orders. Unexecuted, cancelled, or expired draft day orders with `$0.00` price must NEVER be displayed as trade legs.
+        - *Token Conservation Protocol for Subagents*: Subagents MUST utilize `codegraph_explore` for symbol discovery rather than broad sequential file reads. Never spawn parallel unconstrained subagent clusters via slash commands without bounded line ranges and context caps.
+
 ## ☁️ Google Cloud
 - gcloud billing accounts list
 - gcloud billing projects link [PROJECT_ID] --billing-account=[BILLING_ACCOUNT_ID]

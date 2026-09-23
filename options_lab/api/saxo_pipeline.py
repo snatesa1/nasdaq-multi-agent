@@ -106,7 +106,12 @@ class SaxoPipeline:
         logger.info(f"🚀 Starting Saxo Pipeline Scan at {scan_timestamp}...")
 
         if not candidate_tickers:
-            candidate_tickers = ["AAPL", "NVDA", "JPM", "TSLA"]
+            try:
+                from .universe import load_sp500_constituents
+                sp500 = load_sp500_constituents()
+                candidate_tickers = sp500[:15] if sp500 else ["NVDA", "MSFT", "AAPL", "AMZN", "GOOGL", "META", "BAC", "JPM", "XOM", "UNH"]
+            except Exception:
+                candidate_tickers = ["NVDA", "MSFT", "AAPL", "AMZN", "GOOGL", "META", "BAC", "JPM", "XOM", "UNH"]
 
         # Step 1: Saxo Balance Check
         logger.info("Step 1: Auditing Saxo SIM account balance...")

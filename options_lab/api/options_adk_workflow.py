@@ -477,25 +477,32 @@ def synthesizer_node(state: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e_hist:
         logger.debug(f"Historical winning tickers retrieval non-critical: {e_hist}")
 
-    # Core historical CSP winning anchors from user trade history & focus pool
-    historical_winners.update(["INTC", "COIN", "BAC", "CSCO", "GOOGL", "NEM", "KO"])
-
-    # Multi-factor score: Historical win pattern (+35), Watchlist (+20), Trend Momentum (+20), Sweet-spot (+15), Cap efficiency (+10)
+    # Multi-factor score: Trend Momentum (+30), Annualized ROC (+30), Premium Quality (+20), Watchlist (+15), Cap efficiency (+10)
     def _score_candidate(c):
         sym = c["sym"]
-        prem = c["premium"]
-        t = c["t"]
+        prem = float(c.get("premium", 0.0))
+        t = c.get("t", {})
+        roc = float(t.get("annualized_roc", 0.0) or 0.0)
         mom_score = float(t.get("momentum_score", 0.5) or 0.5)
         
         score = 0.0
+        # 1. Trend Momentum Alignment (price > EMA20)
+        score += mom_score * 30.0
+        # 2. Annualized ROC Yield
+        if roc >= 15.0:
+            score += min(35.0, roc * 1.2)
+        # 3. Dynamic Historical Win Pattern from DB
         if sym in historical_winners:
-            score += 35.0  # Proven winning repeat pattern (e.g. profitable CSP on INTC, COIN)
+            score += 20.0
+        # 4. Watchlist / Portfolio affinity
         if sym in watchlist_tickers or sym in active_position_tickers:
-            score += 20.0  # Watchlist priority
-        score += mom_score * 20.0  # Current market trend alignment (price > EMA20, positive momentum)
-        if 1.50 <= prem <= 3.50:
-            score += 15.0 - abs(prem - 2.50) * 3.0
-        if c["strike"] <= 100.0:
+            score += 15.0
+        # 5. Premium Quality ($1.50 - $5.00)
+        if 1.50 <= prem <= 5.00:
+            score += 20.0
+        elif prem > 0.75:
+            score += 10.0
+        if c.get("strike", 0.0) <= 150.0:
             score += 10.0
         return score
 

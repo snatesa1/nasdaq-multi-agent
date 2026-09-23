@@ -1174,7 +1174,7 @@ async def run_broker_pipeline_scan(
         try:
             from .saxo_pipeline import SaxoPipeline
             pipeline = SaxoPipeline(saxo_client=saxo_broker_client)
-            candidates = (payload or {}).get("candidates", ["AAPL", "NVDA", "JPM", "TSLA"])
+            candidates = (payload or {}).get("candidates")
             simulate_order = (payload or {}).get("simulate_order_placement", True)
 
             results = await pipeline.execute_full_pipeline_scan(
