@@ -1692,6 +1692,12 @@ async def approve_staged_trade_endpoint(
     and places the order live on Saxo OpenAPI.
     """
     trade_id = payload.get("trade_id") or payload.get("id") or payload.get("staged_trade_id")
+    custom_limit_price = payload.get("limit_price")
+    if custom_limit_price is not None:
+        try:
+            custom_limit_price = float(custom_limit_price)
+        except Exception:
+            custom_limit_price = None
     
     resolved_week = f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
     if not trade_id and payload.get("symbol"):
@@ -1702,7 +1708,7 @@ async def approve_staged_trade_endpoint(
         raise HTTPException(status_code=400, detail="Missing trade_id in request payload.")
 
     try:
-        result = trade_staging.approve_and_execute_trade(trade_id=trade_id)
+        result = trade_staging.approve_and_execute_trade(trade_id=trade_id, custom_limit_price=custom_limit_price)
         return result
     except ValueError as ve:
         # If trade_id not found in DB but full candidate data is in payload, self-heal by staging and executing
@@ -1710,7 +1716,7 @@ async def approve_staged_trade_endpoint(
             logger.info(f"Self-healing trade execution: staging candidate {payload.get('symbol')} on-the-fly")
             staged = trade_staging.stage_recommendation(payload, week_label=resolved_week)
             new_trade_id = staged.get("trade_id")
-            result = trade_staging.approve_and_execute_trade(trade_id=new_trade_id)
+            result = trade_staging.approve_and_execute_trade(trade_id=new_trade_id, custom_limit_price=custom_limit_price)
             return result
         raise HTTPException(status_code=404, detail=str(ve))
     except Exception as e:

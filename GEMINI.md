@@ -916,9 +916,28 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
           * Replaced static hardcoded text string literals in `behavioral-lab/page.tsx` (e.g. static `$102,192.51` account value and static PnL metrics) with dynamic calculations from live broker data.
         - **Automated Validation**:
           * `pytest tests/`: 12/12 passed (100%) in 5.26s.
+    26. **Aggressive Seller Pricing Buffer ("Far From Market") & Interactive Limit Price Stepper (2026-09-23)**:
+        - **Aggressive Seller Buffer Paradigm (`weekly_intelligence.py`)**:
+          * Decommissioned conservative "Middle Ground" averaging that clamped option seller limit prices down to mid/ask.
+          * Introduced the Aggressive Seller Pricing Buffer: sets the initial offer price well above current market/close price ($P_{\text{ref}} + \text{buffer}$ where buffer is $\ge +\$0.35$ or $+20\%$ above market / 30-40 ticks).
+          * Ensures credit orders sit high on the exchange order book to harvest maximum premium and capture intraday volatility spikes without risk of selling at depressed premiums.
+          * Tagged quote provenance as `SELLER_AGGRESSIVE_BUFFER`.
+        - **Backend User Limit Price Fidelity (`trade_staging.py` & `main.py`)**:
+          * Upgraded `StagedTradeManager.approve_and_execute_trade(trade_id, custom_limit_price)` to accept and strictly prioritize user-edited limit prices over default estimates.
+          * Updated `POST /api/trades/approve` endpoint in `main.py` to extract `limit_price` from request payload and pass it directly to order execution.
+        - **Interactive UI Limit Price Steppers (`weekly-intelligence/page.tsx`)**:
+          * Replaced static limit price labels with interactive stepper controls on all candidate cards.
+          * Added `[-]` and `[+]` quick-nudge buttons dynamically adjusting price by standard exchange ticks ($0.05 / $0.10).
+          * Added `"Seller Buffer (+35¢ / 30-40 Ticks)"` provenance badge and wired the edited price directly into `handleApprove()`.
+        - **Elimination of False Handshake Timeout Alerts**:
+          * Expanded frontend approval timeout budget from 30s to 65s in `api.ts` to accommodate Saxo OpenAPI pre-trade margin calculations.
+          * Added post-timeout self-healing reconciliation in `handleApprove()`, querying the database to confirm whether Saxo accepted the trade before reporting errors.
+        - **Automated Verification**:
+          * `pytest tests/`: 12/12 passed (100%).
+          * Next.js production build (`npm run build`): compiled 17/17 pages cleanly.
 
 ## 📊 Antigravity Usage Stats
-> Last Updated: 2026-09-23 20:16:00 SGT
+> Last Updated: 2026-09-23 22:15:00 SGT
 
 | Metric | Current Session |
 | :--- | :--- |

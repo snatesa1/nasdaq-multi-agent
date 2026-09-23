@@ -87,6 +87,14 @@ export default function WeeklyIntelligencePage() {
   const [copied, setCopied] = useState<boolean>(false);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<string | null>(null);
   const [actionLog, setActionLog] = useState<{ id: string; msg: string; time: string; type: 'success' | 'danger' | 'info'; actionUrl?: string }[]>([]);
+  const [customLimitPrices, setCustomLimitPrices] = useState<Record<string, number>>({});
+
+  const updateCandidateLimitPrice = (tradeKey: string, newPrice: number) => {
+    setCustomLimitPrices(prev => ({
+      ...prev,
+      [tradeKey]: Math.max(0.05, Math.round(newPrice * 100) / 100)
+    }));
+  };
 
   // Cockpit Tab Navigation
   const [activeTab, setActiveTab] = useState<'blotter' | 'compass' | 'interlink' | 'scenarios' | 'briefing' | 'corpus'>('blotter');
@@ -341,6 +349,7 @@ export default function WeeklyIntelligencePage() {
   const handleApprove = async (tradeOrId: any) => {
     const tradeObj = typeof tradeOrId === 'object' && tradeOrId !== null ? tradeOrId : null;
     const tradeId = tradeObj ? (tradeObj.trade_id || tradeObj.id || tradeObj.staged_trade_id) : tradeOrId;
+    const tradeKey = tradeObj ? (tradeObj.trade_id || tradeObj.id || tradeObj.staged_trade_id || `${tradeObj.symbol}-${tradeObj.strike}`) : tradeId;
 
     if (!tradeId) {
       console.error('Cannot approve trade: missing trade_id in candidate', tradeOrId);
@@ -351,9 +360,18 @@ export default function WeeklyIntelligencePage() {
       return;
     }
 
+    // Resolve user-dialed custom limit price if set
+    const effectiveLimitPrice = (tradeKey && customLimitPrices[tradeKey] !== undefined)
+      ? customLimitPrices[tradeKey]
+      : (tradeObj?.limit_price ?? tradeObj?.premium_estimate);
+
+    const enrichedCandidate = tradeObj
+      ? { ...tradeObj, limit_price: effectiveLimitPrice }
+      : { limit_price: effectiveLimitPrice };
+
     setApprovingId(tradeId);
     try {
-      const res = await optionsApi.approveTrade(tradeId, tradeObj || undefined);
+      const res = await optionsApi.approveTrade(tradeId, enrichedCandidate);
       const nowTime = new Date().toLocaleTimeString();
       
       if (res.status === 'FILLED' || res.status === 'PLACED') {
@@ -1024,19 +1042,56 @@ export default function WeeklyIntelligencePage() {
                             )}
                           </div>
                           
-                          <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-slate-500">
-                            <span>Spot: <strong className="text-slate-700">${trade.spot_price.toFixed(2)}</strong></span>
+                          <div className="flex flex-wrap items-center gap-2 mt-2 text-xs text-slate-600">
+                            <span>Spot: <strong className="text-slate-800 font-semibold">${trade.spot_price.toFixed(2)}</strong></span>
                             <span className="text-slate-300">•</span>
-                            <span>Limit Price: <strong className="text-emerald-700 font-mono">${(trade.limit_price ?? trade.premium_estimate).toFixed(2)}</strong></span>
+                            
+                            {/* Interactive Seller Limit Price Stepper */}
+                            <div className="flex items-center gap-1.5 bg-emerald-50/90 px-2.5 py-1 rounded-lg border border-emerald-300 shadow-2xs">
+                              <span className="text-[11px] font-bold text-emerald-900">Limit Price:</span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const cur = customLimitPrices[tradeKey] ?? (trade.limit_price ?? trade.premium_estimate);
+                                  const step = cur >= 3.0 ? 0.10 : 0.05;
+                                  updateCandidateLimitPrice(tradeKey, Math.max(0.05, cur - step));
+                                }}
+                                disabled={isApproved}
+                                className="w-5 h-5 flex items-center justify-center rounded bg-white text-emerald-800 font-bold hover:bg-emerald-100 transition border border-emerald-300 text-xs disabled:opacity-40 cursor-pointer shadow-2xs select-none"
+                                title="Step down 1 tick"
+                              >
+                                -
+                              </button>
+                              <span className="font-mono font-black text-emerald-800 text-sm min-w-[50px] text-center">
+                                ${(customLimitPrices[tradeKey] ?? (trade.limit_price ?? trade.premium_estimate)).toFixed(2)}
+                              </span>
+                              <button
+                                type="button"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  const cur = customLimitPrices[tradeKey] ?? (trade.limit_price ?? trade.premium_estimate);
+                                  const step = cur >= 3.0 ? 0.10 : 0.05;
+                                  updateCandidateLimitPrice(tradeKey, cur + step);
+                                }}
+                                disabled={isApproved}
+                                className="w-5 h-5 flex items-center justify-center rounded bg-white text-emerald-800 font-bold hover:bg-emerald-100 transition border border-emerald-300 text-xs disabled:opacity-40 cursor-pointer shadow-2xs select-none"
+                                title="Step up 1 tick"
+                              >
+                                +
+                              </button>
+                            </div>
+
                             {trade.bid_price !== undefined && trade.bid_price > 0 && (
                               <>
                                 <span className="text-slate-300">•</span>
-                                <span className="font-mono">Bid: ${trade.bid_price.toFixed(2)} / Ask: ${trade.ask_price?.toFixed(2)}</span>
-                                <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 rounded font-semibold text-slate-600 uppercase">
-                                  {trade.pricing_source?.includes('MIDDLE_GROUND') ? 'Middle Ground (+1.5%)' : (trade.pricing_source === 'OPRA_LIVE' ? 'OPRA Live' : 'Model Quote')}
-                                </span>
+                                <span className="font-mono text-slate-500 text-[11px]">Market: Bid ${trade.bid_price.toFixed(2)} / Ask ${trade.ask_price?.toFixed(2)}</span>
                               </>
                             )}
+
+                            <span className="text-[10px] px-2 py-0.5 bg-amber-50 border border-amber-200 rounded font-semibold text-amber-900 uppercase">
+                              {trade.pricing_source === 'SELLER_AGGRESSIVE_BUFFER' ? 'Seller Buffer (+35¢ / 30-40 Ticks)' : (trade.pricing_source?.includes('MIDDLE_GROUND') ? 'Seller Buffer' : (trade.pricing_source === 'OPRA_LIVE' ? 'OPRA Live' : 'Model Quote'))}
+                            </span>
                           </div>
 
                           {trade.contract_uic && (

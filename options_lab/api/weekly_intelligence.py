@@ -491,31 +491,23 @@ class WeeklyIntelligenceEngine:
             volatility = quote["implied_volatility"]
         bs_price = black_scholes_price(S=spot_price, K=strike, T=T, r=r, sigma=volatility, option_type=opt_type)
 
-        # ── Middle Ground Pricing Model (+1% to +2% Favorable Option Seller Anchor) ──
-        # Sits in the middle ground between real-time bid/ask and theoretical BS model.
-        # Avoids single-tick whipsawing while guaranteeing seller price improvement.
-        if is_real and mid_price > 0 and not is_wide and bid_price > 0:
-            base_anchor = (mid_price + bs_price) / 2.0
-            quote_source = "MIDDLE_GROUND_SYNTHESIS"
-        elif last_price > 0 and (0.5 * bs_price <= last_price <= 2.0 * bs_price):
-            base_anchor = (last_price + bs_price) / 2.0
-            quote_source = "MIDDLE_GROUND_LAST_BS"
-        else:
-            base_anchor = bs_price
-            quote_source = "THEORETICAL_BS_MODEL"
+        # ── Aggressive Seller Pricing Model (Far From Market Price Buffer) ──
+        # Places the initial limit price well above current market/close price (+30-40 ticks / +$0.35)
+        # to ensure orders never get filled at depressed premiums. Captures volatility spikes.
+        # User retains full discretion to modify this price down in UI or Saxo TraderGO.
+        market_candidates = [p for p in [ask_price, last_price, mid_price] if p and p > 0]
+        base_market = max(market_candidates) if market_candidates else bs_price
 
-        # Apply 1.5% favorable seller premium (in the 1% to 2% range requested by user)
-        favorable_premium = base_anchor * 1.015
+        # Establish seller buffer: at least +$0.35 or +20% above market, whichever is higher
+        seller_buffer = max(0.35, round(base_market * 0.20, 2))
+        favorable_premium = base_market + seller_buffer
+        quote_source = "SELLER_AGGRESSIVE_BUFFER"
 
         # Strictly quantize to exchange tick size ($0.05 / $0.10)
         if hasattr(self.saxo_client, "quantize_order_price"):
             premium = self.saxo_client.quantize_order_price(favorable_premium, uic=option_uic, asset_type="StockOption")
         else:
             premium = max(0.25, round(round(favorable_premium / 0.05) * 0.05, 2))
-
-        # Liquid quote sanity guard: if liquid quote exists, do not exceed liquid ask or drop below bid
-        if is_real and not is_wide and ask_price > 0 and bid_price > 0 and ask_price > bid_price:
-            premium = max(bid_price, min(ask_price, premium))
 
         premium = max(0.25, premium)
         limit_price = premium

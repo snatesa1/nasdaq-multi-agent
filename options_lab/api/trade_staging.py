@@ -158,7 +158,7 @@ class TradeStagingEngine:
         logger.info(f"Staged trade {trade_id} [{symbol} {strategy} ${strike}] for week {week_label}.")
         return staged_record
 
-    def approve_and_execute_trade(self, trade_id: str) -> Dict[str, Any]:
+    def approve_and_execute_trade(self, trade_id: str, custom_limit_price: Optional[float] = None) -> Dict[str, Any]:
         """
         Descriptive Summary:
             Authenticates and executes a staged trade order against Saxo OpenAPI or simulation sandbox.
@@ -356,8 +356,14 @@ class TradeStagingEngine:
         database.save_staged_trade(record)
 
         try:
+            # Respect user-specified custom_limit_price, staged record limit_price, or premium_est
+            chosen_price = custom_limit_price or record.get("limit_price") or premium_est
+            target_order_price = float(chosen_price if asset_type == "StockOption" else spot_price)
+            if custom_limit_price is not None:
+                record["limit_price"] = float(custom_limit_price)
+
             clean_price = self.saxo_client.quantize_order_price(
-                price=premium_est if asset_type == "StockOption" else spot_price,
+                price=target_order_price,
                 uic=uic,
                 asset_type=asset_type
             )
