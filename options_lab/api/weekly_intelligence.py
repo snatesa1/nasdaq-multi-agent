@@ -1595,42 +1595,29 @@ class WeeklyIntelligenceEngine:
                     news_extracted_tickers.append(t)
                     news_ticker_contexts[t] = h
 
-        # Build highly curated candidate ticker pool:
-        # Guarantee representation across:
-        # 1. Mode 2 Mega-Cap Anchors (MSFT, GOOGL, NVDA, AAPL)
-        # 2. Mode 1 Cross-Sector Sweet-Spot CSP candidates (INTC, BAC, KO, NEM, ABT, SO, CVX, CSCO)
-        # 3. Valid dynamic news & active holdings tickers
-        curated_mode2_anchors = ["MSFT", "GOOGL", "NVDA", "AAPL"]
-        curated_mode1_core = ["INTC", "COIN", "SO", "BAC", "KO", "NEM", "ABT", "CVX", "CSCO"]
+        # Build dynamic candidate ticker pool across broad high-liquidity options universe:
+        broad_liquid_universe = [
+            "NVDA", "AMD", "PLTR", "TSLA", "MSFT", "AMZN", "GOOGL", "META",
+            "BAC", "JPM", "C", "GS", "MS", "XOM", "CVX", "UNH", "LLY", "PFE", "ABT",
+            "DIS", "CAT", "GE", "NFLX", "UBER", "QCOM", "AVGO", "TXN", "SMCI", "IBM",
+            "COIN", "INTC", "SO", "NEM", "KO", "CSCO", "ABNB", "COST", "WMT", "HD"
+        ]
 
         candidate_pool = []
-        # Add Mega-Cap anchors first (for Mode 2)
-        for t in curated_mode2_anchors:
+        # 1. Add broad liquid options universe
+        for t in broad_liquid_universe:
             if t not in candidate_pool:
                 candidate_pool.append(t)
 
-        # Add Core Cross-Sector anchors (for Mode 1 & Mode 2 Satellite)
-        for t in curated_mode1_core:
-            if t not in candidate_pool:
-                candidate_pool.append(t)
-
-        # Add top news catalysts (max 3 additional)
-        added_news = 0
+        # 2. Add all dynamic news extracted tickers
         for t in news_extracted_tickers:
-            if added_news >= 3:
-                break
             if _is_valid_us_symbol(t) and t not in candidate_pool:
                 candidate_pool.append(t)
-                added_news += 1
 
-        # Add active portfolio holdings (max 2 additional)
-        added_pos = 0
-        for t in self.active_position_tickers:
-            if added_pos >= 2:
-                break
+        # 3. Add active portfolio holdings and watchlist tickers
+        for t in list(self.active_position_tickers) + list(self.watchlist_tickers):
             if _is_valid_us_symbol(t) and t not in candidate_pool:
                 candidate_pool.append(t)
-                added_pos += 1
 
         # Calculate exact options expiration date and DTE strictly in the 30 to 35 DTE window
         target_monthly_expiry, target_monthly_dte = resolve_target_monthly_option_cycle(min_dte=30, max_dte=35)
@@ -1775,24 +1762,31 @@ class WeeklyIntelligenceEngine:
                             historical_winners.add(r["symbol"].upper().replace(" ", ""))
         except Exception:
             pass
-        historical_winners.update(["INTC", "COIN", "BAC", "CSCO", "GOOGL", "NEM", "KO"])
-
-        watchlist_set = set(self.watchlist_tickers) | set(self.active_position_tickers)
-
         def _score_mode1_cand(t):
             sym = t.get("symbol", "").upper()
             prem = float(t.get("premium_estimate", 0.0))
+            roc = float(t.get("annualized_roc", 0.0))
+            abs_delta = abs(float(t.get("delta", 0.20)))
             score = 0.0
-            # User's approved triumvirate has top anchor priority
-            if sym in ["INTC", "COIN", "SO"]:
-                score += 50.0  # Core user-approved harvest triumvirate
+            
+            # 1. High annualized ROC (objective yield scoring)
+            if roc >= 15.0:
+                score += min(40.0, roc * 1.5)
+            # 2. Delta assignment safety (|Delta| <= 0.20 preferred)
+            if abs_delta <= 0.20:
+                score += 30.0 - abs_delta * 50.0
+            # 3. Dynamic News Catalyst / Edge
+            if t.get("edge_source") and "Live Market Catalyst" in str(t.get("edge_source", "")):
+                score += 25.0
+            # 4. Premium Quality ($1.50 to $5.00)
+            if 1.50 <= prem <= 5.00:
+                score += 20.0
+            elif prem > 0.75:
+                score += 10.0
+            # 5. Proven repeat winner or watchlist affinity
             if sym in historical_winners:
-                score += 35.0  # Proven winning repeat pattern
+                score += 15.0
             if sym in watchlist_set:
-                score += 20.0  # Watchlist priority
-            if 1.50 <= prem <= 3.50:
-                score += 15.0 - abs(prem - 2.50) * 3.0
-            if float(t.get("strike", 0.0)) <= 100.0:
                 score += 10.0
             return score
 
@@ -1885,7 +1879,7 @@ class WeeklyIntelligenceEngine:
                 for idx in candidate_indices:
                     cand = scaled_basket_m1[idx]
                     curr_c = cand.get("contracts", 1)
-                    if curr_c >= 4:
+                    if curr_c >= 5:
                         continue
                     test_cand = dict(cand)
                     test_cand["contracts"] = curr_c + 1
@@ -1907,6 +1901,31 @@ class WeeklyIntelligenceEngine:
                         progress = True
                         if current_harvest >= target_monthly_harvest:
                             break
+
+        # Additional Reserve Promotion Pass: If harvest is still below $1,500 target, promote reserve candidates from bench_m1 into active basket
+        if current_harvest < target_monthly_harvest and bench_m1:
+            for cand in list(bench_m1):
+                cand_copy = dict(cand)
+                strike = float(cand_copy.get("strike", 0.0))
+                prem = float(cand_copy.get("premium_estimate", 0.0))
+                if prem <= 0:
+                    continue
+                cand_copy["contracts"] = 1
+                cand_copy["collateral_required"] = strike * 100.0
+                cand_copy["max_margin_impact_pct"] = 1.5
+                basket_test = self.margin_guardian.validate_cumulative_basket(
+                    staged_candidates=scaled_basket_m1,
+                    new_candidate=cand_copy,
+                    current_status=margin_status
+                )
+                if basket_test["approved"]:
+                    cand_copy["status"] = "PROPOSED"
+                    scaled_basket_m1.append(cand_copy)
+                    current_harvest += round(prem * 100.0, 2)
+                    if cand in bench_m1:
+                        bench_m1.remove(cand)
+                    if current_harvest >= target_monthly_harvest:
+                        break
 
         m1_harvest = sum(round(t.get("premium_estimate", 0.0) * 100.0 * t.get("contracts", 1), 2) for t in scaled_basket_m1)
         m1_collateral = sum(t.get("collateral_required", 0.0) for t in scaled_basket_m1)

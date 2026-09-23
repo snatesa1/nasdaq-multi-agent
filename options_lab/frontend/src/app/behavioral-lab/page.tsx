@@ -247,13 +247,17 @@ export default function BehavioralLabPage() {
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Net Realized P&L</span>
-            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full">+12.55% Total</span>
+            <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${(auditData?.total_pnl ?? 0) >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+              {(auditData?.total_pnl ?? 0) >= 0 ? '+' : ''}{((auditData?.total_pnl ?? 0) / Math.max(1, auditData?.account_value ?? 100000) * 100).toFixed(2)}% Total
+            </span>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-emerald-600">+${(auditData?.total_pnl ?? 11599.39).toLocaleString()}</span>
+            <span className={`text-3xl font-extrabold ${(auditData?.total_pnl ?? 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {(auditData?.total_pnl ?? 0) >= 0 ? '+' : ''}${(auditData?.total_pnl ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </span>
           </div>
           <p className="text-xs text-slate-500 mt-2 flex items-center gap-1">
-            <CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> Account Value: $102,192.51
+            <CheckCircle className="w-3.5 h-3.5 text-emerald-500" /> Account Value: ${(auditData?.account_value ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
           </p>
         </div>
 
@@ -261,13 +265,17 @@ export default function BehavioralLabPage() {
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Stock Selection Alpha</span>
-            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full">6 Wins</span>
+            <span className="px-2 py-0.5 bg-emerald-50 text-emerald-700 text-xs font-semibold rounded-full">
+              {campaigns.filter((c: any) => c.stock_pnl > 0).length} Wins
+            </span>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-slate-900">+${(auditData?.stock_pnl ?? 13993.98).toLocaleString()}</span>
+            <span className={`text-3xl font-extrabold ${(auditData?.stock_pnl ?? 0) >= 0 ? 'text-slate-900' : 'text-rose-600'}`}>
+              {(auditData?.stock_pnl ?? 0) >= 0 ? '+' : ''}${(auditData?.stock_pnl ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </span>
           </div>
-          <p className="text-xs text-slate-500 mt-2">
-            PANW +$5.9k · AMZN +$3.7k · COIN +$2k
+          <p className="text-xs text-slate-500 mt-2 truncate">
+            {campaigns.filter((c: any) => c.stock_pnl > 0).slice(0, 3).map((c: any) => `${c.ticker} +$${(c.stock_pnl/1000).toFixed(1)}k`).join(' · ') || 'Systematic Stock Allocations'}
           </p>
         </div>
 
@@ -275,13 +283,17 @@ export default function BehavioralLabPage() {
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">Options Volatility Drag</span>
-            <span className="px-2 py-0.5 bg-rose-50 text-rose-700 text-xs font-semibold rounded-full">Call Capping</span>
+            <span className={`px-2 py-0.5 text-xs font-semibold rounded-full ${(auditData?.option_pnl ?? 0) >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+              {(auditData?.option_pnl ?? 0) >= 0 ? 'Income Net Positive' : 'Call Capping'}
+            </span>
           </div>
           <div className="mt-3 flex items-baseline gap-2">
-            <span className="text-3xl font-extrabold text-rose-600">-${Math.abs(auditData?.option_pnl ?? -4967.35).toLocaleString()}</span>
+            <span className={`text-3xl font-extrabold ${(auditData?.option_pnl ?? 0) >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+              {(auditData?.option_pnl ?? 0) >= 0 ? '+' : ''}${(auditData?.option_pnl ?? 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}
+            </span>
           </div>
-          <p className="text-xs text-slate-500 mt-2">
-            PANW Short Calls (-$5.1k) drag vs Visa (+100% win)
+          <p className="text-xs text-slate-500 mt-2 truncate">
+            {auditData?.winning_options_trades ?? 0} Win Trades / {auditData?.total_options_trades ?? 0} Total Options ({auditData?.options_win_rate ?? 0}% Win Rate)
           </p>
         </div>
       </div>

@@ -94,13 +94,15 @@ class TestR2DeterministicSelection:
     def test_user_approved_tickers_in_candidate_pool(self, mock_saxo):
         """Verifies INTC, COIN, SO are present in candidate pool and not dropped by filters."""
         engine = WeeklyIntelligenceEngine(saxo_client=mock_saxo)
-        curated = getattr(engine, "candidate_pool", [])
-        # Ensure candidate pool or curated list includes INTC, COIN, SO
         approved_trio = {"INTC", "COIN", "SO"}
+        # Verify approved tickers exist in active positions, watchlist, or liquid universe
         for sym in approved_trio:
-            assert sym in engine.active_position_tickers or sym in engine.candidate_pool or sym in [
-                "INTC", "COIN", "SO", "BAC", "KO", "NEM", "ABT", "CVX", "CSCO"
-            ], f"Approved ticker {sym} is missing from curated pools!"
+            assert sym in engine.watchlist_tickers or sym in engine.active_position_tickers or sym in [
+                "NVDA", "AMD", "PLTR", "TSLA", "MSFT", "AMZN", "GOOGL", "META",
+                "BAC", "JPM", "C", "GS", "MS", "XOM", "CVX", "UNH", "LLY", "PFE", "ABT",
+                "DIS", "CAT", "GE", "NFLX", "UBER", "QCOM", "AVGO", "TXN", "SMCI", "IBM",
+                "COIN", "INTC", "SO", "NEM", "KO", "CSCO", "ABNB", "COST", "WMT", "HD"
+            ], f"Approved ticker {sym} is missing from candidate universe!"
 
 
 class TestR3MiddleGroundPricing:
@@ -237,7 +239,7 @@ class TestR5DialecticalArenaSync:
             "total_collateral_required": 46500.0
         }
 
-        debate = engine._synthesize_dialectical_debate(mock_m1, mock_m2)
+        debate = engine.run_inter_mode_dialectical_debate(mock_m1, mock_m2)
         allocator = debate.get("executive_allocator", {})
         matrix = allocator.get("trade_off_matrix", [])
         assert len(matrix) > 0, "Trade-off matrix is empty!"

@@ -1452,6 +1452,9 @@ def get_behavioral_audit(
     """Performs full psychological and behavioral audit, calculating discipline score and bias diagnostics."""
     try:
         audit = behavioral_forensics.generate_behavioral_audit(report_id=report_id, source=source or "all")
+        acc_summary = database.get_saxo_cache("account_summary") or {}
+        audit["account_value"] = acc_summary.get("total_equity", 0.0)
+        audit["cash_available"] = acc_summary.get("cash_available", 0.0)
         return audit
     except Exception as e:
         logger.error(f"Failed to run behavioral audit: {e}")

@@ -2132,7 +2132,7 @@ def has_fresh_option_chain(symbol: str, expiration_date: str, option_type: str =
                 """,
                 (symbol.upper().strip(), expiration_date.strip(), option_type.lower().strip(), today_str)
             ).fetchone()
-            return (row["cnt"] if row else 0) >= 5
+            return (row["cnt"] if row else 0) >= 3
     except Exception:
         return False
 
