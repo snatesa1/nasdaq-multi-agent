@@ -182,7 +182,7 @@ class CampaignStitcher:
                     continue
                 seen_order_keys.add(key)
 
-                # Compute leg P&L
+                # Compute leg P&L for executed and active orders
                 if status in ["Traded", "Filled"]:
                     if "Sell" in bs:
                         leg_pnl = round(price * 100, 2)
@@ -190,27 +190,35 @@ class CampaignStitcher:
                     else:
                         leg_pnl = -round(price * 100, 2)
                         leg_cost = 2.50
-                elif status == "Working":
-                    leg_pnl = 0.0
-                    leg_cost = 0.0
-                else:
-                    # Expired / Cancelled
-                    leg_pnl = 0.0
-                    leg_cost = 0.0
-
+                    
                     opt_by_ticker[sym].append({
-                    "contract": parsed["contract"],
-                    "expiry": parsed["expiry"],
-                    "strike": parsed["strike"],
-                    "option_type": parsed["option_type"],
-                    "costs": leg_cost,
-                    "pnl": leg_pnl,
-                    "status": status,
-                    "buy_sell": bs,
-                    "time": order_time,
-                    "source": "LIVE_BROKER"
-                })
-                ticker_sources[sym].add("LIVE_BROKER")
+                        "contract": parsed["contract"],
+                        "expiry": parsed["expiry"],
+                        "strike": parsed["strike"],
+                        "option_type": parsed["option_type"],
+                        "costs": leg_cost,
+                        "pnl": leg_pnl,
+                        "status": "Filled",
+                        "buy_sell": bs,
+                        "time": order_time,
+                        "source": "LIVE_BROKER"
+                    })
+                    ticker_sources[sym].add("LIVE_BROKER")
+                elif status == "Working":
+                    opt_by_ticker[sym].append({
+                        "contract": parsed["contract"],
+                        "expiry": parsed["expiry"],
+                        "strike": parsed["strike"],
+                        "option_type": parsed["option_type"],
+                        "costs": 0.0,
+                        "pnl": 0.0,
+                        "status": "Working",
+                        "buy_sell": bs,
+                        "time": order_time,
+                        "source": "LIVE_BROKER"
+                    })
+                    ticker_sources[sym].add("LIVE_BROKER")
+                # Expired/Cancelled 0-price day orders are excluded from executed campaign lifecycles
             elif "Stock" in atype and status in ["Traded", "Filled"]:
                 if sym not in stock_by_ticker:
                     stock_by_ticker[sym] = {
