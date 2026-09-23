@@ -224,26 +224,81 @@ class MarginGuardian:
         except Exception:
             margin_used = 0.0
 
-        margin_avail = max(0.0, total_equity * 0.85)
-        margin_util_pct = (margin_used / total_equity * 100.0) if total_equity > 0 else 0.0
-        margin_util_pct = max(0.0, margin_util_pct)
+        # Calculate authentic existing locked CSP collateral across live open positions
+        live_puts = []
+        live_put_collateral = 0.0
+        try:
+            if self.saxo_client and self.saxo_client.access_token:
+                pos_resp = self.saxo_client.get_positions()
+                positions = pos_resp.get("positions", []) if isinstance(pos_resp, dict) else []
+                for p in positions:
+                    asset_type = p.get("asset_type", "")
+                    opt_type = str(p.get("option_type", "")).lower()
+                    amt = float(p.get("amount", 0.0) or 0.0)
+                    strike = float(p.get("strike_price", 0.0) or 0.0)
+                    if asset_type == "StockOption" and opt_type == "put" and amt < 0:
+                        live_puts.append(p)
+                        live_put_collateral += strike * abs(amt) * 100.0
+            else:
+                cached_p = database.get_saxo_cache("positions")
+                if cached_p and isinstance(cached_p, dict):
+                    positions = cached_p.get("positions", [])
+                    for p in positions:
+                        asset_type = p.get("asset_type", "")
+                        opt_type = str(p.get("option_type", "")).lower()
+                        amt = float(p.get("amount", 0.0) or 0.0)
+                        strike = float(p.get("strike_price", 0.0) or 0.0)
+                        if asset_type == "StockOption" and opt_type == "put" and amt < 0:
+                            live_puts.append(p)
+                            live_put_collateral += strike * abs(amt) * 100.0
+        except Exception as e_pos:
+            logger.debug(f"Live positions query non-critical fallback: {e_pos}")
 
-        allowed_margin_dollars = total_equity * (self.max_margin_util_pct / 100.0)
-        remaining_margin_headroom = max(0.0, allowed_margin_dollars - margin_used)
+        # Also account for active approved/placed staged trades in SQLite
+        staged_locked_collateral = 0.0
+        try:
+            staged_trades = database.list_staged_trades()
+            active_staged = [t for t in staged_trades if t.get("status") in ["APPROVED", "PLACED", "WORKING", "EXECUTING"]]
+            live_symbols = {p.get("symbol", "").upper() for p in live_puts}
+            for t in active_staged:
+                sym = t.get("symbol", "").upper()
+                strat = str(t.get("strategy", "CSP")).upper()
+                if "PUT" in strat and sym not in live_symbols:
+                    staged_locked_collateral += float(t.get("collateral_required", 0.0) or 0.0)
+        except Exception as e_stg:
+            logger.debug(f"Staged trades query non-critical fallback: {e_stg}")
+
+        total_locked_csp_collateral = round(live_put_collateral + staged_locked_collateral, 2)
+
+        allowed_margin_dollars = round(total_equity * (self.max_margin_util_pct / 100.0), 2)
+        remaining_collateral_headroom = max(0.0, allowed_margin_dollars - total_locked_csp_collateral)
+        collateral_util_pct = (total_locked_csp_collateral / total_equity * 100.0) if total_equity > 0 else 0.0
+        is_capacity_exhausted = bool(remaining_collateral_headroom <= 0 or total_locked_csp_collateral >= allowed_margin_dollars)
+
+        # Synthetic margin utilization reflects both broker margin and CSP collateral commitment
+        effective_margin_used = max(margin_used, total_locked_csp_collateral * 0.15)
+        margin_util_pct = (effective_margin_used / total_equity * 100.0) if total_equity > 0 else 0.0
+        remaining_margin_headroom = max(0.0, allowed_margin_dollars - effective_margin_used)
         max_allowed_collateral = round(cash_avail * (self.max_cash_collateral_pct / 100.0), 2)
 
         return {
             "total_equity": round(total_equity, 2),
             "cash_available": round(cash_avail, 2),
             "margin_used": round(margin_used, 2),
-            "margin_available_broker": round(margin_avail, 2),
+            "effective_margin_used": round(effective_margin_used, 2),
+            "existing_locked_csp_collateral": total_locked_csp_collateral,
+            "live_short_puts_count": len(live_puts),
+            "collateral_utilization_pct": round(collateral_util_pct, 2),
+            "remaining_collateral_headroom": round(remaining_collateral_headroom, 2),
+            "is_capacity_exhausted": is_capacity_exhausted,
+            "margin_available_broker": round(max(0.0, total_equity * 0.85), 2),
             "margin_utilization_pct": round(margin_util_pct, 2),
             "max_margin_limit_pct": self.max_margin_util_pct,
             "allowed_margin_dollars": round(allowed_margin_dollars, 2),
             "remaining_margin_headroom": round(remaining_margin_headroom, 2),
             "max_allowed_collateral": max_allowed_collateral,
             "max_cash_collateral_pct": self.max_cash_collateral_pct,
-            "is_within_limit": margin_util_pct <= self.max_margin_util_pct,
+            "is_within_limit": not is_capacity_exhausted and margin_util_pct <= self.max_margin_util_pct,
             "balance_source": balances.get("balance_source", "CACHED_BROKER"),
             "is_simulated": balances.get("is_simulated", False),
             "account_id": balances.get("account_id", ""),
@@ -310,13 +365,17 @@ class MarginGuardian:
         projected_margin_used = margin_used + margin_impact
         projected_util_pct = (projected_margin_used / total_equity * 100.0) if total_equity > 0 else 0.0
 
+        existing_locked = float(status.get("existing_locked_csp_collateral", 0.0) or 0.0)
+        allowed_margin_dollars = float(status.get("allowed_margin_dollars", total_equity * (self.max_margin_util_pct / 100.0)))
+        total_projected_collateral = existing_locked + collateral_required
+
+        is_put = any(p in strat_upper for p in ["PUT", "CSP"])
         # Enforce single-position collateral ceiling for CSPs:
         # No single candidate can consume > 35% of total collateral budget (~$12,500 max / strike <= $125)
-        # to ensure that 4 high-quality candidates can fit into the account's cash collateral budget.
         max_single_trade_collateral = max_allowed_collateral * 0.35
-        passed_single_trade_cap = (collateral_required <= max_single_trade_collateral) if "PUT" in strat_upper else True
+        passed_single_trade_cap = (collateral_required <= max_single_trade_collateral) if is_put else True
         passed_margin_cap = projected_util_pct <= self.max_margin_util_pct
-        passed_collateral_check = (collateral_required <= max_allowed_collateral) if "PUT" in strat_upper else True
+        passed_collateral_check = (total_projected_collateral <= allowed_margin_dollars) if is_put else True
 
         approved = passed_margin_cap and passed_collateral_check and passed_single_trade_cap
 
@@ -334,8 +393,9 @@ class MarginGuardian:
             )
         if not passed_collateral_check:
             reasons.append(
-                f"COLLATERAL CAP EXCEEDED: Collateral requirement ${collateral_required:,.2f} exceeds "
-                f"the 50% available cash budget of ${max_allowed_collateral:,.2f} (Total Cash: ${cash_avail:,.2f})."
+                f"MARGIN CEILING EXCEEDED: Portfolio already holds ${existing_locked:,.2f} in locked CSP collateral. "
+                f"New trade (${collateral_required:,.2f}) would bring total exposure to ${total_projected_collateral:,.2f}, "
+                f"exceeding your 75% margin ceiling of ${allowed_margin_dollars:,.2f}."
             )
 
         status_str = "APPROVED"
@@ -346,6 +406,7 @@ class MarginGuardian:
 
         return {
             "approved": approved,
+            "is_valid": approved,
             "status": status_str,
             "strategy": strategy,
             "strike": strike,
@@ -448,14 +509,17 @@ class MarginGuardian:
                 cumulative_collateral += collat
                 cumulative_margin_impact += margin_imp
 
+        existing_locked = float(status.get("existing_locked_csp_collateral", 0.0) or 0.0)
+        total_committed_collateral = round(existing_locked + cumulative_collateral, 2)
+
         projected_margin_used = margin_used + cumulative_margin_impact
         projected_margin_util_pct = (projected_margin_used / total_equity * 100.0) if total_equity > 0 else 0.0
-        collateral_util_pct = (cumulative_collateral / cash_avail * 100.0) if cash_avail > 0 else 0.0
+        collateral_util_pct = (total_committed_collateral / total_equity * 100.0) if total_equity > 0 else 0.0
 
-        remaining_collateral_headroom = max(0.0, max_allowed_collateral - cumulative_collateral)
+        remaining_collateral_headroom = max(0.0, allowed_margin_dollars - total_committed_collateral)
         remaining_margin_headroom = max(0.0, allowed_margin_dollars - projected_margin_used)
 
-        passed_collateral_cap = cumulative_collateral <= max_allowed_collateral
+        passed_collateral_cap = (total_committed_collateral <= allowed_margin_dollars) and (cumulative_collateral <= max_allowed_collateral)
         passed_margin_cap = projected_margin_util_pct <= self.max_margin_util_pct
 
         approved = passed_collateral_cap and passed_margin_cap
@@ -465,10 +529,17 @@ class MarginGuardian:
 
         if not passed_collateral_cap:
             status_str = "COLLATERAL_LIMIT_EXCEEDED"
-            reasons.append(
-                f"CUMULATIVE COLLATERAL EXCEEDED: Basket requires ${cumulative_collateral:,.2f} collateral ({collateral_util_pct:.1f}% of cash), "
-                f"exceeding your 50.0% cash cap of ${max_allowed_collateral:,.2f} (Available Cash: ${cash_avail:,.2f})."
-            )
+            if total_committed_collateral > allowed_margin_dollars:
+                reasons.append(
+                    f"CUMULATIVE MARGIN CEILING EXCEEDED: Portfolio already holds ${existing_locked:,.2f} in locked CSP collateral. "
+                    f"New basket requires ${cumulative_collateral:,.2f}, bringing total collateral commitment to ${total_committed_collateral:,.2f}, "
+                    f"exceeding your 75% margin ceiling of ${allowed_margin_dollars:,.2f}."
+                )
+            if cumulative_collateral > max_allowed_collateral:
+                reasons.append(
+                    f"CUMULATIVE CASH COLLATERAL EXCEEDED: Basket requires ${cumulative_collateral:,.2f} collateral, "
+                    f"exceeding your cash buffer cap of ${max_allowed_collateral:,.2f} (Available Cash: ${cash_avail:,.2f})."
+                )
         if not passed_margin_cap:
             status_str = "MARGIN_LIMIT_EXCEEDED"
             reasons.append(
@@ -481,7 +552,10 @@ class MarginGuardian:
             "status": status_str,
             "trade_count": total_trades_count,
             "cumulative_collateral": round(cumulative_collateral, 2),
+            "existing_locked_csp_collateral": round(existing_locked, 2),
+            "total_committed_collateral": round(total_committed_collateral, 2),
             "max_allowed_collateral": round(max_allowed_collateral, 2),
+            "allowed_margin_dollars": round(allowed_margin_dollars, 2),
             "collateral_utilization_pct": round(collateral_util_pct, 2),
             "remaining_collateral_headroom": round(remaining_collateral_headroom, 2),
             "cumulative_margin_impact": round(cumulative_margin_impact, 2),

@@ -932,9 +932,26 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
         - **Elimination of False Handshake Timeout Alerts**:
           * Expanded frontend approval timeout budget from 30s to 65s in `api.ts` to accommodate Saxo OpenAPI pre-trade margin calculations.
           * Added post-timeout self-healing reconciliation in `handleApprove()`, querying the database to confirm whether Saxo accepted the trade before reporting errors.
-        - **Automated Verification**:
-          * `pytest tests/`: 12/12 passed (100%).
-          * Next.js production build (`npm run build`): compiled 17/17 pages cleanly.
+    28. **Portfolio-Aware CSP Collateral Gating, Live Broker Headroom & Risk Aggregator Safety Veto (2026-09-23)**:
+        - **Root Cause of Risk Aggregator Blindness**:
+          * Saxo OpenAPI cash accounts return `margin_used: 0.0` for Cash-Secured Puts because collateral is secured by cash rather than borrowed broker margin debt.
+          * `MarginGuardian` previously evaluated proposed trade baskets in isolation without factoring in active open short put positions in the broker account or active staged trades in SQLite.
+          * When the user held 5 live short put positions (`QCOM`, `COIN`, `INTC`, `NEM`, `GOOGL`) locking **$143,500.00** of cash collateral against **$150,780.66** total account equity (95.2% commitment), `MarginGuardian` read `margin_used: 0.0`, resulting in a false `remaining_margin_headroom: $113,046.74` and allowing the Weekly Intelligence Engine to continue proposing 3-4 new trade candidates despite exceeding the hard 75% margin ceiling.
+        - **Architectural Enhancements**:
+          * **Live CSP Collateral & Staged Trade Aggregation (`margin_guardian.py`)**:
+            `get_current_margin_status()` dynamically queries live Saxo positions (`get_positions()`) and filters for short stock options with `option_type == "put"` and `amount < 0`, summing `strike * abs(amount) * 100.0`. It also incorporates active SQLite staged trades (`list_staged_trades()` in `APPROVED`, `PLACED`, `WORKING`, `EXECUTING` states).
+            Calculates `existing_locked_csp_collateral`, `allowed_margin_dollars` (75% equity ceiling), `remaining_collateral_headroom = max(0.0, allowed_margin - locked_collateral)`, `collateral_utilization_pct`, and sets `is_capacity_exhausted = True` when headroom $\le 0$.
+          * **Cumulative Basket & Single-Trade Validation (`margin_guardian.py`)**:
+            Updated `validate_trade_margin` and `validate_cumulative_basket` to audit `existing_locked + cumulative_collateral <= allowed_margin_dollars`. Rejects new trades with `COLLATERAL_LIMIT_EXCEEDED` when capacity is exhausted.
+          * **Risk Aggregator Capital Veto & Zero-Phantom Staging (`weekly_intelligence.py`)**:
+            `_generate_dual_mode_harvest_blotters()` pre-flights `is_capacity_exhausted`. When exhausted: purges unapproved staged trades from SQLite, sets `staged_trades = []`, `portfolio_fully_deployed = True`, and prevents phantom trade generation.
+            `run_inter_mode_dialectical_debate()` outputs a unanimous multi-agent capital defense synthesis: Risk Aggregator enforces a non-negotiable `CAPITAL_SAFETY_VETO`, Financial Analyst recommends `DEFENSIVE_HOLD`, and Executive Allocator designates `PORTFOLIO_FULLY_DEPLOYED`.
+          * **Executive Protection UI Cockpit (`weekly-intelligence/page.tsx`)**:
+            When capacity is exhausted (`portfolio_fully_deployed = True`), replaces candidate list with an executive **"Portfolio Fully Deployed & Capital Protected"** card detailing live account equity ($150,780.66), 75% margin ceiling ($113,085.50), locked CSP collateral ($143,500.00 / 95.2%), and remaining headroom ($0.00), guiding the user on theta decay and closing winning trades in SaxoTraderGO to liberate collateral.
+        - **Automated Validation**:
+          * `test_margin_guardian_capacity.py`: Verified 100% pass on capacity exhaustion, single-trade blocking, cumulative basket rejection, and weekly intelligence blotter gating.
+          * `test_tier1_feature_coverage.py`: 12/12 e2e tests passed cleanly (100%).
+          * Next.js production build (`npm run build`): All 17 static pages compiled with zero errors.
 
 ## 📊 Antigravity Usage Stats
 > Last Updated: 2026-09-23 22:15:00 SGT

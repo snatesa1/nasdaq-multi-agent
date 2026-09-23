@@ -205,6 +205,16 @@ export interface HarvestModeData {
   total_staged_contracts: number;
   candidates_count: number;
   candidates: StagedTrade[];
+  portfolio_fully_deployed?: boolean;
+  deployment_reason?: string;
+  capacity_metrics?: {
+    existing_locked_csp_collateral: number;
+    allowed_margin_dollars: number;
+    collateral_utilization_pct: number;
+    remaining_collateral_headroom: number;
+    live_short_puts_count: number;
+    is_capacity_exhausted: boolean;
+  };
 }
 
 export interface DebateAgentAnalysis {
@@ -258,6 +268,11 @@ export interface WheelHarvestBlotter {
   mode_1?: HarvestModeData;
   mode_2?: HarvestModeData;
   debate_arena?: DebateArenaData;
+  portfolio_fully_deployed?: boolean;
+  capacity_message?: string;
+  existing_locked_csp_collateral?: number;
+  allowed_margin_dollars?: number;
+  live_short_puts_count?: number;
 }
 
 export interface MarginStatus {
@@ -271,6 +286,11 @@ export interface MarginStatus {
   is_within_limit: boolean;
   currency: string;
   updated_at: string;
+  existing_locked_csp_collateral?: number;
+  live_short_puts_count?: number;
+  collateral_utilization_pct?: number;
+  remaining_collateral_headroom?: number;
+  is_capacity_exhausted?: boolean;
 }
 
 export interface MarketSummaryItem {
