@@ -140,6 +140,7 @@ def _init_db():
                 approved_at           TEXT,
                 executed_at           TEXT,
                 week_label            TEXT NOT NULL,
+                limit_price           REAL,
                 bid_price             REAL,
                 ask_price             REAL,
                 spread                REAL,
@@ -152,6 +153,7 @@ def _init_db():
         """)
         # Dynamic schema migration for existing databases
         for col, col_type in [
+            ("limit_price", "REAL"),
             ("bid_price", "REAL"),
             ("ask_price", "REAL"),
             ("spread", "REAL"),
@@ -165,6 +167,27 @@ def _init_db():
                 conn.execute(f"ALTER TABLE staged_trades ADD COLUMN {col} {col_type}")
             except Exception:
                 pass
+
+        # ── Cached Option Chains (Batch Yahoo Finance / OPRA Ingestion) ─
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS cached_option_chains (
+                symbol              TEXT NOT NULL,
+                expiration_date     TEXT NOT NULL,
+                strike              REAL NOT NULL,
+                option_type         TEXT NOT NULL,
+                dte                 INTEGER NOT NULL,
+                bid                 REAL DEFAULT 0.0,
+                ask                 REAL DEFAULT 0.0,
+                mid                 REAL DEFAULT 0.0,
+                last_price          REAL DEFAULT 0.0,
+                volume              INTEGER DEFAULT 0,
+                open_interest       INTEGER DEFAULT 0,
+                implied_volatility  REAL DEFAULT 0.0,
+                contract_symbol     TEXT,
+                updated_at          TEXT NOT NULL,
+                PRIMARY KEY (symbol, expiration_date, strike, option_type)
+            )
+        """)
         # ── Broker Tokens (Persistent OAuth Credentials) ─────────────────
         conn.execute("""
             CREATE TABLE IF NOT EXISTS broker_tokens (
@@ -1148,7 +1171,7 @@ def save_staged_trade(record: Dict[str, Any]):
                     margin_check_result, safety_check_result, status,
                     saxo_order_id, saxo_order_response, proposed_at,
                     approved_at, executed_at, week_label,
-                    bid_price, ask_price, spread, pricing_source,
+                    limit_price, bid_price, ask_price, spread, pricing_source,
                     contract_uic, contract_description, contract_symbol, expiration_date
                 ) VALUES (
                     ?, ?, ?, ?, ?, ?, ?,
@@ -1157,7 +1180,7 @@ def save_staged_trade(record: Dict[str, Any]):
                     ?, ?, ?,
                     ?, ?, ?,
                     ?, ?, ?,
-                    ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?,
                     ?, ?, ?, ?
                 )
                 ON CONFLICT(trade_id) DO UPDATE SET
@@ -1168,6 +1191,7 @@ def save_staged_trade(record: Dict[str, Any]):
                     saxo_order_response = excluded.saxo_order_response,
                     approved_at = excluded.approved_at,
                     executed_at = excluded.executed_at,
+                    limit_price = COALESCE(excluded.limit_price, staged_trades.limit_price),
                     bid_price = COALESCE(excluded.bid_price, staged_trades.bid_price),
                     ask_price = COALESCE(excluded.ask_price, staged_trades.ask_price),
                     spread = COALESCE(excluded.spread, staged_trades.spread),
@@ -1185,7 +1209,7 @@ def save_staged_trade(record: Dict[str, Any]):
                     record.get("margin_check_result"), record.get("safety_check_result"), record.get("status", "PROPOSED"),
                     record.get("saxo_order_id"), record.get("saxo_order_response"), record.get("proposed_at"),
                     record.get("approved_at"), record.get("executed_at"), record.get("week_label"),
-                    record.get("bid_price"), record.get("ask_price"), record.get("spread"), record.get("pricing_source"),
+                    record.get("limit_price"), record.get("bid_price"), record.get("ask_price"), record.get("spread"), record.get("pricing_source"),
                     record.get("contract_uic") or record.get("uic"), record.get("contract_description"),
                     record.get("contract_symbol"), record.get("expiration_date")
                 )
@@ -1193,6 +1217,46 @@ def save_staged_trade(record: Dict[str, Any]):
             conn.commit()
     except Exception as e:
         logger.error(f"Failed to save staged trade {record.get('trade_id')}: {e}")
+
+def update_staged_trade_status(
+    trade_id: str,
+    status: str,
+    limit_price: Optional[float] = None,
+    order_id: Optional[str] = None,
+    order_response: Optional[str] = None,
+    approved_at: Optional[str] = None,
+    executed_at: Optional[str] = None
+) -> bool:
+    """Updates status and optional limit_price or execution details of a staged trade in SQLite."""
+    try:
+        with _get_conn() as conn:
+            updates = ["status = ?"]
+            params: List[Any] = [status]
+            if limit_price is not None:
+                updates.append("limit_price = ?")
+                params.append(float(limit_price))
+            if order_id is not None:
+                updates.append("saxo_order_id = ?")
+                params.append(str(order_id))
+            if order_response is not None:
+                updates.append("saxo_order_response = ?")
+                params.append(str(order_response))
+            if approved_at is not None:
+                updates.append("approved_at = ?")
+                params.append(str(approved_at))
+            if executed_at is not None:
+                updates.append("executed_at = ?")
+                params.append(str(executed_at))
+            params.append(trade_id)
+            conn.execute(
+                f"UPDATE staged_trades SET {', '.join(updates)} WHERE trade_id = ?",
+                tuple(params)
+            )
+            conn.commit()
+            return True
+    except Exception as e:
+        logger.error(f"Failed to update staged trade status for {trade_id}: {e}")
+        return False
 
 def get_staged_trade_by_id(trade_id: str) -> Optional[Dict[str, Any]]:
     """Retrieves a staged trade record by trade_id."""
@@ -1929,6 +1993,148 @@ try:
     init_macro_category_corpus()
 except Exception as e:
     logger.warning(f"Could not auto-seed macro_category_corpus on import: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  CACHED OPTION CHAINS HELPERS (BATCH INGESTION & HARVESTING LOOKUP)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def save_option_chain_contracts(contracts: List[Dict[str, Any]]) -> int:
+    """
+    Descriptive Summary:
+        Batch upserts option chain contracts extracted from Yahoo Finance or OPRA feeds
+        into SQLite `cached_option_chains` table.
+
+    Parameters:
+        contracts (List[Dict[str, Any]]): List of option contracts containing symbol,
+            expiration_date, strike, option_type, dte, bid, ask, mid, last_price, volume,
+            open_interest, implied_volatility, and contract_symbol.
+
+    Returns:
+        int: Number of contracts successfully upserted.
+
+    Exceptions / Side Effects:
+        Performs batch UPSERT into cached_option_chains table. Commits transaction.
+
+    Usage Example:
+        >>> count = save_option_chain_contracts([{"symbol": "INTC", "strike": 100.0, ...}])
+        >>> assert count >= 1
+    """
+    if not contracts:
+        return 0
+    now_iso = datetime.now().isoformat()
+    count = 0
+    try:
+        with _get_conn() as conn:
+            for c in contracts:
+                sym = str(c.get("symbol", "")).upper().strip()
+                exp = str(c.get("expiration_date", "")).strip()
+                strike = float(c.get("strike", 0.0))
+                opt_type = str(c.get("option_type", "put")).lower().strip()
+                dte = int(c.get("dte", 0))
+                bid = float(c.get("bid", 0.0) or 0.0)
+                ask = float(c.get("ask", 0.0) or 0.0)
+                mid = float(c.get("mid", 0.0) or ((bid + ask) / 2.0 if (bid > 0 and ask > 0) else max(bid, ask)))
+                last_price = float(c.get("last_price", 0.0) or 0.0)
+                vol = int(c.get("volume", 0) or 0)
+                oi = int(c.get("open_interest", 0) or 0)
+                iv = float(c.get("implied_volatility", 0.0) or 0.0)
+                csym = str(c.get("contract_symbol", "") or "")
+
+                conn.execute(
+                    """
+                    INSERT INTO cached_option_chains (
+                        symbol, expiration_date, strike, option_type, dte,
+                        bid, ask, mid, last_price, volume, open_interest, implied_volatility, contract_symbol, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(symbol, expiration_date, strike, option_type) DO UPDATE SET
+                        dte = excluded.dte,
+                        bid = excluded.bid,
+                        ask = excluded.ask,
+                        mid = excluded.mid,
+                        last_price = excluded.last_price,
+                        volume = excluded.volume,
+                        open_interest = excluded.open_interest,
+                        implied_volatility = excluded.implied_volatility,
+                        contract_symbol = excluded.contract_symbol,
+                        updated_at = excluded.updated_at
+                    """,
+                    (sym, exp, strike, opt_type, dte, bid, ask, mid, last_price, vol, oi, iv, csym, now_iso)
+                )
+                count += 1
+            conn.commit()
+    except Exception as e:
+        logger.error(f"Failed to save option chain contracts: {e}")
+    return count
+
+
+def get_cached_option_chain(symbol: str, expiration_date: str, option_type: str = "put") -> List[Dict[str, Any]]:
+    """
+    Descriptive Summary:
+        Retrieves all cached option contracts for a specific ticker, expiration date, and
+        option type from local SQLite storage, ordered by strike ascending.
+
+    Parameters:
+        symbol (str): Underlying ticker (e.g. 'INTC', 'COIN', 'SO').
+        expiration_date (str): Target expiration date in YYYY-MM-DD format (e.g. '2026-10-23').
+        option_type (str, optional): 'put' or 'call'. Defaults to 'put'.
+
+    Returns:
+        List[Dict[str, Any]]: List of option contract dictionaries.
+
+    Exceptions / Side Effects:
+        Read-only query on cached_option_chains table.
+
+    Usage Example:
+        >>> puts = get_cached_option_chain('INTC', '2026-10-23', 'put')
+        >>> print(len(puts))
+        54
+    """
+    try:
+        with _get_conn() as conn:
+            rows = conn.execute(
+                """
+                SELECT * FROM cached_option_chains
+                WHERE symbol = ? AND expiration_date = ? AND option_type = ?
+                ORDER BY strike ASC
+                """,
+                (symbol.upper().strip(), expiration_date.strip(), option_type.lower().strip())
+            ).fetchall()
+            return [dict(r) for r in rows]
+    except Exception as e:
+        logger.error(f"Failed to fetch cached option chain for {symbol}: {e}")
+        return []
+
+
+def has_fresh_option_chain(symbol: str, expiration_date: str, option_type: str = "put") -> bool:
+    """
+    Descriptive Summary:
+        Checks whether a viable, liquid option chain exists in SQLite updated on today's calendar date.
+
+    Parameters:
+        symbol (str): Underlying ticker.
+        expiration_date (str): Target expiration date.
+        option_type (str, optional): 'put' or 'call'. Defaults to 'put'.
+
+    Returns:
+        bool: True if at least 5 contracts exist updated today.
+
+    Exceptions / Side Effects:
+        Read-only query.
+    """
+    try:
+        today_str = datetime.now().strftime("%Y-%m-%d")
+        with _get_conn() as conn:
+            row = conn.execute(
+                """
+                SELECT COUNT(*) as cnt FROM cached_option_chains
+                WHERE symbol = ? AND expiration_date = ? AND option_type = ? AND updated_at >= ?
+                """,
+                (symbol.upper().strip(), expiration_date.strip(), option_type.lower().strip(), today_str)
+            ).fetchone()
+            return (row["cnt"] if row else 0) >= 5
+    except Exception:
+        return False
 
 
 

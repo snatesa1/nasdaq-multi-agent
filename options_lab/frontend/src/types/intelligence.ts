@@ -151,6 +151,7 @@ export interface StagedTrade {
   delta: number;
   dte: number;
   premium_estimate: number;
+  limit_price?: number;
   bid_price?: number;
   ask_price?: number;
   spread?: number;

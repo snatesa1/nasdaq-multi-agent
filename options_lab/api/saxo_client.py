@@ -1721,13 +1721,17 @@ class SaxoClient:
                 if window_candidates:
                     selected_space_meta = min(window_candidates, key=lambda x: abs(x["cal_dte"] - 32))
 
-            # Priority 3: Nearest calendar DTE >= 25 days
+            # Priority 3: Nearest calendar DTE within target range (strictly avoid LEAPs or >40 DTE when target is 30-35)
             if not selected_space_meta:
-                future_spaces = [item for item in parsed_spaces if item["cal_dte"] >= 25]
+                target_min = 25 if (30 <= dte <= 35) else 20
+                target_max = 40 if (30 <= dte <= 35) else 65
+                future_spaces = [item for item in parsed_spaces if target_min <= item["cal_dte"] <= target_max]
                 if future_spaces:
                     selected_space_meta = min(future_spaces, key=lambda x: abs(x["cal_dte"] - dte))
-                else:
-                    selected_space_meta = min(parsed_spaces, key=lambda x: abs(x["cal_dte"] - dte))
+                elif not (30 <= dte <= 35):
+                    future_spaces_broad = [item for item in parsed_spaces if item["cal_dte"] >= 20]
+                    if future_spaces_broad:
+                        selected_space_meta = min(future_spaces_broad, key=lambda x: abs(x["cal_dte"] - dte))
 
             if not selected_space_meta:
                 return None
@@ -1783,7 +1787,14 @@ class SaxoClient:
 
             # Safety Shield: Verify resolved contract ticker matches requested underlying ticker
             contract_sym_root = (sym or "").split(":")[0].split("/")[0].upper().strip()
-            if contract_sym_root and contract_sym_root != clean_sym and not contract_sym_root.startswith(clean_sym):
+            is_ticker_match = (
+                contract_sym_root == clean_sym or
+                contract_sym_root.startswith(clean_sym) or
+                contract_sym_root == f"O{clean_sym}" or
+                contract_sym_root.lstrip("O") == clean_sym or
+                clean_sym in desc.upper()
+            )
+            if contract_sym_root and not is_ticker_match:
                 logger.error(
                     f"🛡️ [SaxoClient Safety Shield] Mismatched contract resolved: "
                     f"Expected underlying '{clean_sym}', but resolved contract '{sym}' ({desc}, UIC {opt_uic}). Rejecting resolution."

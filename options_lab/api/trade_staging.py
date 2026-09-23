@@ -93,6 +93,8 @@ class TradeStagingEngine:
             contracts=contracts
         )
 
+        limit_price = float(rec.get("limit_price") or premium_est)
+
         staged_record = {
             "trade_id": trade_id,
             "id": trade_id,
@@ -106,6 +108,7 @@ class TradeStagingEngine:
             "delta": delta,
             "dte": dte,
             "premium_estimate": premium_est,
+            "limit_price": limit_price,
             "bid_price": float(rec.get("bid_price", 0.0) or 0.0),
             "ask_price": float(rec.get("ask_price", 0.0) or 0.0),
             "spread": float(rec.get("spread", 0.0) or 0.0),
@@ -151,6 +154,7 @@ class TradeStagingEngine:
         rec["trade_id"] = trade_id
         rec["id"] = trade_id
         rec["staged_trade_id"] = trade_id
+        rec["limit_price"] = limit_price
         logger.info(f"Staged trade {trade_id} [{symbol} {strategy} ${strike}] for week {week_label}.")
         return staged_record
 
@@ -298,7 +302,15 @@ class TradeStagingEngine:
                         }
 
                     # Audit Underlying Ticker match
-                    if contract_sym and not contract_sym.startswith("INST-") and not (contract_sym == symbol.upper() or contract_sym.startswith(symbol.upper())):
+                    sym_root = (contract_sym or "").split(":")[0].split("/")[0].upper()
+                    is_sym_match = (
+                        sym_root == symbol.upper() or
+                        sym_root.startswith(symbol.upper()) or
+                        sym_root == f"O{symbol.upper()}" or
+                        sym_root.lstrip("O") == symbol.upper() or
+                        symbol.upper() in contract_desc.upper()
+                    )
+                    if contract_sym and not contract_sym.startswith("INST-") and not is_sym_match:
                         error_msg = (
                             f"CONTRACT TICKER MISMATCH: Expected underlying ticker '{symbol}', but resolved Saxo contract "
                             f"'{contract_desc}' (UIC: {uic}) belongs to '{contract_sym}'. Order execution blocked."

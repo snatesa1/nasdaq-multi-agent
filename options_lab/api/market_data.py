@@ -707,3 +707,157 @@ def fetch_option_market_quote(
         "uic": uic,
         "is_real_quote": False
     }
+
+
+def fetch_and_dump_option_chain_from_yahoo(
+    symbol: str,
+    target_expiration_date: str,
+    dte: int = 31
+) -> List[Dict[str, Any]]:
+    """
+    Descriptive Summary:
+        Extracts the complete option chain for a specific expiration date from Yahoo Finance
+        and dumps all contracts (calls and puts) with authentic bids, asks, mids, volume,
+        open interest, and implied volatility directly into the local SQLite `cached_option_chains` table.
+
+    Parameters:
+        symbol (str): Underlying ticker symbol (e.g. 'INTC', 'COIN', 'SO').
+        target_expiration_date (str): Targeted options expiration date (e.g. '2026-10-23').
+        dte (int, optional): Calendar days to expiration. Defaults to 31.
+
+    Returns:
+        List[Dict[str, Any]]: List of normalized option contract dictionaries saved to SQLite.
+
+    Exceptions / Side Effects:
+        Network calls to Yahoo Finance API. Batch writes to SQLite `cached_option_chains` table.
+
+    Usage Example:
+        >>> contracts = fetch_and_dump_option_chain_from_yahoo('INTC', '2026-10-23', 31)
+        >>> assert len(contracts) > 0
+    """
+    from . import db as database
+    symbol_clean = normalize_canonical_ticker(symbol)
+    contracts = []
+
+    try:
+        tk = yf.Ticker(symbol_clean)
+        expiries = tk.options
+        if not expiries:
+            logger.warning(f"No option expirations found for {symbol_clean} on Yahoo Finance")
+            return []
+
+        resolved_exp = None
+        for exp in expiries:
+            if exp == target_expiration_date:
+                resolved_exp = exp
+                break
+
+        if not resolved_exp:
+            # Match closest expiration within target window
+            now_dt = datetime.now()
+            min_diff = float("inf")
+            for exp in expiries:
+                try:
+                    exp_dt = datetime.strptime(exp, "%Y-%m-%d")
+                    diff = abs((exp_dt - now_dt).days - dte)
+                    if diff < min_diff:
+                        min_diff = diff
+                        resolved_exp = exp
+                except Exception:
+                    pass
+
+        if not resolved_exp:
+            logger.warning(f"Could not resolve target expiration {target_expiration_date} for {symbol_clean}")
+            return []
+
+        chain = tk.option_chain(resolved_exp)
+        now_date = datetime.now().date()
+        exp_date = datetime.strptime(resolved_exp, "%Y-%m-%d").date()
+        cal_dte = max(1, (exp_date - now_date).days)
+
+        def _safe_float(v, default=0.0):
+            try:
+                if v is None or pd.isna(v):
+                    return default
+                return float(v)
+            except Exception:
+                return default
+
+        def _safe_int(v, default=0):
+            try:
+                if v is None or pd.isna(v):
+                    return default
+                return int(float(v))
+            except Exception:
+                return default
+
+        # Process puts
+        if chain.puts is not None and not chain.puts.empty:
+            for _, row in chain.puts.iterrows():
+                strike = _safe_float(row.get("strike"))
+                if strike <= 0:
+                    continue
+                bid = _safe_float(row.get("bid"))
+                ask = _safe_float(row.get("ask"))
+                last_p = _safe_float(row.get("lastPrice"))
+                mid = round((bid + ask) / 2.0, 2) if (bid > 0 and ask > 0) else (last_p if last_p > 0 else max(bid, ask))
+                vol = _safe_int(row.get("volume"))
+                oi = _safe_int(row.get("openInterest"))
+                iv = _safe_float(row.get("impliedVolatility"))
+                csym = str(row.get("contractSymbol") or "")
+
+                contracts.append({
+                    "symbol": symbol_clean,
+                    "expiration_date": resolved_exp,
+                    "strike": strike,
+                    "option_type": "put",
+                    "dte": cal_dte,
+                    "bid": bid,
+                    "ask": ask,
+                    "mid": mid,
+                    "last_price": last_p,
+                    "volume": vol,
+                    "open_interest": oi,
+                    "implied_volatility": iv,
+                    "contract_symbol": csym
+                })
+
+        # Process calls
+        if chain.calls is not None and not chain.calls.empty:
+            for _, row in chain.calls.iterrows():
+                strike = _safe_float(row.get("strike"))
+                if strike <= 0:
+                    continue
+                bid = _safe_float(row.get("bid"))
+                ask = _safe_float(row.get("ask"))
+                last_p = _safe_float(row.get("lastPrice"))
+                mid = round((bid + ask) / 2.0, 2) if (bid > 0 and ask > 0) else (last_p if last_p > 0 else max(bid, ask))
+                vol = _safe_int(row.get("volume"))
+                oi = _safe_int(row.get("openInterest"))
+                iv = _safe_float(row.get("impliedVolatility"))
+                csym = str(row.get("contractSymbol") or "")
+
+                contracts.append({
+                    "symbol": symbol_clean,
+                    "expiration_date": resolved_exp,
+                    "strike": strike,
+                    "option_type": "call",
+                    "dte": cal_dte,
+                    "bid": bid,
+                    "ask": ask,
+                    "mid": mid,
+                    "last_price": last_p,
+                    "volume": vol,
+                    "open_interest": oi,
+                    "implied_volatility": iv,
+                    "contract_symbol": csym
+                })
+
+        if contracts:
+            database.save_option_chain_contracts(contracts)
+            logger.info(f"Dumped {len(contracts)} contracts for {symbol_clean} ({resolved_exp}, DTE: {cal_dte}) into SQLite.")
+
+    except Exception as e:
+        logger.error(f"Failed to fetch/dump option chain from Yahoo Finance for {symbol_clean}: {e}")
+
+    return contracts

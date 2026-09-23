@@ -1011,13 +1011,13 @@ export default function WeeklyIntelligencePage() {
                           <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-slate-500">
                             <span>Spot: <strong className="text-slate-700">${trade.spot_price.toFixed(2)}</strong></span>
                             <span className="text-slate-300">•</span>
-                            <span>Limit Price: <strong className="text-emerald-700 font-mono">${trade.premium_estimate.toFixed(2)}</strong></span>
+                            <span>Limit Price: <strong className="text-emerald-700 font-mono">${(trade.limit_price ?? trade.premium_estimate).toFixed(2)}</strong></span>
                             {trade.bid_price !== undefined && trade.bid_price > 0 && (
                               <>
                                 <span className="text-slate-300">•</span>
                                 <span className="font-mono">Bid: ${trade.bid_price.toFixed(2)} / Ask: ${trade.ask_price?.toFixed(2)}</span>
                                 <span className="text-[10px] px-1.5 py-0.5 bg-slate-100 rounded font-semibold text-slate-600 uppercase">
-                                  {trade.pricing_source === 'OPRA_LIVE' ? 'OPRA Live' : 'Model Quote'}
+                                  {trade.pricing_source?.includes('MIDDLE_GROUND') ? 'Middle Ground (+1.5%)' : (trade.pricing_source === 'OPRA_LIVE' ? 'OPRA Live' : 'Model Quote')}
                                 </span>
                               </>
                             )}
