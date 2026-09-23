@@ -896,9 +896,22 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
           * **DTE Root-Cause Fix in Candidate Builder**: Located and fixed regression in `weekly_intelligence.py:_build_dynamic_trade_candidate` line 444 where `max_dte=65` was hardcoded, causing the calendar cycle to skip October 16 (24 DTE) and jump to November 20 (59 DTE). Fixed to strict `min_dte=30, max_dte=35` (`2026-10-23`, 31 DTE).
           * **Earnings Lockout Relaxation**: Relaxed the blunt `and not has_earnings` filter which was zeroing out core candidates (INTC, COIN, BAC, KO); `seasonality_engine` already expands the strike buffer by +4.0% OTM for earnings protection. Expanded strike ceiling to $220.0, allowing high-conviction winning setups like `COIN` (strike $175) and `INTC` (strike $100) to be staged.
           * **Cache Invalidation & Fresh Harvest**: Purged stale `briefing_current` in `saxo_cache`. Regenerated live blotter with 3 Golden Trades (`INTC` \$100.0, `COIN` \$175.0, `SO` \$72.5) producing **$1,560.00** projected harvest at **31 DTE** (`2026-10-23`), fully satisfying the $1,500 mandate within a 75% margin ceiling.
+    27. **Broad Dynamic Ticker Scanning, Reserve Candidate Promotion & Saxo Behavioral UI Fix (2026-09-23)**:
+        - **Purged Hardcoded Ticker Biases (`weekly_intelligence.py`)**:
+          * Removed static candidate pool restrictions (`curated_mode1_core`) and eliminated hardcoded scoring bonuses (`if sym in ["INTC", "COIN", "SO"]: score += 50.0`).
+          * Expanded evaluation pool across a broad 40+ high-liquidity U.S. option chain ticker universe (`NVDA`, `AMD`, `PLTR`, `TSLA`, `MSFT`, `AMZN`, `GOOGL`, `META`, `BAC`, `JPM`, `XOM`, `CVX`, `UNH`, `LLY`, `DIS`, `CAT`, `GE`, `NFLX`, `UBER`, `QCOM`, `AVGO`, `SMCI`, `IBM`, `COIN`, `INTC`, `SO`, etc.) plus dynamic news catalysts and portfolio holdings.
+          * Replaced static bias with objective quantitative scoring evaluating annualized ROC yield, delta assignment safety ($|\Delta| \le 0.20$), news edge, and watchlist affinity.
+        - **Reserve Candidate Promotion & 5-Contract Scaling**:
+          * Added an automated Reserve Candidate Promotion pass pulling qualifying bench reserve candidates into the active harvest basket when total income is below \$1,500.
+          * Expanded contract scaling ceiling up to 5 contracts within the 75% margin ceiling to guarantee the \$1,500/month harvest milestone is met.
+        - **Dynamic Saxo Behavioral Forensics UI (`page.tsx` & `main.py`)**:
+          * Attached dynamic Saxo `account_value` (`total_equity` from `account_summary`) to `/api/behavioral/audit` endpoint payload.
+          * Replaced static hardcoded text string literals in `behavioral-lab/page.tsx` (e.g. static `$102,192.51` account value and static PnL metrics) with dynamic calculations from live broker data.
+        - **Automated Validation**:
+          * `pytest tests/`: 12/12 passed (100%) in 5.26s.
 
 ## 📊 Antigravity Usage Stats
-> Last Updated: 2026-09-22 21:55:00 SGT
+> Last Updated: 2026-09-23 20:16:00 SGT
 
 | Metric | Current Session |
 | :--- | :--- |
