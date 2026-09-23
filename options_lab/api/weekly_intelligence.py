@@ -1762,6 +1762,9 @@ class WeeklyIntelligenceEngine:
                             historical_winners.add(r["symbol"].upper().replace(" ", ""))
         except Exception:
             pass
+
+        watchlist_set = set(self.watchlist_tickers) | set(self.active_position_tickers)
+
         def _score_mode1_cand(t):
             sym = t.get("symbol", "").upper()
             prem = float(t.get("premium_estimate", 0.0))
