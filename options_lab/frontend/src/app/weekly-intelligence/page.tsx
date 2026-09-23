@@ -386,6 +386,22 @@ export default function WeeklyIntelligencePage() {
       fetchBriefing();
     } catch (err: any) {
       console.error('Approve trade failed:', err);
+      // Self-healing audit check: If client timed out or connection dropped, verify if order was actually placed on broker
+      try {
+        const stagedList = await optionsApi.getStagedTrades();
+        const matched = Array.isArray(stagedList) ? stagedList.find((t: any) => t.trade_id === tradeId) : null;
+        if (matched && (matched.status === 'PLACED' || matched.status === 'FILLED')) {
+          setActionLog(prev => [
+            { id: tradeId, msg: `✅ Trade ${tradeId} Approved & Placed on Saxo! (Order #${matched.saxo_order_id || 'LIVE'} - Reconciled)`, time: new Date().toLocaleTimeString(), type: 'success' },
+            ...prev
+          ]);
+          fetchBriefing();
+          return;
+        }
+      } catch (checkErr) {
+        // Fall through to standard error report
+      }
+
       setActionLog(prev => [
         { id: tradeId, msg: `❌ Approval Error: ${err.message || 'Failed'}`, time: new Date().toLocaleTimeString(), type: 'danger' },
         ...prev

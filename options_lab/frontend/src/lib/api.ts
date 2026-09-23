@@ -286,13 +286,13 @@ export const optionsApi = {
     const q = params.toString();
     return apiRequest(q ? `/api/trades/staged?${q}` : '/api/trades/staged');
   },
-  approveTrade: (tradeId: string, candidateData?: any) => 
+  approveTrade: (tradeId: string, candidateData?: any, timeoutMs: number = 65000) => 
     apiRequest('/api/trades/approve', 'POST', { 
       trade_id: tradeId,
       id: tradeId,
       staged_trade_id: tradeId,
       ...(candidateData || {}) 
-    }),
+    }, timeoutMs),
   rejectTrade: (tradeId: string, reason?: string, candidateData?: any) => 
     apiRequest('/api/trades/reject', 'POST', { 
       trade_id: tradeId,
