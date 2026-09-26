@@ -1044,7 +1044,7 @@ class OptionsADKWorkflowEngine:
                     f"The macroeconomic landscape for {current_date_str} ({week_label}) reflects resilient corporate fundamentals "
                     f"amid shifting monetary policy expectations. Active sectors remain well-diversified across "
                     f"{', '.join(active_sectors) if active_sectors else 'Information Technology, Communication Services, Financials, and Industrials'}. "
-                    f"Quantitative risk checks confirm portfolio operations remain safely within the 15% maximum margin limit."
+                    f"Quantitative risk checks confirm portfolio operations remain safely within the 75% margin ceiling and 50% cash buffer."
                 )
 
             # Post-process briefing_text to strictly purge any residual memo headers (TO:, FROM:, SUBJECT:, DATE:)
@@ -1190,5 +1190,5 @@ class OptionsADKWorkflowEngine:
                 for e in self.workflow.edges
             ],
             "hitl_enabled": True,
-            "deterministic_guardrails": ["MarginGuardian <= 15%", "DTE == 30", "CoveredCall >= 100 shares", "Sector Diversification <= 2 per sector"]
+            "deterministic_guardrails": ["MarginGuardian <= 75% Margin Ceiling", "DTE == 30-35", "CoveredCall >= 100 shares", "Sector Diversification <= 2 per sector"]
         }

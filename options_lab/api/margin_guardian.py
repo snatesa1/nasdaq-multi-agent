@@ -148,14 +148,15 @@ class MarginGuardian:
     Descriptive Summary:
         Real-Time Margin Utilization & Capital Headroom Guardian.
         Enforces strict institutional risk policy constraints:
-        - Maximum Cumulative Margin Utilization Cap: 15.0% of Total Account Equity.
+        - Maximum Cumulative Margin Ceiling: 75.0% of Total Account Equity.
         - Cumulative Basket Cash Collateral Cap: <= 50.0% of Uninvested Cash Buffer.
-        - Active Staged Trades Ceiling: 3 to 4 trades max for $1,000/month harvest.
+        - Synthetic Margin Requirement Factor: 15.0% for equity short put exposure.
+        - Dynamic Active Staged Trades Capacity: 1 to 5 candidates sized to available headroom.
         - Real-Time Headroom & Projected Margin Impact Calculations.
 
     Parameters / Encapsulation:
         saxo_client (Optional[SaxoClient]): Saxo OpenAPI client instance.
-        max_margin_util_pct (float): Hard ceiling for account margin utilization (default: 60.0%).
+        max_margin_util_pct (float): Hard ceiling for account margin utilization (default: 75.0%).
         max_cash_collateral_pct (float): Hard ceiling for cumulative CSP collateral as % of available cash (default: 50.0%).
 
     Returns / Internal State:
@@ -185,7 +186,7 @@ class MarginGuardian:
         """
         Descriptive Summary:
             Fetches live account balance metrics via the 5-tier resolution hierarchy and computes
-            authentic margin utilization and cash collateral boundaries without silent defaults.
+            authentic margin utilization, available candidate slots (1-5), and cash collateral boundaries without silent defaults.
 
         Parameters:
             None.
@@ -196,20 +197,21 @@ class MarginGuardian:
                 - 'cash_available' (float): Uninvested cash available.
                 - 'margin_used' (float): Current margin committed.
                 - 'margin_utilization_pct' (float): Current margin utilization %.
-                - 'max_margin_limit_pct' (float): Risk cap (15.0%).
-                - 'allowed_margin_dollars' (float): Maximum allowed margin in dollars.
-                - 'remaining_margin_headroom' (float): Dollar headroom before 15% cap.
+                - 'max_margin_limit_pct' (float): Margin ceiling limit (75.0%).
+                - 'allowed_margin_dollars' (float): Maximum allowed margin in dollars under 75% ceiling.
+                - 'remaining_margin_headroom' (float): Dollar headroom before 75% ceiling.
                 - 'max_allowed_collateral' (float): 50% cash collateral budget.
+                - 'estimated_available_slots' (int): Permitted trade candidate slots (0 to 5).
                 - 'balance_source' (str): 5-tier provenance tag.
                 - 'is_simulated' (bool): True if benchmark model.
-                - 'is_within_limit' (bool): True if margin <= 15%.
+                - 'is_within_limit' (bool): True if margin exposure is within the 75% ceiling.
 
         Exceptions / Side Effects:
             Non-throwing. Always returns valid numerical structure.
 
         Usage Example:
             >>> status = guardian.get_current_margin_status()
-            >>> print(status["total_equity"], status["balance_source"])
+            >>> print(status["total_equity"], status["balance_source"], status["estimated_available_slots"])
         """
         balances = resolve_account_balances(self.saxo_client)
         total_equity = max(0.0, float(balances.get("total_equity", 100000.0)))

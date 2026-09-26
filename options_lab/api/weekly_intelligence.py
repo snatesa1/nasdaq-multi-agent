@@ -188,7 +188,7 @@ class WeeklyIntelligenceEngine:
 
     Encapsulation & Internal State:
         - saxo_client (SaxoClient): Authenticated broker gateway client for balances, orders, and quotes.
-        - margin_guardian (MarginGuardian): Pre-flight margin safety validator enforcing strict 15% limits.
+        - margin_guardian (MarginGuardian): Pre-flight margin safety validator enforcing 75.0% total capital margin ceiling and 50% cash buffer.
         - trade_staging (TradeStagingEngine): SQLite persistence engine for candidate order staging and status tracking.
         - campaign_stitcher (CampaignStitcher): Multi-year options campaign lifecycle and behavioral stitcher.
         - universe_engine (InstitutionalUniverseEngine): 4-tier universe scanner across all 11 GICS sectors.
@@ -631,7 +631,7 @@ class WeeklyIntelligenceEngine:
             "pillars": {
                 "watchlist_status": f"{sector} Pillar",
                 "trade_history_profile": f"Dynamic {strategy} setup ({seasonality_eval.get('seasonality_bias')}) with {volatility*100:.1f}% realized vol (IV Rank: {seasonality_eval.get('iv_rank_pct')}%)",
-                "margin_status": "Within 15% Max Limit" if margin_eval.get("is_valid", True) else "Margin Constrained"
+                "margin_status": "Within 75% Margin Ceiling" if margin_eval.get("is_valid", True) else "Margin Constrained"
             }
         }
 
@@ -1155,7 +1155,7 @@ class WeeklyIntelligenceEngine:
                 "direction": "DOWN",
                 "bias": "NEUTRAL",
                 "driver": "Systemic equity implied volatility compressed near median levels, favoring disciplined net-seller premium harvesting.",
-                "options_stance": "Systematic Wheel Harvest targeting $1,000/mo ($200-$300/contract) with strict 15% portfolio margin limits."
+                "options_stance": "Systematic Wheel Harvest targeting $1,000/mo ($200-$300/contract) with 75% margin ceiling and 50% cash buffer."
             }
         ]
 
@@ -3080,7 +3080,7 @@ WATCHLIST:
 — If a story directly names or materially affects a watchlist entity (e.g. COIN, INTC, IBM, PLTR, NEM, AAPL, BAC, CVX, CSCO, KO, GS, GE), classify it no lower than High Priority.
 
 SECTOR LENS:
-Broad Macro, Technology, Financials & Systematic Options Yield (Cash-Secured Puts & Covered Calls with strict 30-32 DTE and 15% margin cap)
+Broad Macro, Technology, Financials & Systematic Options Yield (Cash-Secured Puts & Covered Calls with strict 30-35 DTE, 75% margin ceiling, and 50% cash buffer)
 
 STORY COUNT:
 10

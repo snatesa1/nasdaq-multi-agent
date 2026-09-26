@@ -1750,7 +1750,7 @@ async def reject_staged_trade_endpoint(
 
 @app.get("/api/margin/status")
 async def get_margin_status_endpoint(user=Depends(verify_firebase_token)):
-    """Fetches real-time margin status and checks compliance against 15.0% limit."""
+    """Fetches real-time margin status and checks compliance against 75.0% margin ceiling and 50.0% cash collateral capacity."""
     try:
         status = margin_guardian.get_current_margin_status()
         return status
