@@ -10,6 +10,7 @@ import os
 import uuid
 import logging
 import math
+import time
 from typing import Dict, Any, Optional, List
 import pandas as pd
 import numpy as np
@@ -48,6 +49,68 @@ class QuantStatsEngine:
 
     def __init__(self):
         self.reports_dir = REPORTS_DIR
+        self.archive_old_reports()
+
+    def archive_old_reports(self, max_keep: int = 15, max_age_days: int = 7) -> int:
+        """
+        1. Descriptive Summary:
+           Audits and enforces a rolling LRU (Least Recently Used) archival retention policy 
+           on HTML tear sheets within REPORTS_DIR. Purges stale reports older than `max_age_days` 
+           and trims total file count to `max_keep`, preventing unbounded storage accumulation 
+           and disk exhaustion across local and containerized deployments.
+
+        2. Parameters / Encapsulation:
+           - max_keep (int, default=15): Maximum number of most recent HTML tear sheet files to retain.
+           - max_age_days (int, default=7): Maximum allowable file age in days before forced pruning.
+
+        3. Returns / Internal State:
+           - int: Total number of obsolete HTML report files permanently unlinked/purged from disk.
+
+        4. Exceptions / Side Effects:
+           - Catches OSError / FileNotFoundError gracefully per file, logging warnings without crashing.
+           - Modifies filesystem state by deleting stale *.html files in `self.reports_dir`.
+
+        5. Concrete Executable Usage Example:
+           >>> engine = QuantStatsEngine()
+           >>> purged_count = engine.archive_old_reports(max_keep=10, max_age_days=5)
+           >>> print(f"Purged {purged_count} stale tear sheets.")
+        """
+        if not os.path.exists(self.reports_dir):
+            return 0
+
+        purged = 0
+        try:
+            now = time.time()
+            max_age_seconds = max_age_days * 86400
+
+            files = []
+            for entry in os.scandir(self.reports_dir):
+                if entry.is_file() and entry.name.startswith("tearsheet_") and entry.name.endswith(".html"):
+                    try:
+                        stat = entry.stat()
+                        files.append((entry.path, stat.st_mtime))
+                    except OSError:
+                        pass
+
+            # Sort descending by mtime (newest first)
+            files.sort(key=lambda x: x[1], reverse=True)
+
+            for idx, (fpath, mtime) in enumerate(files):
+                file_age = now - mtime
+                # Purge if exceeding max_keep OR older than max_age_days (keeping at least 3 latest)
+                if idx >= max_keep or (file_age > max_age_seconds and idx >= 3):
+                    try:
+                        os.remove(fpath)
+                        purged += 1
+                    except OSError as e:
+                        logger.warning(f"Could not purge stale report {fpath}: {e}")
+
+            if purged > 0:
+                logger.info(f"🧹 [Report Archival] Cleaned up {purged} stale tear sheet(s) from {self.reports_dir}")
+        except Exception as e:
+            logger.error(f"Error during tear sheet archival housekeeping: {e}")
+
+        return purged
 
     def compute_metrics(
         self,
@@ -178,6 +241,9 @@ class QuantStatsEngine:
         Generates a standalone QuantStats HTML performance report.
         Returns the unique report filename / report_id.
         """
+        # Pre-flight archival to prevent disk bloat
+        self.archive_old_reports()
+
         report_id = f"tearsheet_{uuid.uuid4().hex[:12]}.html"
         output_path = os.path.join(self.reports_dir, report_id)
 

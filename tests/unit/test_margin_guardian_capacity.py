@@ -13,6 +13,7 @@ def test_margin_guardian_capacity_exhausted_with_live_puts():
         "balance_source": "LIVE_BROKER",
         "is_simulated": False
     }
+    mock_saxo.get_account_balances.return_value = mock_saxo.get_balances.return_value
     # Mock 5 short put positions locking $143,500 collateral
     mock_saxo.get_positions.return_value = {
         "positions": [
@@ -65,6 +66,7 @@ def test_weekly_intelligence_gating_when_capacity_exhausted():
         "cash_available": 93443.75,
         "margin_used": 0.0
     }
+    mock_saxo.get_account_balances.return_value = mock_saxo.get_balances.return_value
     mock_saxo.get_positions.return_value = {
         "positions": [
             {"asset_type": "StockOption", "option_type": "put", "amount": -1, "strike_price": 1435.0, "symbol": "TEST"}

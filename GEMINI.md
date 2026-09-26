@@ -964,7 +964,14 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
         - **Automated Validation**:
           * `test_margin_guardian_capacity.py`: Verified 100% pass on capacity exhaustion, single-trade blocking, cumulative basket rejection, and weekly intelligence blotter gating.
           * `test_tier1_feature_coverage.py`: 12/12 e2e tests passed cleanly (100%).
-          * Next.js production build (`npm run build`): All 17 static pages compiled with zero errors.
+    29. **Tear Sheet Archival & Disk Space Guardian Invariant (Added 2026-09-27)**:
+        - **Problem & Root Cause**:
+          * Every QuantStats HTML tear sheet generated via `qs.reports.html` produces a standalone 500KB–750KB HTML document in `options_lab/reports/`.
+          * Without an automated retention or archival lifecycle, repeated backtests, simulator sweeps, and weekly audit runs accumulate dozens of files (e.g. 50+ files / ~32MB+), threatening to bloat disk storage over time in both local dev environments and containerized deployments.
+        - **Archival & Retention Mandate**:
+          * **Rolling LRU Retention Cap**: Enforce a strict file count ceiling (e.g. maximum 10-15 latest active reports) or a 7-day Time-To-Live (TTL).
+          * **Pre-Flight Housekeeping in Data Pipeline**: Before writing a new `tearsheet_<hex>.html` in `QuantStatsEngine.generate_html_report()`, the engine must trigger an automated pre-flight scan of `REPORTS_DIR`, sorting existing reports by modification time (`mtime`) and purging or compressing records exceeding the retention threshold.
+          * **Zero Unbounded Accumulation**: Prevent unbounded disk footprint expansion while preserving recent interactive performance audit links for the frontend UI.
 
 ## 📊 Antigravity Usage Stats
 > Last Updated: 2026-09-23 22:15:00 SGT
