@@ -280,6 +280,7 @@ class MarginGuardian:
         margin_util_pct = (effective_margin_used / total_equity * 100.0) if total_equity > 0 else 0.0
         remaining_margin_headroom = max(0.0, allowed_margin_dollars - effective_margin_used)
         max_allowed_collateral = round(cash_avail * (self.max_cash_collateral_pct / 100.0), 2)
+        estimated_available_slots = max(0, min(5, int(remaining_collateral_headroom // 7500.0))) if not is_capacity_exhausted else 0
 
         return {
             "total_equity": round(total_equity, 2),
@@ -291,6 +292,7 @@ class MarginGuardian:
             "collateral_utilization_pct": round(collateral_util_pct, 2),
             "remaining_collateral_headroom": round(remaining_collateral_headroom, 2),
             "is_capacity_exhausted": is_capacity_exhausted,
+            "estimated_available_slots": estimated_available_slots,
             "margin_available_broker": round(max(0.0, total_equity * 0.85), 2),
             "margin_utilization_pct": round(margin_util_pct, 2),
             "max_margin_limit_pct": self.max_margin_util_pct,
@@ -317,8 +319,8 @@ class MarginGuardian:
     ) -> Dict[str, Any]:
         """
         Descriptive Summary:
-            Validates if an individual proposed trade complies with the 15.0% margin limit
-            and the 50.0% cash collateral capacity.
+            Validates if an individual proposed trade complies with the 75.0% total capital margin ceiling,
+            the 50.0% cash collateral capacity, and the 15.0% synthetic margin requirement impact.
 
         Parameters:
             strategy (str): Strategy name ('CSP', 'CC', etc.).
@@ -434,10 +436,11 @@ class MarginGuardian:
         """
         Descriptive Summary:
             Audits an entire basket of staged option recommendations (plus an optional new candidate)
-            against the user's hard risk policy:
+            against the user's institutional risk policy:
             1. Cumulative Cash Collateral Cap: <= 50.0% of available cash (~$35,992 on $71,984 cash).
-            2. Cumulative Account Margin Utilization Cap: <= 15.0% of total equity (~$15,328 on $102,192 equity).
-            3. Active Staged Trades Ceiling: strictly 3 to 4 trades max for systematic $1,000/month harvest.
+            2. Cumulative Account Margin Ceiling: <= 75.0% of total equity (~$76,644 on $102,192 equity)
+               with 15.0% synthetic margin requirement impact modeling.
+            3. Dynamic Active Staged Trades Capacity: 1 to 5 candidates sized dynamically to available headroom.
 
         Parameters:
             staged_candidates (List[Dict[str, Any]]): Existing staged trade dictionaries in basket.
@@ -453,10 +456,10 @@ class MarginGuardian:
                 - 'cumulative_collateral' (float): Total cash collateral required for all CSPs in basket.
                 - 'max_allowed_collateral' (float): 50% available cash threshold.
                 - 'collateral_utilization_pct' (float): Collateral committed as % of available cash.
-                - 'remaining_collateral_headroom' (float): Dollar capacity remaining under 50% cap.
-                - 'cumulative_margin_impact' (float): Total margin commitment across basket.
+                - 'remaining_collateral_headroom' (float): Dollar capacity remaining under 75% margin ceiling.
+                - 'cumulative_margin_impact' (float): Total synthetic margin commitment across basket.
                 - 'projected_margin_util_pct' (float): Account margin % after all basket trades.
-                - 'max_margin_limit_pct' (float): Margin risk limit (15.0%).
+                - 'max_margin_limit_pct' (float): Margin ceiling limit (75.0%).
                 - 'remaining_margin_headroom' (float): Dollar margin headroom remaining.
                 - 'reasons' (List[str]): Failure explanations if unapproved.
 

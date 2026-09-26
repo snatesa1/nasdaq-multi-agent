@@ -118,6 +118,19 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
         - *Execution Integrity & Unexecuted Day Order Sanitization*: Strategic campaign stitchers and P&L blotters MUST only aggregate authentic `Filled` / `Traded` executions and active `Working` orders. Unexecuted, cancelled, or expired draft day orders with `$0.00` price must NEVER be displayed as trade legs.
         - *Token Conservation Protocol for Subagents*: Subagents MUST utilize `codegraph_explore` for symbol discovery rather than broad sequential file reads. Never spawn parallel unconstrained subagent clusters via slash commands without bounded line ranges and context caps.
 
+    14. **Dynamic Margin-Constrained Multi-Agent Sizing Standard (Added 2026-09-26)**:
+        - *Dynamic Slot Sizing (1 to 5 Candidates)*: The multi-agent desk (Checker / Risk Aggregator, Financial Analyst, Allocator) MUST dynamically calibrate proposed trade candidate counts (1, 2, 3, 4, or 5) strictly based on verified uninvested cash and remaining collateral headroom under the 75% margin ceiling.
+        - *Cumulative Basket Margin Verification*: Every proposal in Mode 1 (Multi-Sector) and Mode 2 (Mega-Cap Anchor + Satellite) MUST be validated against `validate_cumulative_basket()` before inclusion. If available headroom only permits 1 or 2 candidates, the desk stages only what fits safely without exceeding collateral limits.
+        - *Transparent Margin Rationale*: All sub-agent consensus verdicts and debate scorecards must explicitly report the exact collateral required, available headroom, and slot capacity rationale.
+
+    15. **Expiry Horizon Radar & Proactive Roll / Replacement Pipeline Standard (Added 2026-09-26)**:
+        - *Near-Term Expiry Scanning (<= 14 DTE)*: The Weekly Intelligence desk and Margin Guardian MUST automatically inspect open option positions (e.g. short puts like GOOGL Oct 2nd) and compute liberated collateral upon expiration or buy-to-close.
+        - *Dual Roll & Replacement Actionability*: For every expiring position, the desk MUST stage both:
+          1. *Direct Same-Ticker Roll*: Rolled to the next monthly cycle (30-35 DTE) targeting ~0.20-0.25 Delta and net credit.
+          2. *Cross-Sector Replacement Setup*: Alternative high-conviction candidate from another GICS sector sized to the liberated collateral budget.
+        - *Multi-Agent Consensus Verdicts*: Financial Analyst, Risk Aggregator, and Allocator must attach explicit rationale covering assignment defense, margin neutrality, and capital compounding.
+
+
 ## ☁️ Google Cloud
 - gcloud billing accounts list
 - gcloud billing projects link [PROJECT_ID] --billing-account=[BILLING_ACCOUNT_ID]
