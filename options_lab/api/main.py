@@ -849,10 +849,13 @@ def broker_oauth_callback(code: Optional[str] = None, state: Optional[str] = Non
                         try {
                             window.opener.postMessage({ type: 'SAXO_AUTH_SUCCESS' }, '*');
                         } catch(e){}
-                        setTimeout(function(){ window.close(); }, 1200);
-                    } else {
-                        setTimeout(function(){ window.location.href = 'http://localhost:3000/weekly-intelligence'; }, 1500);
                     }
+                    setTimeout(function(){
+                        var appUrl = (window.location.port === '8000' || !window.location.port)
+                          ? 'http://' + window.location.hostname + ':3000/weekly-intelligence'
+                          : window.location.origin + '/weekly-intelligence';
+                        window.location.href = appUrl;
+                    }, 1500);
                 </script>
             </body>
             </html>

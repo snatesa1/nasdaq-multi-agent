@@ -146,6 +146,10 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
     19. **Unified Light Theme Protocol for Dialectical Arena (Added 2026-09-27)**:
         - *Consistent UI Surface Invariant*: Frontend sub-agent debate panels and cross-examination arenas MUST strictly adhere to the parent page's light theme container hierarchy (`bg-white border-slate-200 text-slate-800`), utilizing indigo (`#4051B5`), emerald, and amber background tints (`bg-indigo-50/50`, `bg-emerald-50/40`) for agent role highlights. Dark gradient containers in standard dashboard views are strictly prohibited.
 
+    20. **Saxo Chrome OAuth Redirect & Auto-App Navigation Standard (Added 2026-09-27)**:
+        - *Direct Browser MFA Redirect*: Triggering Saxo broker authorization MUST perform a top-level location redirect (`window.location.href = authUrl`) to Google Chrome / system default browser rather than opening constrained pop-up windows.
+        - *Automated Post-MFA Return Navigation*: Upon exchanging authorization codes for live tokens in `@app.get("/api/broker/oauth/callback")`, the callback endpoint MUST automatically navigate Chrome back to the OptionsLab web app (`/weekly-intelligence`), rehydrating session telemetry and live account balances smoothly.
+
 
 ## ☁️ Google Cloud
 - gcloud billing accounts list

@@ -308,11 +308,10 @@ export default function WeeklyIntelligencePage() {
       return;
     }
 
-    const width = 600;
-    const height = 750;
-    const left = window.screen.width / 2 - width / 2;
-    const top = window.screen.height / 2 - height / 2;
-    window.open(authUrl, 'SaxoMFA', `width=${width},height=${height},left=${left},top=${top}`);
+    // Direct browser redirect to Google Chrome / primary browser for Saxo MFA authentication
+    if (typeof window !== 'undefined') {
+      window.location.href = authUrl;
+    }
   };
 
   const fetchBriefing = async (forceRefresh: boolean = false) => {
