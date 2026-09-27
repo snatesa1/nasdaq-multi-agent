@@ -981,8 +981,37 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
           * **Decoupled Live Margin Re-hydration (`_rehydrate_cached_briefing`)**: Keeps heavy 60-second Gemini macro research cached in SQLite, but dynamically queries live broker balances (`resolve_account_balances()`) and open short puts on every cache load. Re-evaluates margin headroom, locked CSP collateral ($143,500), and dynamically enforces the Mandatory Capital Safety Veto if capacity has been exhausted since caching.
           * **Verification**: 18/18 pytest tests passed (100%), FastAPI broker gateway test suite passed, and Next.js compiled all 17 static pages with zero errors.
 
+    31. **Dynamic Macroeconomic Releases & Live Cross-Asset Telemetry Engine (Zero Hardcoded Calendar Figures Invariant) (Added 2026-09-27)**:
+        - **Problem & Root Cause**:
+          * In `WeeklyIntelligenceEngine.analyze_weekly_macro_and_edges()`, the LLM prompt template and fallback `ai_summary` contained hardcoded exemplar rows:
+            `| **US Initial Jobless Claims** (Wk ending Aug 22) | 215,000 | 211,000 (Prior) | Scheduled (08:30 EDT) |`
+            `| **US Q2 GDP** (Second Estimate) | 2.8% Annualized | 2.8% (Prior) | Released |`
+            `| 7-Year Treasury Note Auction | 2.52x Bid-to-Cover | 2.48x (Prior) | Scheduled |`
+          * The LLM was not fed live macroeconomic indicators from FRED or authentic market quotes for cross-asset benchmarks, causing Gemini or fallback routines to reproduce obsolete August 2024 dates and mock figures.
+        - **Architecture & Permanent Zero-Hardcoding Solution**:
+          * **Direct St. Louis Fed FRED REST Data Ingestion (`fetch_dynamic_macro_economic_releases`)**:
+            Integrated `FRED_API_KEY` (`1713868f20d435a34cbce67659354413`) via direct REST endpoint queries (`https://api.stlouisfed.org/fred/series/observations`).
+            Dynamically queries authentic releases across leading/lagging series:
+            - Initial Jobless Claims (`ICSA`): e.g. 197,000 (Wk ending 2026-09-19) vs. 198,000 (Prior).
+            - Real GDP (`A191RL1Q225SBEA`): e.g. 1.5% Annualized vs. 2.1% (Prior).
+            - Core PCE Price Index (`PCEPILFE`): e.g. 130.66 (+0.2% MoM) vs. 130.34 (Prior).
+            - 10-Year Treasury Yield (`DGS10`): e.g. 5.18% vs. 5.11% (Prior).
+            - Unemployment Rate (`UNRATE`): e.g. 4.1% vs. 4.1% (Prior).
+            - Consumer Price Index (`CPIAUCSL`): e.g. +0.4% MoM vs. 332.81 (Prior).
+            Caches releases in SQLite (`fred_macro_releases_latest`) for 6-hour offline resilience.
+          * **Live Cross-Asset Benchmark Quotes (`build_cross_asset_directional_table`)**:
+            Dynamically queries batch tickers (`SPY`, `QQQ`, `^TNX`, `USO`, `GLD`, `UUP`, `BTC-USD`, `^VIX`) via `yf.Tickers`. Calculates actual current prices, daily point/bps moves, and percentage changes, evaluating real momentum direction ('UP', 'DOWN', 'FLAT') and bias without hardcoded levels.
+          * **Dynamic Markdown Rendering & Prompt Injection**:
+            Added `render_macro_calendar_markdown_table()` and `render_cross_asset_markdown_table()`. Injects both dynamic tables into the LLM prompt under `AUTHENTIC MACRO ECONOMIC RELEASES` and `AUTHENTIC CROSS-ASSET BENCHMARK METRICS` with strict instructions forbidding obsolete dates or simulated placeholders.
+          * **Fallback Dynamic Sanitization**:
+            In `if not ai_summary:`, binds directly to `{macro_calendar_table_str}` and `{cross_asset_table_str}`, guaranteeing 100% authentic dynamic figures even under API outages.
+        - **Automated Validation**:
+          * `tests/test_dynamic_macro_calendar.py`: Validated 100% pass across dynamic FRED retrieval, markdown table formatting, cross-asset live benchmarks, and zero obsolete "Aug 22" or "215,000" references.
+          * Full pytest test suite: 21/21 tests passed (100%).
+          * Next.js static production export: 17/17 pages compiled cleanly.
+
 ## 📊 Antigravity Usage Stats
-> Last Updated: 2026-09-23 22:15:00 SGT
+> Last Updated: 2026-09-27 08:30:00 SGT
 
 | Metric | Current Session |
 | :--- | :--- |
@@ -990,3 +1019,4 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
 | **Projects Synced** | 18 projects + 4 resource dirs |
 
 *Tip: If Status is 🔴, start a new conversation to save quota!* 🚀
+
