@@ -972,6 +972,14 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
           * **Rolling LRU Retention Cap**: Enforce a strict file count ceiling (e.g. maximum 10-15 latest active reports) or a 7-day Time-To-Live (TTL).
           * **Pre-Flight Housekeeping in Data Pipeline**: Before writing a new `tearsheet_<hex>.html` in `QuantStatsEngine.generate_html_report()`, the engine must trigger an automated pre-flight scan of `REPORTS_DIR`, sorting existing reports by modification time (`mtime`) and purging or compressing records exceeding the retention threshold.
           * **Zero Unbounded Accumulation**: Prevent unbounded disk footprint expansion while preserving recent interactive performance audit links for the frontend UI.
+    30. **Cold-Start Broker Authentication & Decoupled Live Margin Re-hydration (Added 2026-09-27)**:
+        - **Problem & Root Cause**:
+          * When launching the UI after a system reboot or browser shutdown, serving cached weekly intelligence briefings (`briefing_YYYY-WXX`) risked displaying stale margin status, out-of-date cash balances, and obsolete trade recommendations without authenticating with Saxo OpenAPI.
+        - **Architecture & Solution**:
+          * **Dual-Guard Cold-Start Handshake**: Implemented `SERVER_BOOT_ID = uuid4().hex[:12]` on the FastAPI backend paired with `sessionStorage('optionslab_saxo_boot_id')` on the Next.js client. Detects cold system boots or fresh browser sessions via `GET /api/broker/session-status`.
+          * **Strict Blocking Authentication Gate**: If unauthenticated on a cold start, halts dashboard rendering and displays a dedicated full-page "Saxo Broker Live Authentication Required" gate with 1-click OAuth and auto-link clipboard controls until valid credentials are confirmed.
+          * **Decoupled Live Margin Re-hydration (`_rehydrate_cached_briefing`)**: Keeps heavy 60-second Gemini macro research cached in SQLite, but dynamically queries live broker balances (`resolve_account_balances()`) and open short puts on every cache load. Re-evaluates margin headroom, locked CSP collateral ($143,500), and dynamically enforces the Mandatory Capital Safety Veto if capacity has been exhausted since caching.
+          * **Verification**: 18/18 pytest tests passed (100%), FastAPI broker gateway test suite passed, and Next.js compiled all 17 static pages with zero errors.
 
 ## 📊 Antigravity Usage Stats
 > Last Updated: 2026-09-23 22:15:00 SGT

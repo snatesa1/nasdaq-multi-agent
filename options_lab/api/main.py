@@ -4,8 +4,9 @@ from fastapi.responses import JSONResponse, HTMLResponse
 import logging
 import os
 import json
+import uuid
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 
 from .config import settings
@@ -95,6 +96,10 @@ tutor_service = SocraticTutor()
 fundamental_engine = FundamentalIndexEngine()
 saxo_broker_client = SaxoClient()
 broker_concurrency_lock = asyncio.Lock()
+
+# Cold-Start Sentinel: Unique ID regenerated on every system boot / process start
+SERVER_BOOT_ID: str = uuid.uuid4().hex[:12]
+SERVER_BOOT_TIME: str = datetime.now(timezone.utc).isoformat()
 
 ingest_engine = TradeHistoryIngestEngine()
 campaign_stitcher = CampaignStitcher(ingest_engine=ingest_engine, saxo_client=saxo_broker_client)
@@ -729,6 +734,7 @@ def get_broker_status(user=Depends(verify_firebase_token)):
     """Returns the operational environment, live execution safety guard, and connection health."""
     has_token = bool(saxo_broker_client.access_token)
     log_progress("Status Check", "INFO", f"Status queried. Has token: {has_token}")
+    is_ready = bool(has_token and not getattr(saxo_broker_client, 'needs_reauth', False))
     return {
         "environment": settings.SAXO_ENV,
         "allow_live_execution": settings.BROKER_ALLOW_LIVE_EXECUTION,
@@ -738,7 +744,54 @@ def get_broker_status(user=Depends(verify_firebase_token)):
         "base_url": saxo_broker_client.base_url,
         "timeout_seconds": saxo_broker_client.timeout,
         "app_name": settings.SAXO_APP_NAME,
-        "status": "NEEDS_REAUTH" if getattr(saxo_broker_client, 'needs_reauth', False) else "READY"
+        "status": "READY" if is_ready else "NEEDS_REAUTH",
+        "server_boot_id": SERVER_BOOT_ID,
+        "server_boot_time": SERVER_BOOT_TIME
+    }
+
+@app.get("/api/broker/session-status")
+def get_broker_session_status():
+    """
+    1. Descriptive Summary:
+        Returns the cold-start session sentinel, server boot identifier, and real-time
+        authentication viability of the Saxo OpenAPI broker gateway. Enables the frontend
+        client to detect fresh computer restarts or server reboots and enforce a strict
+        blocking authentication gate if tokens are expired, missing, or require MFA.
+
+    2. Parameters / Encapsulation:
+        - None (HTTP GET request, unauthenticated public health/auth probe).
+        - Encapsulates SERVER_BOOT_ID, SERVER_BOOT_TIME, and saxo_broker_client runtime state.
+
+    3. Returns / Internal State:
+        Dict[str, Any]:
+            - 'server_boot_id' (str): 12-char hex unique to current server process lifespan.
+            - 'server_boot_time' (str): ISO timestamp of server initialization.
+            - 'has_access_token' (bool): True if access token is present in memory.
+            - 'has_refresh_token' (bool): True if refresh token is present in memory/DB.
+            - 'is_authenticated' (bool): True if access token is valid and not flagged needs_reauth.
+            - 'needs_reauth' (bool): True if 401/MFA error flagged during broker interaction.
+            - 'status' (str): 'READY' if fully authenticated, 'NEEDS_AUTH' if cold/expired.
+
+    4. Exceptions / Side Effects:
+        - Non-throwing endpoint. Inspects client state without side effects.
+
+    5. Concrete Executable Usage Example:
+        >>> import requests
+        >>> resp = requests.get("http://localhost:8000/api/broker/session-status").json()
+        >>> assert "server_boot_id" in resp
+        >>> assert resp["status"] in ["READY", "NEEDS_AUTH"]
+    """
+    is_auth = bool(saxo_broker_client.access_token and not getattr(saxo_broker_client, 'needs_reauth', False))
+    return {
+        "server_boot_id": SERVER_BOOT_ID,
+        "server_boot_time": SERVER_BOOT_TIME,
+        "has_access_token": bool(saxo_broker_client.access_token),
+        "has_refresh_token": bool(saxo_broker_client.refresh_token),
+        "is_authenticated": is_auth,
+        "needs_reauth": getattr(saxo_broker_client, 'needs_reauth', False),
+        "status": "READY" if is_auth else "NEEDS_AUTH",
+        "environment": settings.SAXO_ENV,
+        "app_name": settings.SAXO_APP_NAME
     }
 
 @app.get("/api/broker/oauth/auth-url")

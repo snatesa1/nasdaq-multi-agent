@@ -82,6 +82,7 @@ export default function WeeklyIntelligencePage() {
   const [loadingStep, setLoadingStep] = useState<string>('Verifying Backend Handshake...');
   const [authUrl, setAuthUrl] = useState<string | null>(null);
   const [brokerStatus, setBrokerStatus] = useState<any>(null);
+  const [coldStartAuthRequired, setColdStartAuthRequired] = useState<boolean>(false);
   const [approvingId, setApprovingId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [copied, setCopied] = useState<boolean>(false);
@@ -206,7 +207,13 @@ export default function WeeklyIntelligencePage() {
           { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authentication Successful! Broker session is now active.', time: new Date().toLocaleTimeString(), type: 'success' },
           ...prev
         ]);
-        optionsApi.getBrokerStatus().then(res => setBrokerStatus(res)).catch(() => null);
+        optionsApi.getBrokerSessionStatus().then(res => {
+          if (res?.server_boot_id) {
+            sessionStorage.setItem('optionslab_saxo_boot_id', res.server_boot_id);
+          }
+          setBrokerStatus(res);
+          setColdStartAuthRequired(false);
+        }).catch(() => null);
         fetchBriefing(true);
       }
     };
@@ -222,6 +229,12 @@ export default function WeeklyIntelligencePage() {
               ...prev
             ]);
             await optionsApi.setBrokerToken({ token: clipText.trim() });
+            const sRes = await optionsApi.getBrokerSessionStatus();
+            if (sRes?.server_boot_id) {
+              sessionStorage.setItem('optionslab_saxo_boot_id', sRes.server_boot_id);
+            }
+            setBrokerStatus(sRes);
+            setColdStartAuthRequired(false);
             setActionLog(prev => [
               { id: 'AUTH-OK', msg: '✅ Live Saxo broker session successfully established and persisted!', time: new Date().toLocaleTimeString(), type: 'success' },
               ...prev
@@ -253,7 +266,12 @@ export default function WeeklyIntelligencePage() {
         ...prev
       ]);
       await optionsApi.setBrokerToken({ token: clipText.trim() });
-      optionsApi.getBrokerStatus().then(res => setBrokerStatus(res)).catch(() => null);
+      const sRes = await optionsApi.getBrokerSessionStatus();
+      if (sRes?.server_boot_id) {
+        sessionStorage.setItem('optionslab_saxo_boot_id', sRes.server_boot_id);
+      }
+      setBrokerStatus(sRes);
+      setColdStartAuthRequired(false);
       setActionLog(prev => [
         { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authenticated via Clipboard!', time: new Date().toLocaleTimeString(), type: 'success' },
         ...prev
@@ -273,12 +291,17 @@ export default function WeeklyIntelligencePage() {
     
     if (typeof window !== 'undefined' && (window as any).electronAPI?.openSaxoOauth) {
       (window as any).electronAPI.openSaxoOauth(authUrl)
-        .then(() => {
+        .then(async () => {
           setActionLog(prev => [
             { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authenticated via Desktop Interceptor!', time: new Date().toLocaleTimeString(), type: 'success' },
             ...prev
           ]);
-          optionsApi.getBrokerStatus().then(res => setBrokerStatus(res)).catch(() => null);
+          const sRes = await optionsApi.getBrokerSessionStatus();
+          if (sRes?.server_boot_id) {
+            sessionStorage.setItem('optionslab_saxo_boot_id', sRes.server_boot_id);
+          }
+          setBrokerStatus(sRes);
+          setColdStartAuthRequired(false);
           fetchBriefing(true);
         })
         .catch((err: any) => console.error('Electron OAuth error:', err));
@@ -305,6 +328,33 @@ export default function WeeklyIntelligencePage() {
       }
     } catch (hErr: any) {
       console.warn('[OptionsLab Gateway] Initial handshake probe non-critical:', hErr);
+    }
+
+    // Pre-flight Cold-Start Dual-Guard Handshake
+    try {
+      const sessionStatus = await optionsApi.getBrokerSessionStatus();
+      if (sessionStatus) {
+        setBrokerStatus(sessionStatus);
+        const currentBootId = sessionStatus.server_boot_id;
+        const cachedBootId = typeof window !== 'undefined' ? sessionStorage.getItem('optionslab_saxo_boot_id') : null;
+
+        // If server rebooted or new browser session AND broker is not ready:
+        if ((!cachedBootId || cachedBootId !== currentBootId) && sessionStatus.status === 'NEEDS_AUTH') {
+          setColdStartAuthRequired(true);
+          setLoading(false);
+          return;
+        }
+
+        // If authenticated, record current server boot id in sessionStorage
+        if (sessionStatus.status === 'READY') {
+          if (typeof window !== 'undefined' && currentBootId) {
+            sessionStorage.setItem('optionslab_saxo_boot_id', currentBootId);
+          }
+          setColdStartAuthRequired(false);
+        }
+      }
+    } catch (sErr) {
+      console.warn('Session status probe notice:', sErr);
     }
 
     setLoadingStep('Synthesizing 4D Macro Compass, Interlink Graph & Wheel Harvest Blotter...');
@@ -469,6 +519,61 @@ export default function WeeklyIntelligencePage() {
     (margin?.remaining_collateral_headroom !== undefined && margin.remaining_collateral_headroom <= 0) || 
     stagedTrades.length === 0
   );
+
+  if (coldStartAuthRequired) {
+    return (
+      <ProtectedRoute>
+        <div className="min-h-[75vh] flex items-center justify-center p-4">
+          <div className="max-w-xl w-full bg-white rounded-2xl border-2 border-indigo-200 shadow-xl overflow-hidden p-8 space-y-6">
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-indigo-50 border border-indigo-200 rounded-xl text-[#4051B5]">
+                <Key className="h-7 w-7" />
+              </div>
+              <div>
+                <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold uppercase bg-amber-100 text-amber-800 border border-amber-200">
+                  Cold-Start Sentinel Triggered
+                </span>
+                <h2 className="text-xl font-bold text-slate-800 tracking-tight mt-1">
+                  Saxo Broker Live Authentication Required
+                </h2>
+              </div>
+            </div>
+
+            <div className="text-sm text-slate-600 space-y-2 leading-relaxed bg-slate-50 p-4 rounded-xl border border-slate-200/80">
+              <p className="font-semibold text-slate-700">
+                System restart or new browser session detected.
+              </p>
+              <p className="text-xs text-slate-500">
+                To guarantee you never trade on stale margin, cached cash balances, or obsolete collateral calculations, live Saxo OpenAPI authentication is strictly required before loading the Weekly Intelligence Cockpit.
+              </p>
+            </div>
+
+            <div className="space-y-3">
+              <button
+                onClick={handleStartOAuth}
+                className="w-full py-3.5 px-4 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl font-bold text-sm shadow-md hover:shadow-lg transition flex items-center justify-center gap-2 cursor-pointer"
+              >
+                <Key className="h-4 w-4" />
+                Authenticate Saxo Live (1-Click OAuth)
+              </button>
+
+              <button
+                onClick={handleAutoLinkClipboard}
+                className="w-full py-3 px-4 bg-white hover:bg-slate-50 text-emerald-700 border border-emerald-300 rounded-xl font-semibold text-xs transition flex items-center justify-center gap-2 cursor-pointer shadow-xs"
+              >
+                ⚡ Auto-Link Token from Clipboard
+              </button>
+            </div>
+
+            <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 font-mono">
+              <span>Server Boot ID: {brokerStatus?.server_boot_id || 'Initializing...'}</span>
+              <span>Status: {brokerStatus?.status || 'AWAITING_AUTH'}</span>
+            </div>
+          </div>
+        </div>
+      </ProtectedRoute>
+    );
+  }
 
   return (
     <ProtectedRoute>

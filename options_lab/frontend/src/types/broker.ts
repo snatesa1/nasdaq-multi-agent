@@ -12,6 +12,22 @@ export interface BrokerStatus {
   base_url: string;
   timeout_seconds: number;
   status: string;
+  server_boot_id?: string;
+  server_boot_time?: string;
+  is_authenticated?: boolean;
+  needs_reauth?: boolean;
+}
+
+export interface BrokerSessionStatus {
+  server_boot_id: string;
+  server_boot_time: string;
+  has_access_token: boolean;
+  has_refresh_token: boolean;
+  is_authenticated: boolean;
+  needs_reauth: boolean;
+  status: 'READY' | 'NEEDS_AUTH';
+  environment: BrokerEnvironmentMode;
+  app_name?: string;
 }
 
 export interface BrokerAccountSummary {

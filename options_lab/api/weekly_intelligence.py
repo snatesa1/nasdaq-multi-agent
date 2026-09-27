@@ -2943,7 +2943,89 @@ class WeeklyIntelligenceEngine:
             except Exception as e_st:
                 logger.debug(f"Auto-staging check notice for {tid}: {e_st}")
 
-        return briefing
+    def _rehydrate_cached_briefing(self, cached: Dict[str, Any], week_label: str) -> Dict[str, Any]:
+        """
+        1. Descriptive Summary:
+            Dynamically re-hydrates a cached weekly intelligence briefing payload with live broker margin,
+            cash balances, and risk capacity status from Saxo OpenAPI. Decouples static heavy Gemini macro
+            research from volatile intraday account equity and open short put commitments, dynamically
+            enforcing the Capital Safety Veto if capacity has been exhausted since the briefing was cached.
+
+        2. Parameters / Encapsulation:
+            - cached (Dict[str, Any]): Cached briefing dictionary retrieved from SQLite saxo_cache table.
+            - week_label (str): ISO calendar week identifier (e.g. '2026-W39').
+
+        3. Returns / Internal State:
+            - Dict[str, Any]: Re-hydrated briefing dictionary with updated 'margin_status', 'balance_provenance',
+              and audited 'wheel_harvest_blotter' reflecting live broker realities.
+
+        4. Exceptions / Side Effects:
+            - Non-fatal broker exceptions gracefully fall back to 5-tier resolution hierarchy.
+            - May update active candidate lists in memory if margin capacity is exhausted.
+
+        5. Concrete Executable Usage Example:
+            >>> engine = WeeklyIntelligenceEngine()
+            >>> cached_data = database.get_saxo_cache("briefing_2026-W39")
+            >>> rehydrated = engine._rehydrate_cached_briefing(cached_data, "2026-W39")
+            >>> assert "margin_status" in rehydrated
+        """
+        if not isinstance(cached, dict):
+            return cached
+
+        try:
+            # 1. Fetch live margin status and account balances directly from broker
+            live_margin = self.margin_guardian.get_current_margin_status()
+            live_balances = resolve_account_balances(self.saxo_client)
+
+            # Update cache payload with real-time figures
+            cached["margin_status"] = live_margin
+            cached["balance_provenance"] = live_balances
+
+            wb = cached.get("wheel_harvest_blotter")
+            if isinstance(wb, dict):
+                is_capacity_exhausted = bool(
+                    live_margin.get("is_capacity_exhausted")
+                    or float(live_margin.get("remaining_collateral_headroom", 0.0) or 0.0) <= 0
+                )
+                wb["portfolio_fully_deployed"] = is_capacity_exhausted
+                wb["collateral_headroom"] = 0.0 if is_capacity_exhausted else live_margin.get("remaining_collateral_headroom", 0.0)
+                wb["existing_locked_csp_collateral"] = live_margin.get("existing_locked_csp_collateral", 0.0)
+                wb["live_short_puts_count"] = live_margin.get("live_short_puts_count", 0)
+
+                # If capacity is exhausted, immediately enforce Capital Safety Veto on the blotter
+                if is_capacity_exhausted:
+                    wb["candidates"] = []
+                    wb["total_staged_contracts"] = 0
+                    wb["projected_monthly_harvest_dollars"] = 0.0
+                    wb["target_achievement_pct"] = 0.0
+                    wb["allocator_challenge_active"] = False
+                    wb["allocator_shortfall_dollars"] = 0.0
+                    wb["allocator_challenge_statement"] = (
+                        "Executive Portfolio Allocator Consensus: Portfolio capacity is fully deployed across active short put positions. "
+                        "Zero new trades staged to strictly uphold the 75% margin ceiling."
+                    )
+                    cached["potential_trades"] = []
+
+                    if isinstance(wb.get("mode_1"), dict):
+                        wb["mode_1"]["candidates"] = []
+                        wb["mode_1"]["candidates_count"] = 0
+                        wb["mode_1"]["total_staged_contracts"] = 0
+                        wb["mode_1"]["projected_monthly_harvest_dollars"] = 0.0
+                    if isinstance(wb.get("mode_2"), dict):
+                        wb["mode_2"]["candidates"] = []
+                        wb["mode_2"]["candidates_count"] = 0
+                        wb["mode_2"]["total_staged_contracts"] = 0
+                        wb["mode_2"]["projected_monthly_harvest_dollars"] = 0.0
+                    if isinstance(wb.get("debate_arena"), dict):
+                        arena = wb["debate_arena"]
+                        if isinstance(arena.get("executive_allocator"), dict):
+                            arena["executive_allocator"]["recommended_mode"] = "PORTFOLIO_FULLY_DEPLOYED"
+                        if isinstance(arena.get("risk_aggregator"), dict):
+                            arena["risk_aggregator"]["recommendation"] = "Mandatory Capital Safety Veto: Block all new trade allocations."
+        except Exception as e_rehydrate:
+            logger.warning(f"Live margin rehydration non-critical warning: {e_rehydrate}")
+
+        return self._ensure_briefing_candidates_staged(cached, week_label)
 
     def analyze_weekly_macro_and_edges(self, week_label: Optional[str] = None, force_refresh: bool = False) -> Dict[str, Any]:
         """
@@ -2997,10 +3079,10 @@ class WeeklyIntelligenceEngine:
                 gen_at = cached.get("generated_at", "")
                 # Only serve cache if it was generated on today's calendar date
                 if gen_at and gen_at.startswith(today_str):
-                    logger.info(f"Serving cached weekly intelligence briefing for {week_label} (generated today {today_str})")
-                    return self._ensure_briefing_candidates_staged(cached, week_label)
+                    logger.info(f"Serving cached weekly intelligence briefing for {week_label} (generated today {today_str}) with live margin rehydration")
+                    return self._rehydrate_cached_briefing(cached, week_label)
                 elif not gen_at:
-                    return self._ensure_briefing_candidates_staged(cached, week_label)
+                    return self._rehydrate_cached_briefing(cached, week_label)
 
         self._sync_dynamic_universe()
         news_items = self.collect_weekly_news_events()

@@ -147,7 +147,7 @@ class EarningsScanRequest(BaseModel):
     min_open_interest: int = Field(5000, description="Min Option Open Interest")
 
 class BrokerAccountSummary(BaseModel):
-    status: str = Field(..., description="Connection status string")
+    status: str = Field("READY", description="Connection status string")
     environment: str = Field("SIMULATION", description="'SIMULATION' or 'LIVE'")
     cash_available: float = Field(0.0, description="Available cash balance")
     total_equity: float = Field(0.0, description="Total account equity / Net Asset Value")
@@ -155,7 +155,7 @@ class BrokerAccountSummary(BaseModel):
     margin_used: float = Field(0.0, description="Margin consumed by open positions")
     currency: str = Field("USD", description="Account base currency")
     account_id: str = Field("LIVE-ACC-PRIMARY", description="Account identifier")
-    updated_at: str = Field(..., description="ISO timestamp")
+    updated_at: Optional[str] = Field(None, description="ISO timestamp")
 
 class BrokerPosition(BaseModel):
     position_id: str = Field(..., description="Position ID from Saxo")

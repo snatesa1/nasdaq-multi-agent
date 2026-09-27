@@ -1,6 +1,7 @@
 import { auth } from '@/lib/firebase';
 import {
   BrokerStatus,
+  BrokerSessionStatus,
   BrokerAccountSummary,
   BrokerPositionsResponse,
   BrokerOrdersResponse
@@ -196,6 +197,7 @@ export const optionsApi = {
 
   // ── Broker Gateway (Live & SIM Integration) ───────────────────────────────
   getBrokerStatus: (): Promise<BrokerStatus> => apiRequest('/api/broker/status'),
+  getBrokerSessionStatus: (): Promise<BrokerSessionStatus> => apiRequest('/api/broker/session-status'),
   getBrokerAuthUrl: (): Promise<{ auth_url: string; app_name: string; redirect_url: string }> => apiRequest('/api/broker/oauth/auth-url'),
   setBrokerToken: (payload: { token?: string; code?: string; refresh_token?: string }) => apiRequest('/api/broker/oauth/set-token', 'POST', payload),
   disconnectBroker: () => apiRequest('/api/broker/oauth/disconnect', 'POST'),
