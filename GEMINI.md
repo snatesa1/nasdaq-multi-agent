@@ -7,6 +7,13 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
 - Always use `git commit -m "commit message"` to commit changes
 - Always use `git push` to push changes to the remote repository
 
+## 📐 Spec-Driven Architecture (Single Source of Truth)
+> **Options Lab has transitioned from skill-based development to Spec-Driven Architecture (SDD).**
+> - **The Specification is the Single Source of Truth**: All architectural contracts, financial invariants, and execution flows live in modular, version-controlled markdown specifications under [`specs/`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/).
+> - **Constitution & Invariant Registry**: See [`specs/README.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/README.md).
+> - **Strict Single Execution Engine**: Live Saxo Desk Engine only; no simulated sandboxes ([`specs/02-broker-and-execution/saxo-execution-desk.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/02-broker-and-execution/saxo-execution-desk.spec.md)).
+> - **Workflow**: To change behavior, update the spec (or ask in chat) -> verify invariants -> implement code -> run tests.
+
 ## 🪟 Default Terminal & Execution Environment
 > **Windows Native PowerShell (`pwsh`) is the 100% EXCLUSIVE execution environment. WSL is STRICTLY PROHIBITED.**
 
