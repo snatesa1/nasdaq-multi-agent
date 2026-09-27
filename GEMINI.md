@@ -135,6 +135,11 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
         - *Strict Return Invariant on Cache Rehydration*: Any cache hydration or idempotency staging helper (e.g. `_ensure_briefing_candidates_staged`) MUST explicitly return the hydrated briefing dictionary. Dropping or failing to return the payload converts cached snapshots into `None` / `null`, causing frontend macro synthesis and event card grids to hang indefinitely in a loading state.
         - *Aligned Broker Gateway Timeouts*: Consolidated multi-endpoint gatherers (`/api/broker/refresh`) must configure per-task timeouts to at least 25.0s (and 28.0s for blotter audits) to prevent premature `asyncio.TimeoutError` exceptions during initial TCP/TLS handshake latency.
 
+    17. **FRED Macro & Weekly Intelligence Cache Non-Destructive Rehydration Standard (Added 2026-09-27)**:
+        - *24-Hour FRED Cache & Multi-Key Fallback*: FRED macro series caching (`fred_macro_releases_latest`) strictly evaluates a 24-hour TTL (`(now - c_dt).total_seconds() < 86400`) and multi-key resolution across `FRED_API_KEY`, `FRED_KEY`, and `settings.FRED_API_KEY` to guarantee uninterrupted indicator tables offline or across calendar date boundaries.
+        - *Non-Destructive Margin Veto Rehydration*: During live broker rehydration (`_rehydrate_cached_briefing`), if remaining collateral headroom is zero, staged candidates in `potential_trades` and `wheel_harvest_blotter` MUST be preserved with explicit `margin_veto = True` and `margin_veto_reason` metadata rather than silently wiping arrays to empty (`[]`).
+        - *Weekly Briefing Cache Serving*: Cached weekly briefings (`briefing_YYYY-WXX`) serve directly for the active calendar week without discarding valid caches across midnight date boundaries when `force_refresh=False`.
+
 
 ## ☁️ Google Cloud
 - gcloud billing accounts list

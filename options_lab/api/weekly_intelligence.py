@@ -1083,13 +1083,19 @@ class WeeklyIntelligenceEngine:
 
         cache_key = "fred_macro_releases_latest"
         cached = database.get_saxo_cache(cache_key)
-        # Refresh cache once per 6 hours
+        # Refresh cache once per 24 hours unless forced
         if cached and isinstance(cached, dict) and cached.get("releases"):
             cached_at = cached.get("cached_at", "")
-            if cached_at and cached_at.startswith(datetime.now().strftime("%Y-%m-%d")):
-                return cached["releases"]
+            try:
+                if cached_at:
+                    c_dt = datetime.fromisoformat(cached_at)
+                    if (datetime.now() - c_dt).total_seconds() < 86400:
+                        return cached["releases"]
+            except Exception:
+                if cached_at and cached_at.startswith(datetime.now().strftime("%Y-%m-%d")):
+                    return cached["releases"]
 
-        fred_key = os.getenv("FRED_API_KEY") or getattr(settings, "FRED_API_KEY", "")
+        fred_key = os.getenv("FRED_API_KEY") or os.getenv("FRED_KEY") or getattr(settings, "FRED_API_KEY", "")
 
         series_map = [
             {
@@ -3357,30 +3363,19 @@ class WeeklyIntelligenceEngine:
                 wb["existing_locked_csp_collateral"] = live_margin.get("existing_locked_csp_collateral", 0.0)
                 wb["live_short_puts_count"] = live_margin.get("live_short_puts_count", 0)
 
-                # If capacity is exhausted, immediately enforce Capital Safety Veto on the blotter
+                # If capacity is exhausted, attach Capital Safety Veto metadata to candidates rather than wiping them
                 if is_capacity_exhausted:
-                    wb["candidates"] = []
-                    wb["total_staged_contracts"] = 0
-                    wb["projected_monthly_harvest_dollars"] = 0.0
-                    wb["target_achievement_pct"] = 0.0
-                    wb["allocator_challenge_active"] = False
-                    wb["allocator_shortfall_dollars"] = 0.0
+                    wb["allocator_challenge_active"] = True
                     wb["allocator_challenge_statement"] = (
                         "Executive Portfolio Allocator Consensus: Portfolio capacity is fully deployed across active short put positions. "
-                        "Zero new trades staged to strictly uphold the 75% margin ceiling."
+                        "Trades marked with Capital Safety Veto to strictly uphold the 75% margin ceiling."
                     )
-                    cached["potential_trades"] = []
-
-                    if isinstance(wb.get("mode_1"), dict):
-                        wb["mode_1"]["candidates"] = []
-                        wb["mode_1"]["candidates_count"] = 0
-                        wb["mode_1"]["total_staged_contracts"] = 0
-                        wb["mode_1"]["projected_monthly_harvest_dollars"] = 0.0
-                    if isinstance(wb.get("mode_2"), dict):
-                        wb["mode_2"]["candidates"] = []
-                        wb["mode_2"]["candidates_count"] = 0
-                        wb["mode_2"]["total_staged_contracts"] = 0
-                        wb["mode_2"]["projected_monthly_harvest_dollars"] = 0.0
+                    for cand in wb.get("candidates", []) + cached.get("potential_trades", []):
+                        if isinstance(cand, dict):
+                            cand["margin_veto"] = True
+                            cand["margin_veto_reason"] = "Capacity fully deployed under 75% margin ceiling"
+                else:
+                    wb["allocator_challenge_active"] = False
                     if isinstance(wb.get("debate_arena"), dict):
                         arena = wb["debate_arena"]
                         if isinstance(arena.get("executive_allocator"), dict):
@@ -3441,13 +3436,8 @@ class WeeklyIntelligenceEngine:
         if not force_refresh:
             cached = database.get_saxo_cache(cache_key)
             if cached and isinstance(cached, dict):
-                gen_at = cached.get("generated_at", "")
-                # Only serve cache if it was generated on today's calendar date
-                if gen_at and gen_at.startswith(today_str):
-                    logger.info(f"Serving cached weekly intelligence briefing for {week_label} (generated today {today_str}) with live margin rehydration")
-                    return self._rehydrate_cached_briefing(cached, week_label)
-                elif not gen_at:
-                    return self._rehydrate_cached_briefing(cached, week_label)
+                logger.info(f"Serving cached weekly intelligence briefing for {week_label} with live margin rehydration")
+                return self._rehydrate_cached_briefing(cached, week_label)
 
         self._sync_dynamic_universe()
         news_items = self.collect_weekly_news_events()
