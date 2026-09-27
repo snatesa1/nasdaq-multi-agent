@@ -902,26 +902,26 @@ export default function WeeklyIntelligencePage() {
               </div>
             </div>
 
-            {/* 🏛️ Inter-Agent Dialectical Debate Arena */}
+            {/* 🏛️ Inter-Agent Dialectical Debate Arena (Seamless Light Theme Matching) */}
             {debateArena && (
-              <div className="p-5 bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-2xl shadow-md border border-indigo-800/50 space-y-4">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-indigo-800/60 pb-3">
+              <div className="p-5 bg-white border border-slate-200 rounded-2xl shadow-xs space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 border-b border-slate-100 pb-3">
                   <div className="flex items-center gap-2.5">
-                    <div className="p-2 rounded-lg bg-indigo-500/20 text-indigo-300 border border-indigo-400/30">
+                    <div className="p-2 rounded-lg bg-indigo-50 text-[#4051B5] border border-indigo-100">
                       <Sparkles className="h-4 w-4" />
                     </div>
                     <div>
-                      <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                      <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
                         Sub-Agent Cross-Examination Arena: Mode 1 vs. Mode 2
                       </h3>
-                      <p className="text-[11px] text-indigo-200/70">
+                      <p className="text-[11px] text-slate-500">
                         Formal dialectical interrogation of sector diversification vs. single-name cash concentration.
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2 text-xs">
-                    <span className="px-2.5 py-1 rounded-lg bg-indigo-500/20 text-indigo-200 font-mono text-[11px] border border-indigo-400/30">
+                    <span className="px-3 py-1 rounded-lg bg-indigo-50 text-[#4051B5] font-mono text-[11px] font-bold border border-indigo-200">
                       Allocated Recommendation: {debateArena.executive_allocator?.recommended_mode === 'MODE_1_MULTI_SECTOR' ? 'Mode 1 (Multi-Sector)' : 'Mode 2 (Mega-Cap Anchor)'}
                     </span>
                   </div>
@@ -930,54 +930,54 @@ export default function WeeklyIntelligencePage() {
                 {/* 3-Agent Cards Grid */}
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3 text-xs">
                   {/* Financial Analyst */}
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl space-y-2">
-                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                      <span className="font-bold text-emerald-400 flex items-center gap-1.5">
+                  <div className="p-4 bg-emerald-50/40 border border-emerald-200/60 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between border-b border-emerald-100 pb-2">
+                      <span className="font-bold text-emerald-800 flex items-center gap-1.5">
                         👨‍💼 {debateArena.financial_analyst?.agent_name}
                       </span>
                       <div className="flex items-center gap-1.5 font-mono text-[10px]">
-                        <span className="text-slate-400">M1: <strong className="text-white">{debateArena.financial_analyst?.mode_1_score}</strong></span>
-                        <span className="text-slate-500">|</span>
-                        <span className="text-slate-400">M2: <strong className="text-emerald-300">{debateArena.financial_analyst?.mode_2_score}</strong></span>
+                        <span className="text-slate-500">M1: <strong className="text-slate-800">{debateArena.financial_analyst?.mode_1_score}</strong></span>
+                        <span className="text-slate-300">|</span>
+                        <span className="text-slate-500">M2: <strong className="text-emerald-700">{debateArena.financial_analyst?.mode_2_score}</strong></span>
                       </div>
                     </div>
-                    <div className="space-y-1.5 text-[11px] text-slate-300">
-                      <p><strong className="text-indigo-300">Mode 1:</strong> {debateArena.financial_analyst?.mode_1_critique}</p>
-                      <p><strong className="text-emerald-300">Mode 2:</strong> {debateArena.financial_analyst?.mode_2_critique}</p>
+                    <div className="space-y-1.5 text-[11px] text-slate-700">
+                      <p><strong className="text-indigo-700">Mode 1:</strong> {debateArena.financial_analyst?.mode_1_critique}</p>
+                      <p><strong className="text-emerald-700">Mode 2:</strong> {debateArena.financial_analyst?.mode_2_critique}</p>
                     </div>
                   </div>
 
                   {/* Risk Aggregator */}
-                  <div className="p-4 bg-white/5 border border-white/10 rounded-xl space-y-2">
-                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                      <span className="font-bold text-amber-400 flex items-center gap-1.5">
+                  <div className="p-4 bg-amber-50/40 border border-amber-200/60 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between border-b border-amber-100 pb-2">
+                      <span className="font-bold text-amber-800 flex items-center gap-1.5">
                         🛡️ {debateArena.risk_aggregator?.agent_name}
                       </span>
                       <div className="flex items-center gap-1.5 font-mono text-[10px]">
-                        <span className="text-slate-400">M1: <strong className="text-amber-300">{debateArena.risk_aggregator?.mode_1_score}</strong></span>
-                        <span className="text-slate-500">|</span>
-                        <span className="text-slate-400">M2: <strong className="text-white">{debateArena.risk_aggregator?.mode_2_score}</strong></span>
+                        <span className="text-slate-500">M1: <strong className="text-amber-700">{debateArena.risk_aggregator?.mode_1_score}</strong></span>
+                        <span className="text-slate-300">|</span>
+                        <span className="text-slate-500">M2: <strong className="text-slate-800">{debateArena.risk_aggregator?.mode_2_score}</strong></span>
                       </div>
                     </div>
-                    <div className="space-y-1.5 text-[11px] text-slate-300">
-                      <p><strong className="text-amber-300">Mode 1:</strong> {debateArena.risk_aggregator?.mode_1_critique}</p>
-                      <p><strong className="text-rose-300">Mode 2:</strong> {debateArena.risk_aggregator?.mode_2_critique}</p>
+                    <div className="space-y-1.5 text-[11px] text-slate-700">
+                      <p><strong className="text-amber-700">Mode 1:</strong> {debateArena.risk_aggregator?.mode_1_critique}</p>
+                      <p><strong className="text-rose-700">Mode 2:</strong> {debateArena.risk_aggregator?.mode_2_critique}</p>
                     </div>
                   </div>
 
                   {/* Executive Allocator */}
-                  <div className="p-4 bg-indigo-500/10 border border-indigo-400/20 rounded-xl space-y-2">
-                    <div className="flex items-center justify-between border-b border-white/10 pb-2">
-                      <span className="font-bold text-indigo-300 flex items-center gap-1.5">
+                  <div className="p-4 bg-indigo-50/50 border border-indigo-200/70 rounded-xl space-y-2">
+                    <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
+                      <span className="font-bold text-[#4051B5] flex items-center gap-1.5">
                         🏛️ {debateArena.executive_allocator?.agent_name}
                       </span>
                       <div className="flex items-center gap-1.5 font-mono text-[10px]">
-                        <span className="text-slate-400">M1: <strong className="text-indigo-300">{debateArena.executive_allocator?.mode_1_composite_score}</strong></span>
-                        <span className="text-slate-500">|</span>
-                        <span className="text-slate-400">M2: <strong className="text-white">{debateArena.executive_allocator?.mode_2_composite_score}</strong></span>
+                        <span className="text-slate-500">M1: <strong className="text-indigo-700">{debateArena.executive_allocator?.mode_1_composite_score}</strong></span>
+                        <span className="text-slate-300">|</span>
+                        <span className="text-slate-500">M2: <strong className="text-slate-800">{debateArena.executive_allocator?.mode_2_composite_score}</strong></span>
                       </div>
                     </div>
-                    <p className="text-[11px] text-indigo-100/90 leading-relaxed font-medium">
+                    <p className="text-[11px] text-slate-700 leading-relaxed font-medium">
                       {debateArena.executive_allocator?.decision_statement}
                     </p>
                   </div>
@@ -985,23 +985,23 @@ export default function WeeklyIntelligencePage() {
 
                 {/* Side-by-Side Trade-Off Matrix */}
                 {debateArena.executive_allocator?.trade_off_matrix && (
-                  <div className="overflow-x-auto rounded-xl border border-white/10 bg-black/20">
+                  <div className="overflow-x-auto rounded-xl border border-slate-200 bg-slate-50/50">
                     <table className="w-full text-left text-[11px]">
                       <thead>
-                        <tr className="border-b border-white/10 text-indigo-300 font-bold bg-white/5">
+                        <tr className="border-b border-slate-200 text-slate-700 font-bold bg-slate-100/70">
                           <th className="p-2.5">Evaluation Dimension</th>
                           <th className="p-2.5">Mode 1 (Multi-Sector Basket)</th>
                           <th className="p-2.5">Mode 2 (Mega-Cap Anchor Wheel)</th>
                           <th className="p-2.5 text-right">Strategic Advantage</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-white/5 font-mono text-slate-300">
+                      <tbody className="divide-y divide-slate-200 font-mono text-slate-700">
                         {debateArena.executive_allocator.trade_off_matrix.map((row, idx) => (
-                          <tr key={idx} className="hover:bg-white/5 transition">
-                            <td className="p-2.5 font-sans font-semibold text-white">{row.metric}</td>
+                          <tr key={idx} className="hover:bg-white transition">
+                            <td className="p-2.5 font-sans font-semibold text-slate-900">{row.metric}</td>
                             <td className="p-2.5">{row.mode_1}</td>
                             <td className="p-2.5">{row.mode_2}</td>
-                            <td className="p-2.5 text-right font-sans font-bold text-indigo-300">{row.edge}</td>
+                            <td className="p-2.5 text-right font-sans font-bold text-[#4051B5]">{row.edge}</td>
                           </tr>
                         ))}
                       </tbody>

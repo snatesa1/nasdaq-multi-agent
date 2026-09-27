@@ -143,6 +143,9 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
     18. **Dynamic 4D Macro Compass Calibration Standard (Added 2026-09-27)**:
         - *Zero Hardcoded Offsets & Static Drivers*: All 4 dimensions (Rates & Monetary Pressure, Corporate Earnings, AI Interlink CapEx, Market Liquidity & Volatility) MUST derive scores, momentum labels, and key driver statements dynamically from live FRED series (`DGS10` yields, CPI/PCE inflation), accumulated headline corpus sentiment, and `InterlinkGraphEngine` supply chain metrics. Static score boosts (e.g. `+25.0`, `+35.0`) and hardcoded narrative strings are strictly prohibited.
 
+    19. **Unified Light Theme Protocol for Dialectical Arena (Added 2026-09-27)**:
+        - *Consistent UI Surface Invariant*: Frontend sub-agent debate panels and cross-examination arenas MUST strictly adhere to the parent page's light theme container hierarchy (`bg-white border-slate-200 text-slate-800`), utilizing indigo (`#4051B5`), emerald, and amber background tints (`bg-indigo-50/50`, `bg-emerald-50/40`) for agent role highlights. Dark gradient containers in standard dashboard views are strictly prohibited.
+
 
 ## ☁️ Google Cloud
 - gcloud billing accounts list
