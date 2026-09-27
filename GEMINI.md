@@ -12,6 +12,14 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
 > - **The Specification is the Single Source of Truth**: All architectural contracts, financial invariants, and execution flows live in modular, version-controlled markdown specifications under [`specs/`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/).
 > - **Constitution & Invariant Registry**: See [`specs/README.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/README.md).
 > - **Strict Single Execution Engine**: Live Saxo Desk Engine only; no simulated sandboxes ([`specs/02-broker-and-execution/saxo-execution-desk.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/02-broker-and-execution/saxo-execution-desk.spec.md)).
+> - **Active Specifications**:
+>   - [`specs/00-system-architecture/system-overview.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/00-system-architecture/system-overview.spec.md)
+>   - [`specs/00-system-architecture/process-guardian.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/00-system-architecture/process-guardian.spec.md)
+>   - [`specs/00-system-architecture/database-and-migrations.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/00-system-architecture/database-and-migrations.spec.md)
+>   - [`specs/01-pricing-and-quant-engine/black-scholes-and-greeks.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/01-pricing-and-quant-engine/black-scholes-and-greeks.spec.md)
+>   - [`specs/02-broker-and-execution/saxo-execution-desk.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/02-broker-and-execution/saxo-execution-desk.spec.md)
+>   - [`specs/02-broker-and-execution/order-safety-and-quantization.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/02-broker-and-execution/order-safety-and-quantization.spec.md)
+>   - [`specs/02-broker-and-execution/balance-and-collateral.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/02-broker-and-execution/balance-and-collateral.spec.md)
 > - **Workflow**: To change behavior, update the spec (or ask in chat) -> verify invariants -> implement code -> run tests.
 
 ## 🪟 Default Terminal & Execution Environment
