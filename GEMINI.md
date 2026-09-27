@@ -140,6 +140,9 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
         - *Non-Destructive Margin Veto Rehydration*: During live broker rehydration (`_rehydrate_cached_briefing`), if remaining collateral headroom is zero, staged candidates in `potential_trades` and `wheel_harvest_blotter` MUST be preserved with explicit `margin_veto = True` and `margin_veto_reason` metadata rather than silently wiping arrays to empty (`[]`).
         - *Weekly Briefing Cache Serving*: Cached weekly briefings (`briefing_YYYY-WXX`) serve directly for the active calendar week without discarding valid caches across midnight date boundaries when `force_refresh=False`.
 
+    18. **Dynamic 4D Macro Compass Calibration Standard (Added 2026-09-27)**:
+        - *Zero Hardcoded Offsets & Static Drivers*: All 4 dimensions (Rates & Monetary Pressure, Corporate Earnings, AI Interlink CapEx, Market Liquidity & Volatility) MUST derive scores, momentum labels, and key driver statements dynamically from live FRED series (`DGS10` yields, CPI/PCE inflation), accumulated headline corpus sentiment, and `InterlinkGraphEngine` supply chain metrics. Static score boosts (e.g. `+25.0`, `+35.0`) and hardcoded narrative strings are strictly prohibited.
+
 
 ## ☁️ Google Cloud
 - gcloud billing accounts list
