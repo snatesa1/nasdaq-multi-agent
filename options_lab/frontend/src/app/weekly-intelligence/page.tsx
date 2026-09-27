@@ -1104,30 +1104,30 @@ export default function WeeklyIntelligencePage() {
 
             {/* Candidate Cards Grid or Fully Deployed Protection Card */}
             {isPortfolioFullyDeployed ? (
-              <div className="p-6 bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 border border-emerald-500/40 rounded-2xl shadow-xl text-white space-y-6">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-5">
+              <div className="p-6 bg-emerald-50/50 border border-emerald-200 rounded-2xl shadow-xs text-slate-800 space-y-6">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-emerald-200/60 pb-5">
                   <div className="flex items-center gap-3.5">
-                    <div className="p-3 rounded-2xl bg-emerald-500/20 text-emerald-400 border border-emerald-400/40 shadow-inner">
+                    <div className="p-3 rounded-2xl bg-emerald-600 text-white shadow-xs">
                       <ShieldCheck className="h-7 w-7" />
                     </div>
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-bold text-white tracking-tight">
+                        <h3 className="text-lg font-bold text-slate-900 tracking-tight">
                           Portfolio Fully Deployed &amp; Capital Protected
                         </h3>
-                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-mono text-[10px] font-bold border border-emerald-400/30">
+                        <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 font-mono text-[10px] font-bold border border-emerald-300">
                           75.0% Margin Ceiling Enforced
                         </span>
                       </div>
-                      <p className="text-xs text-indigo-200/80 mt-0.5">
+                      <p className="text-xs text-slate-600 mt-0.5">
                         Risk Aggregator Agent Capital Veto Active • 0 new phantom trades proposed.
                       </p>
                     </div>
                   </div>
 
                   <div className="flex items-center gap-2">
-                    <span className="px-3 py-1.5 rounded-xl bg-white/10 text-slate-200 font-mono text-xs border border-white/10 flex items-center gap-1.5">
-                      <Lock className="h-3.5 w-3.5 text-amber-400" /> Capital Gate Active
+                    <span className="px-3 py-1.5 rounded-xl bg-amber-50 text-amber-900 font-mono text-xs font-bold border border-amber-200 flex items-center gap-1.5">
+                      <Lock className="h-3.5 w-3.5 text-amber-600" /> Capital Gate Active
                     </span>
                   </div>
                 </div>
@@ -1444,85 +1444,85 @@ export default function WeeklyIntelligencePage() {
                     </div>
 
                     {/* 3 Sub-Agent Persona Consensus Panel */}
-                    <div className="bg-gradient-to-r from-slate-900 to-indigo-950 text-white rounded-xl p-4 text-xs space-y-3 shadow-sm border border-indigo-800/40">
-                      <div className="flex items-center justify-between border-b border-indigo-800/60 pb-2">
+                    <div className="bg-indigo-50/50 border border-indigo-200/70 text-slate-800 rounded-xl p-4 text-xs space-y-3 shadow-xs">
+                      <div className="flex items-center justify-between border-b border-indigo-100 pb-2">
                         <div className="flex items-center gap-2">
-                          <span className="p-1 rounded-md bg-indigo-600/60 text-indigo-200">
+                          <span className="p-1 rounded-md bg-indigo-100 text-[#4051B5]">
                             <Layers className="h-4 w-4" />
                           </span>
-                          <span className="font-bold text-indigo-100 tracking-wide">
+                          <span className="font-bold text-slate-800 tracking-wide">
                             Autonomous 3 Sub-Agent Consensus Review
                           </span>
                         </div>
-                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-400/20 text-amber-300 border border-amber-400/40">
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-amber-100 text-amber-800 border border-amber-200">
                           {trade.sub_agent_consensus?.executive_allocator?.golden_trade_label || `Golden Trade #${trade.golden_trade_rank || 1}`}
                         </span>
                       </div>
 
                       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                         {/* 1. Financial Analyst Persona */}
-                        <div className="bg-white/5 border border-white/10 rounded-lg p-2.5 space-y-1">
+                        <div className="bg-white border border-slate-200 rounded-lg p-2.5 space-y-1 shadow-2xs">
                           <div className="flex items-center justify-between">
-                            <span className="font-bold text-indigo-300 text-[11px] flex items-center gap-1">
+                            <span className="font-bold text-indigo-700 text-[11px] flex items-center gap-1">
                               📊 Financial Analyst
                             </span>
                             <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
                               trade.sub_agent_consensus?.financial_analyst?.status === 'CHALLENGED_ON_SWEET_SPOT' 
-                                ? 'bg-amber-500/30 text-amber-300 border border-amber-400/30' 
-                                : 'bg-emerald-500/30 text-emerald-300'
+                                ? 'bg-amber-100 text-amber-800 border border-amber-300' 
+                                : 'bg-emerald-100 text-emerald-800'
                             }`}>
                               {trade.sub_agent_consensus?.financial_analyst?.status === 'CHALLENGED_ON_SWEET_SPOT' ? 'SWEET SPOT CHALLENGED' : (trade.sub_agent_consensus?.financial_analyst?.status || 'APPROVED')}
                             </span>
                           </div>
-                          <p className="text-[11px] text-slate-300 leading-snug">
+                          <p className="text-[11px] text-slate-700 leading-snug">
                             {trade.sub_agent_consensus?.financial_analyst?.verdict || `High fundamental conviction. Selling conservative 30-DTE OTM CSP at $${trade.strike} captures premium sweet-spot above support.`}
                           </p>
-                          <span className="text-[10px] text-indigo-200 font-mono block">
+                          <span className="text-[10px] text-indigo-600 font-mono block font-medium">
                             Target: {trade.sub_agent_consensus?.financial_analyst?.sweet_spot_score || `$${trade.premium_estimate.toFixed(2)}/contract`}
                           </span>
                         </div>
 
                         {/* 2. Risk Aggregator Persona */}
-                        <div className="bg-white/5 border border-white/10 rounded-lg p-2.5 space-y-1">
+                        <div className="bg-white border border-slate-200 rounded-lg p-2.5 space-y-1 shadow-2xs">
                           <div className="flex items-center justify-between">
-                            <span className="font-bold text-amber-300 text-[11px] flex items-center gap-1">
+                            <span className="font-bold text-amber-700 text-[11px] flex items-center gap-1">
                               🛡️ Risk Aggregator
                             </span>
-                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-500/30 text-emerald-300 font-bold">
+                            <span className="text-[9px] px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800 font-bold">
                               {trade.sub_agent_consensus?.risk_aggregator?.status || 'APPROVED'}
                             </span>
                           </div>
-                          <p className="text-[11px] text-slate-300 leading-snug">
+                          <p className="text-[11px] text-slate-700 leading-snug">
                             {trade.sub_agent_consensus?.risk_aggregator?.verdict || `Risk cleared. +${trade.max_margin_impact_pct?.toFixed(1) || '1.5'}% margin within limit. 100% full cash collateral ($${(trade.collateral_required || trade.strike * 100).toLocaleString()}) within budget.`}
                           </p>
-                          <span className="text-[10px] text-amber-200 font-mono block">
+                          <span className="text-[10px] text-amber-700 font-mono block font-medium">
                             Sector: {trade.sub_agent_consensus?.risk_aggregator?.sector_clearance || `${trade.sector} (Cleared)`}
                           </span>
                         </div>
 
                         {/* 3. Executive Portfolio Allocator Persona */}
-                        <div className="bg-white/5 border border-white/10 rounded-lg p-2.5 space-y-1">
+                        <div className="bg-white border border-slate-200 rounded-lg p-2.5 space-y-1 shadow-2xs">
                           <div className="flex items-center justify-between">
-                            <span className="font-bold text-emerald-300 text-[11px] flex items-center gap-1">
+                            <span className="font-bold text-emerald-700 text-[11px] flex items-center gap-1">
                               🏛️ Executive Allocator
                             </span>
                             <span className={`text-[9px] px-1.5 py-0.2 rounded font-bold ${
                               trade.sub_agent_consensus?.executive_allocator?.status === 'TARGET_SHORTFALL_CHALLENGE'
-                                ? 'bg-amber-500/30 text-amber-300 border border-amber-400/50'
-                                : 'bg-emerald-500/30 text-emerald-300'
+                                ? 'bg-amber-100 text-amber-800 border border-amber-300'
+                                : 'bg-emerald-100 text-emerald-800'
                             }`}>
                               {trade.sub_agent_consensus?.executive_allocator?.status === 'TARGET_SHORTFALL_CHALLENGE' ? 'DEFICIT CHALLENGE' : 'GOLDEN TARGET'}
                             </span>
                           </div>
-                          <p className="text-[11px] text-slate-300 leading-snug">
+                          <p className="text-[11px] text-slate-700 leading-snug">
                             {trade.sub_agent_consensus?.executive_allocator?.allocation_decision || 'Approved for user 1-click authorization into Saxo Order Blotter.'}
                           </p>
-                          <div className="flex flex-wrap items-center justify-between gap-1 pt-1 border-t border-white/10">
-                            <span className="text-[10px] text-emerald-300 font-mono font-bold">
+                          <div className="flex flex-wrap items-center justify-between gap-1 pt-1 border-t border-slate-100">
+                            <span className="text-[10px] text-emerald-700 font-mono font-bold">
                               {trade.sub_agent_consensus?.executive_allocator?.monthly_harvest_contribution || `$${(trade.premium_estimate * 100).toFixed(2)} towards $1,500 goal`}
                             </span>
                             {trade.sub_agent_consensus?.executive_allocator?.target_harvest_gap && (
-                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-400/20 text-amber-300 font-mono font-bold">
+                              <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 font-mono font-bold">
                                 {trade.sub_agent_consensus.executive_allocator.target_harvest_gap}
                               </span>
                             )}
@@ -1544,15 +1544,15 @@ export default function WeeklyIntelligencePage() {
         {activeTab === 'compass' && (
           <div className="space-y-6">
             {/* Compass Composite Direction Banner */}
-            <div className="p-6 bg-gradient-to-r from-indigo-900 via-indigo-800 to-slate-900 text-white rounded-2xl shadow-sm space-y-3">
+            <div className="p-6 bg-white border border-slate-200 text-slate-800 rounded-2xl shadow-xs space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
-                  <div className="p-3 rounded-xl bg-white/10 backdrop-blur-xs border border-white/20">
-                    <Compass className="h-6 w-6 text-indigo-200" />
+                  <div className="p-3 rounded-xl bg-indigo-50 border border-indigo-100 text-[#4051B5]">
+                    <Compass className="h-6 w-6 text-[#4051B5]" />
                   </div>
                   <div>
-                    <span className="text-xs uppercase tracking-wider text-indigo-300 font-bold">Composite Macro Regime</span>
-                    <h2 className="text-2xl font-black tracking-tight text-white flex items-center gap-2">
+                    <span className="text-xs uppercase tracking-wider text-slate-500 font-bold">Composite Macro Regime</span>
+                    <h2 className="text-2xl font-black tracking-tight text-slate-900 flex items-center gap-2">
                       {compass?.composite_direction || 'EXPANSIVE_EQUILIBRIUM'}
                     </h2>
                   </div>
@@ -1560,8 +1560,8 @@ export default function WeeklyIntelligencePage() {
 
                 <div className="flex items-center gap-3">
                   <div className="text-right">
-                    <span className="text-[10px] uppercase text-indigo-300 font-bold block">Aggregated Score</span>
-                    <span className="text-2xl font-mono font-black text-emerald-400">
+                    <span className="text-[10px] uppercase text-slate-500 font-bold block">Aggregated Score</span>
+                    <span className="text-2xl font-mono font-black text-emerald-600">
                       {compass ? (compass.composite_score >= 0 ? `+${compass.composite_score}` : compass.composite_score) : '+46.3'}
                     </span>
                   </div>
