@@ -24,6 +24,8 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
 >   - [`specs/03-options-harvest-and-margin/wheel-harvest-engine.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/03-options-harvest-and-margin/wheel-harvest-engine.spec.md)
 >   - [`specs/03-options-harvest-and-margin/expiry-radar-and-rolls.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/03-options-harvest-and-margin/expiry-radar-and-rolls.spec.md)
 >   - [`specs/04-macro-and-multi-agent/dialectical-fiduciary-arena.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/04-macro-and-multi-agent/dialectical-fiduciary-arena.spec.md)
+>   - [`specs/05-behavioral-forensics-and-tutor/socratic-tutor.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/05-behavioral-forensics-and-tutor/socratic-tutor.spec.md)
+>   - [`specs/06-frontend-and-api-contracts/api-gateway-and-handshake.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/06-frontend-and-api-contracts/api-gateway-and-handshake.spec.md)
 > - **Workflow**: To change behavior, update the spec (or ask in chat) -> verify invariants -> implement code -> run tests.
 
 ## 🪟 Default Terminal & Execution Environment
