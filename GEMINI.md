@@ -20,6 +20,10 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
 >   - [`specs/02-broker-and-execution/saxo-execution-desk.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/02-broker-and-execution/saxo-execution-desk.spec.md)
 >   - [`specs/02-broker-and-execution/order-safety-and-quantization.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/02-broker-and-execution/order-safety-and-quantization.spec.md)
 >   - [`specs/02-broker-and-execution/balance-and-collateral.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/02-broker-and-execution/balance-and-collateral.spec.md)
+>   - [`specs/03-options-harvest-and-margin/margin-guardian.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/03-options-harvest-and-margin/margin-guardian.spec.md)
+>   - [`specs/03-options-harvest-and-margin/wheel-harvest-engine.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/03-options-harvest-and-margin/wheel-harvest-engine.spec.md)
+>   - [`specs/03-options-harvest-and-margin/expiry-radar-and-rolls.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/03-options-harvest-and-margin/expiry-radar-and-rolls.spec.md)
+>   - [`specs/04-macro-and-multi-agent/dialectical-fiduciary-arena.spec.md`](file:///c:/Admin/Akpegis-Agent-Ecosystem/nasdaq-multi-agent/specs/04-macro-and-multi-agent/dialectical-fiduciary-arena.spec.md)
 > - **Workflow**: To change behavior, update the spec (or ask in chat) -> verify invariants -> implement code -> run tests.
 
 ## 🪟 Default Terminal & Execution Environment
