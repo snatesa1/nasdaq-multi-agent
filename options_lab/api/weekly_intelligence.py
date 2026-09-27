@@ -3253,10 +3253,25 @@ class WeeklyIntelligenceEngine:
 
     def _ensure_briefing_candidates_staged(self, briefing: Dict[str, Any], week_label: str) -> Dict[str, Any]:
         """
-        Descriptive Summary:
+        1. Descriptive Summary:
             Idempotency & Integrity Guard: Ensures every candidate in the briefing payload
             has a valid trade_id, id, and staged_trade_id, and guarantees that each candidate
             is actively persisted into SQLite staged_trades table so it can be approved without 400/404 errors.
+
+        2. Parameters / Encapsulation:
+            - briefing (Dict[str, Any]): Full briefing data dictionary containing wheel_harvest_blotter and potential_trades.
+            - week_label (str): ISO calendar week identifier (e.g. '2026-W39').
+
+        3. Returns / Internal State:
+            - Dict[str, Any]: Verified briefing dictionary with populated candidate IDs.
+
+        4. Exceptions / Side Effects:
+            - Catches and logs non-critical SQLite staging errors; persists trade recommendations to database.
+
+        5. Concrete Executable Usage Example:
+            >>> engine = WeeklyIntelligenceEngine()
+            >>> secured_briefing = engine._ensure_briefing_candidates_staged({"potential_trades": []}, "2026-W39")
+            >>> assert isinstance(secured_briefing, dict)
         """
         if not isinstance(briefing, dict):
             return briefing
@@ -3290,6 +3305,8 @@ class WeeklyIntelligenceEngine:
                     self.trade_staging.stage_recommendation(cand, week_label=week_label)
             except Exception as e_st:
                 logger.debug(f"Auto-staging check notice for {tid}: {e_st}")
+
+        return briefing
 
     def _rehydrate_cached_briefing(self, cached: Dict[str, Any], week_label: str) -> Dict[str, Any]:
         """

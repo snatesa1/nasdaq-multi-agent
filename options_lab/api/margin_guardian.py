@@ -476,9 +476,9 @@ class MarginGuardian:
             >>> print(res["approved"], res["cumulative_collateral"], res["max_allowed_collateral"])
         """
         status = current_status or self.get_current_margin_status()
-        total_equity = status["total_equity"]
-        margin_used = status["margin_used"]
-        cash_avail = status["cash_available"]
+        total_equity = float(status.get("total_equity", 100000.0))
+        margin_used = float(status.get("margin_used", 0.0))
+        cash_avail = float(status.get("cash_available", 50000.0))
 
         collateral_cap_pct = float(max_cash_collateral_pct) if max_cash_collateral_pct is not None else self.max_cash_collateral_pct
         max_allowed_collateral = round(cash_avail * (collateral_cap_pct / 100.0), 2)

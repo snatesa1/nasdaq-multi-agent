@@ -130,6 +130,11 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
           2. *Cross-Sector Replacement Setup*: Alternative high-conviction candidate from another GICS sector sized to the liberated collateral budget.
         - *Multi-Agent Consensus Verdicts*: Financial Analyst, Risk Aggregator, and Allocator must attach explicit rationale covering assignment defense, margin neutrality, and capital compounding.
 
+    16. **Fresh Boot Broker Concurrency & Cache Rehydration Invariant (Added 2026-09-27)**:
+        - *Decoupled Startup Pre-Warm*: Background pre-warmers (e.g. weekly macro intelligence briefing) must delay startup tasks by at least 15 seconds (`await asyncio.sleep(15)`) to guarantee the frontend UI, WebSocket handshakes, and initial account telemetry (`/api/broker/refresh`) execute cleanly without socket starvation or thread pool lock contention. Never invoke heavy `force_refresh=True` on startup.
+        - *Strict Return Invariant on Cache Rehydration*: Any cache hydration or idempotency staging helper (e.g. `_ensure_briefing_candidates_staged`) MUST explicitly return the hydrated briefing dictionary. Dropping or failing to return the payload converts cached snapshots into `None` / `null`, causing frontend macro synthesis and event card grids to hang indefinitely in a loading state.
+        - *Aligned Broker Gateway Timeouts*: Consolidated multi-endpoint gatherers (`/api/broker/refresh`) must configure per-task timeouts to at least 25.0s (and 28.0s for blotter audits) to prevent premature `asyncio.TimeoutError` exceptions during initial TCP/TLS handshake latency.
+
 
 ## ☁️ Google Cloud
 - gcloud billing accounts list

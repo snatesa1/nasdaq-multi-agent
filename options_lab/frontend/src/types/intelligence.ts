@@ -141,6 +141,8 @@ export interface SubAgentConsensus {
 
 export interface StagedTrade {
   trade_id: string;
+  id?: string;
+  staged_trade_id?: string;
   symbol: string;
   name?: string;
   sector?: string;

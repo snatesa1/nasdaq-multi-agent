@@ -2365,7 +2365,7 @@ export default function WeeklyIntelligencePage() {
                     </div>
                   </div>
                 ) : (
-                  <MacroBriefingView content={briefing?.ai_summary || ''} />
+                  <MacroBriefingView content={briefing?.ai_summary || ''} onRetry={() => fetchBriefing(true)} />
                 )}
               </div>
             </div>
@@ -2380,30 +2380,43 @@ export default function WeeklyIntelligencePage() {
               </h2>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                {briefing?.macro_events?.map((evt) => (
-                  <div key={evt.event_id} className="velzon-card p-5 bg-white border border-slate-200/80 rounded-xl shadow-sm space-y-3 hover:border-indigo-200 transition">
-                    <div className="flex items-start justify-between gap-3">
-                      <span className="px-2.5 py-1 bg-indigo-50 text-[#4051B5] rounded-md border border-indigo-100 font-mono text-xs font-bold">
-                        {evt.category}
-                      </span>
-                      <span className="text-xs text-slate-400 font-mono">{evt.date}</span>
-                    </div>
-                    <h3 className="text-sm font-bold text-slate-800">{evt.title}</h3>
-                    <p className="text-xs text-slate-600 leading-relaxed">{evt.summary}</p>
-                    
-                    <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs">
-                      <div className="flex items-center gap-1.5">
-                        <span className="text-slate-400 font-medium">Tickers:</span>
-                        {evt.affected_tickers?.map(t => (
-                          <span key={t} className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded font-mono font-bold">
-                            {t}
-                          </span>
-                        ))}
+                {briefing?.macro_events && briefing.macro_events.length > 0 ? (
+                  briefing.macro_events.map((evt) => (
+                    <div key={evt.event_id} className="velzon-card p-5 bg-white border border-slate-200/80 rounded-xl shadow-sm space-y-3 hover:border-indigo-200 transition">
+                      <div className="flex items-start justify-between gap-3">
+                        <span className="px-2.5 py-1 bg-indigo-50 text-[#4051B5] rounded-md border border-indigo-100 font-mono text-xs font-bold">
+                          {evt.category}
+                        </span>
+                        <span className="text-xs text-slate-400 font-mono">{evt.date}</span>
                       </div>
-                      <span className="text-amber-600 font-mono font-bold">Impact: {'★'.repeat(evt.impact_score)}</span>
+                      <h3 className="text-sm font-bold text-slate-800">{evt.title}</h3>
+                      <p className="text-xs text-slate-600 leading-relaxed">{evt.summary}</p>
+                      
+                      <div className="flex items-center justify-between pt-3 border-t border-slate-100 text-xs">
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-slate-400 font-medium">Tickers:</span>
+                          {evt.affected_tickers?.map(t => (
+                            <span key={t} className="px-2 py-0.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded font-mono font-bold">
+                              {t}
+                            </span>
+                          ))}
+                        </div>
+                        <span className="text-amber-600 font-mono font-bold">Impact: {'★'.repeat(evt.impact_score)}</span>
+                      </div>
                     </div>
+                  ))
+                ) : (
+                  <div className="col-span-full p-8 text-center rounded-xl bg-slate-50 border border-dashed border-slate-200 text-slate-500 text-xs font-medium space-y-2">
+                    <p>No active high-impact macro catalyst events staged in current snapshot.</p>
+                    <button
+                      onClick={() => fetchBriefing(true)}
+                      className="px-3.5 py-1.5 bg-[#4051B5] text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition inline-flex items-center gap-1.5 shadow-xs cursor-pointer"
+                    >
+                      <RefreshCw className="h-3.5 w-3.5" />
+                      <span>Refresh Macro News Wire</span>
+                    </button>
                   </div>
-                ))}
+                )}
               </div>
             </div>
           </div>
@@ -2803,12 +2816,23 @@ export default function WeeklyIntelligencePage() {
 // INSTITUTIONAL RESEARCH DESK BRIEFING FORMATTER
 // ────────────────────────────────────────────────────────────
 
-function MacroBriefingView({ content }: { content: string }) {
+function MacroBriefingView({ content, onRetry }: { content: string; onRetry?: () => void }) {
   if (!content) {
     return (
-      <div className="flex items-center justify-center py-6 text-slate-400 text-xs gap-2">
-        <RefreshCw className="h-4 w-4 animate-spin text-[#4051B5]" />
-        <span>Synthesizing institutional research desk macro briefing...</span>
+      <div className="flex flex-col items-center justify-center py-8 px-4 text-center rounded-xl bg-slate-50 border border-slate-200/80 space-y-3">
+        <div className="flex items-center gap-2 text-slate-500 text-xs font-medium">
+          <RefreshCw className="h-4 w-4 animate-spin text-[#4051B5]" />
+          <span>Synthesizing institutional research desk macro briefing...</span>
+        </div>
+        {onRetry && (
+          <button
+            onClick={onRetry}
+            className="px-3.5 py-1.5 bg-[#4051B5] text-white rounded-lg text-xs font-bold hover:bg-indigo-700 transition flex items-center gap-1.5 shadow-xs cursor-pointer"
+          >
+            <Sparkles className="h-3.5 w-3.5" />
+            <span>Generate Synthesis</span>
+          </button>
+        )}
       </div>
     );
   }

@@ -140,13 +140,16 @@ async def start_token_heartbeat():
 
     async def _prewarm_weekly_intelligence():
         try:
-            await asyncio.sleep(2)
+            # Stagger startup pre-warm by 15s to allow smooth initial UI hydration & broker handshake
+            await asyncio.sleep(15)
             current_week = f"{datetime.now().year}-W{datetime.now().isocalendar()[1]}"
             cached = database.get_saxo_cache(f"briefing_{current_week}")
-            if not cached or not isinstance(cached, dict) or not cached.get("wheel_harvest_blotter", {}).get("mode_1"):
-                logger.info(f"⚡ [Background Intelligence Pre-warmer] Warming weekly briefing for {current_week}...")
-                await asyncio.to_thread(weekly_intelligence.analyze_weekly_macro_and_edges, week_label=current_week, force_refresh=True)
-                logger.info(f"✅ [Background Intelligence Pre-warmer] Weekly briefing warmed and cached for {current_week}!")
+            if not cached or not isinstance(cached, dict) or not cached.get("ai_summary"):
+                logger.info(f"⚡ [Background Intelligence Pre-warmer] Initializing weekly briefing for {current_week}...")
+                await asyncio.to_thread(weekly_intelligence.analyze_weekly_macro_and_edges, week_label=current_week, force_refresh=False)
+                logger.info(f"✅ [Background Intelligence Pre-warmer] Weekly briefing initialized for {current_week}!")
+            else:
+                logger.info(f"⚡ [Background Intelligence Pre-warmer] Valid briefing for {current_week} already cached. Rehydration ready.")
         except Exception as e_prewarm:
             logger.warning(f"⚠️ [Background Intelligence Pre-warmer] Non-critical: {e_prewarm}")
     asyncio.create_task(_prewarm_weekly_intelligence())
@@ -1092,29 +1095,29 @@ async def force_refresh_broker(user=Depends(verify_firebase_token)):
             "updated_at": now_iso
         }
 
-        # Helper sub-tasks with dedicated individual timeouts
+        # Helper sub-tasks with dedicated individual timeouts (aligned with SaxoClient 30s timeout)
         async def _fetch_acc():
             return await asyncio.wait_for(
                 asyncio.to_thread(saxo_broker_client.get_account_balances),
-                timeout=15.0
+                timeout=25.0
             )
 
         async def _fetch_pos():
             return await asyncio.wait_for(
                 asyncio.to_thread(saxo_broker_client.get_positions),
-                timeout=15.0
+                timeout=25.0
             )
 
         async def _fetch_blotter():
             return await asyncio.wait_for(
                 asyncio.to_thread(saxo_broker_client.get_order_blotter),
-                timeout=18.0
+                timeout=28.0
             )
 
         async def _fetch_orders():
             return await asyncio.wait_for(
                 asyncio.to_thread(saxo_broker_client.get_orders),
-                timeout=15.0
+                timeout=25.0
             )
 
         raw_results = await asyncio.gather(
