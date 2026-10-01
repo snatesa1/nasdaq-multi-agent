@@ -189,12 +189,29 @@ export default function Dashboard() {
   const handleStartOAuth = (e?: React.MouseEvent) => {
     if (e) e.preventDefault();
     if (!authUrl) return;
+
+    // Start background status poll for automatic zero-touch detection
+    const pollTimer = setInterval(async () => {
+      try {
+        const sRes = await optionsApi.getBrokerSessionStatus();
+        if (sRes?.has_access_token) {
+          clearInterval(pollTimer);
+          setIsAuthenticated(true);
+          setSyncNotice('✅ Saxo Live MFA Authenticated via Loopback Callback!');
+          fetchBrokerData(false);
+        }
+      } catch (err) {}
+    }, 1500);
+    setTimeout(() => clearInterval(pollTimer), 90000);
     
     if (typeof window !== 'undefined' && (window as any).electronAPI?.openSaxoOauth) {
       setActionLoading(true);
-      setSyncNotice('Launching Google Chrome for Saxo Live MFA. Authenticate in Chrome, then copy the address bar URL or let the auto-sentinel link it.');
+      setSyncNotice('Launching Google Chrome for Saxo Live MFA. Authenticate in Chrome — session will unlock automatically upon login.');
       (window as any).electronAPI.openSaxoOauth(authUrl)
-        .then(() => fetchBrokerData(false))
+        .then(() => {
+          clearInterval(pollTimer);
+          fetchBrokerData(false);
+        })
         .catch((err: any) => console.error('Electron OAuth error:', err))
         .finally(() => setActionLoading(false));
       return;
@@ -203,7 +220,7 @@ export default function Dashboard() {
     // Direct browser redirect to Google Chrome / primary browser in a new tab for Saxo MFA authentication
     if (typeof window !== 'undefined') {
       window.open(authUrl, '_blank');
-      setSyncNotice('Google Chrome / browser opened in a new tab for Saxo MFA. Complete login, then copy the URL and click Auto-Link from Clipboard.');
+      setSyncNotice('Google Chrome opened for Saxo Live MFA. Authenticate in Chrome — dashboard will unlock automatically.');
     }
   };
 

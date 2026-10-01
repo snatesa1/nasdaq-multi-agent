@@ -395,6 +395,32 @@ async function createWindow() {
           return;
         }
 
+        // 1. Check if backend already exchanged tokens via loopback callback (http://localhost:8000/api/broker/oauth/callback)
+        try {
+          const statusReq = http.get(`${BACKEND_URL}/api/broker/session-status`, (res) => {
+            let data = '';
+            res.on('data', (chunk) => { data += chunk; });
+            res.on('end', () => {
+              try {
+                const parsed = JSON.parse(data);
+                if (parsed && parsed.has_access_token && !handled) {
+                  handled = true;
+                  cleanUp();
+                  console.log('[Electron OAuth] Live broker authenticated via loopback callback! Focusing OptionsLab...');
+                  if (mainWindow && !mainWindow.isDestroyed()) {
+                    mainWindow.webContents.send('saxo-auth-success');
+                    if (mainWindow.isMinimized()) mainWindow.restore();
+                    mainWindow.focus();
+                  }
+                  resolve({ success: true, method: 'LOOPBACK_CALLBACK' });
+                }
+              } catch (e) {}
+            });
+          });
+          statusReq.on('error', () => {});
+        } catch (e) {}
+
+        // 2. Clipboard fallback (if user copied URL or manual code)
         try {
           const text = clipboard.readText();
           if (!text || text.length < 10) return;

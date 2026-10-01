@@ -289,13 +289,35 @@ export default function WeeklyIntelligencePage() {
     if (e) e.preventDefault();
     if (!authUrl) return;
     
+    // Background polling sentinel for zero-touch loopback callback detection
+    const pollTimer = setInterval(async () => {
+      try {
+        const sRes = await optionsApi.getBrokerSessionStatus();
+        if (sRes?.has_access_token) {
+          clearInterval(pollTimer);
+          if (sRes?.server_boot_id) {
+            sessionStorage.setItem('optionslab_saxo_boot_id', sRes.server_boot_id);
+          }
+          setBrokerStatus(sRes);
+          setColdStartAuthRequired(false);
+          setActionLog(prev => [
+            { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authenticated via Loopback Callback!', time: new Date().toLocaleTimeString(), type: 'success' },
+            ...prev
+          ]);
+          fetchBriefing(true);
+        }
+      } catch (err) {}
+    }, 1500);
+    setTimeout(() => clearInterval(pollTimer), 90000);
+
     if (typeof window !== 'undefined' && (window as any).electronAPI?.openSaxoOauth) {
       setActionLog(prev => [
-        { id: 'AUTH-LAUNCH', msg: '🚀 Google Chrome launched for Saxo Live MFA. Authenticate in Chrome and copy URL to auto-link.', time: new Date().toLocaleTimeString(), type: 'info' },
+        { id: 'AUTH-LAUNCH', msg: '🚀 Google Chrome launched for Saxo Live MFA. Authenticate in Chrome — cockpit unlocks automatically.', time: new Date().toLocaleTimeString(), type: 'info' },
         ...prev
       ]);
       (window as any).electronAPI.openSaxoOauth(authUrl)
         .then(async () => {
+          clearInterval(pollTimer);
           setActionLog(prev => [
             { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authenticated via Google Chrome!', time: new Date().toLocaleTimeString(), type: 'success' },
             ...prev
@@ -316,7 +338,7 @@ export default function WeeklyIntelligencePage() {
     if (typeof window !== 'undefined') {
       window.open(authUrl, '_blank');
       setActionLog(prev => [
-        { id: 'AUTH-LAUNCH', msg: '🚀 Opened Saxo Live OAuth in a new tab. Complete MFA, then copy URL and click Auto-Link from Clipboard.', time: new Date().toLocaleTimeString(), type: 'info' },
+        { id: 'AUTH-LAUNCH', msg: '🚀 Opened Saxo Live OAuth in Google Chrome. Complete MFA — cockpit unlocks automatically.', time: new Date().toLocaleTimeString(), type: 'info' },
         ...prev
       ]);
     }

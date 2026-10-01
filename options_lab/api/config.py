@@ -153,7 +153,7 @@ class Settings:
 
     @cached_property
     def SAXO_REDIRECT_URL(self) -> str:
-        return os.getenv("SAXO_REDIRECT_URL", "https://Akpegis-Agent.com.sg")
+        return os.getenv("SAXO_REDIRECT_URL", "http://localhost:8000/api/broker/oauth/callback")
 
     # ── CORS ──────────────────────────────────────────────────────────────────
     @cached_property

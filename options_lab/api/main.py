@@ -851,11 +851,12 @@ def broker_oauth_callback(code: Optional[str] = None, state: Optional[str] = Non
                         } catch(e){}
                     }
                     setTimeout(function(){
+                        try { window.close(); } catch(e){}
                         var appUrl = (window.location.port === '8000' || !window.location.port)
                           ? 'http://' + window.location.hostname + ':3000/weekly-intelligence'
                           : window.location.origin + '/weekly-intelligence';
                         window.location.href = appUrl;
-                    }, 1500);
+                    }, 1200);
                 </script>
             </body>
             </html>

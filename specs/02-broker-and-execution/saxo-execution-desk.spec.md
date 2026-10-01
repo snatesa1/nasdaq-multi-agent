@@ -21,11 +21,12 @@ Options Lab enforces a **Strict Single Execution Engine Architecture**.
 - All proposed trades originate from authentic market quotes (`trade/v1/infoprices`) and execute exclusively via the Saxo OpenAPI trading gateway (`trade/v2/orders`).
 - Fictitious paper order fills or disconnected sandboxes are strictly prohibited in the trading pipeline.
 
-### `[SPEC-SAXO-DESK-002]`: OAuth 2.0 PKCE & Chrome Browser Redirect
+### `[SPEC-SAXO-DESK-002]`: OAuth 2.0 PKCE & Chrome Native Loopback Callback
 - Authentication executes via Saxo OpenAPI standard OAuth 2.0 Authorization Code Flow with PKCE (`S256`).
 - **Zero In-App Modal Sandboxing**: Desktop environments (`Electron`) are strictly prohibited from trapping authentication inside internal child `BrowserWindow` modals. Authentication MUST launch external **Google Chrome** directly (`chrome.exe` / `shell.openExternal(authUrl)`) to guarantee native support for hardware security keys (FIDO2/WebAuthn), Windows Hello, biometric MFA, and Chrome password autofill.
-- **Web Tab Preservation**: Web clients MUST launch Saxo OAuth in an external tab (`window.open(authUrl, '_blank')`) to prevent destroying active OptionsLab session telemetry when Saxo redirects to the registered external redirect URI (`https://Akpegis-Agent.com.sg`).
-- **Automated Background Clipboard Interceptor**: When Google Chrome is launched, the desktop runtime MUST activate a background clipboard polling sentinel (90s TTL, 500ms cycle) that automatically intercepts any copied Saxo callback URL containing `code=` or UUID, auto-exchanges the code via `POST /api/broker/oauth/set-token`, notifies the renderer, and brings the OptionsLab window to the foreground.
+- **Native Loopback Callback (`http://localhost:8000/api/broker/oauth/callback`)**: Registered in Saxo Developer Portal under RFC 8252 (OAuth 2.0 for Native Apps). When the user authenticates in Google Chrome, Saxo redirects Chrome directly to the local FastAPI backend callback (`GET /api/broker/oauth/callback`). The backend captures the authorization code, automatically exchanges it for live access and refresh tokens, and serves a success verification page attempting `window.close()`.
+- **Zero-Touch Session Heartbeat**: Both the desktop Electron runtime and web frontend initiate a background session status polling heartbeat (1.5s interval, 90s TTL). As soon as the loopback callback exchanges the token, OptionsLab automatically unlocks the cockpit without requiring any user copy-pasting or manual clicks.
+- **Resilient Fallback Sentinel**: If running with a legacy external domain, the desktop runtime retains the background clipboard polling sentinel to auto-intercept copied codes.
 
 ### `[SPEC-SAXO-DESK-003]`: Multi-Tier Token Persistence
 - OAuth access tokens, refresh tokens, and expiry timestamps persist across three resilient storage tiers:

@@ -167,10 +167,11 @@ Welcome to **Akpegis-Agent-Ecosystem** — your autonomous AI agent, market inte
     19. **Unified Light Theme Protocol for Dialectical Arena (Added 2026-09-27)**:
         - *Consistent UI Surface Invariant*: Frontend sub-agent debate panels and cross-examination arenas MUST strictly adhere to the parent page's light theme container hierarchy (`bg-white border-slate-200 text-slate-800`), utilizing indigo (`#4051B5`), emerald, and amber background tints (`bg-indigo-50/50`, `bg-emerald-50/40`) for agent role highlights. Dark gradient containers in standard dashboard views are strictly prohibited.
 
-    20. **Saxo Chrome OAuth Redirect & Auto-Clipboard Sentinel Standard (Updated 2026-10-01)**:
+    20. **Saxo Chrome OAuth Native Loopback Callback Standard (Updated 2026-10-01)**:
         - *Direct Google Chrome Launch (Zero In-App Modals)*: Triggering Saxo broker authorization in the desktop runtime (`Electron`) is strictly prohibited from opening child `BrowserWindow` modals inside the application. It MUST launch external **Google Chrome** directly (`chrome.exe` / `shell.openExternal(authUrl)`) to guarantee native support for hardware security keys (FIDO2/WebAuthn), Windows Hello, biometric MFA, and Chrome password autofill.
-        - *Web Tab Preservation*: In standard browser environments, authentication MUST open in an external tab (`window.open(authUrl, '_blank')`) to keep the OptionsLab cockpit and session telemetry intact when Saxo redirects to the external registered redirect URI.
-        - *Automated Background Clipboard Sentinel*: In the desktop app, launching Chrome automatically activates a 90-second background sentinel (500ms cycle) that polls `clipboard.readText()`. The moment the user copies the redirected callback URL or code (`code=` / UUID), the desktop runtime auto-exchanges the code via `POST /api/broker/oauth/set-token`, emits `saxo-auth-success`, and restores/focuses the OptionsLab window.
+        - *Native Loopback Callback (`http://localhost:8000/api/broker/oauth/callback`)*: Registered in Saxo Developer Portal under RFC 8252. Google Chrome redirects directly to the local FastAPI backend callback upon MFA approval. The backend automatically captures and exchanges the code for live tokens, persists them to SQLite (`broker_tokens`), and attempts `window.close()`.
+        - *Zero-Touch Heartbeat Unlocking*: Both desktop Electron and web frontend run a 1.5s background session status polling heartbeat. The moment the loopback callback registers the token, OptionsLab automatically clears the cold-start gate and rehydrates live Cockpit data with zero manual copying or clicking required.
+        - *Clipboard Sentinel Fallback*: If running with a legacy external domain, the desktop runtime retains the background clipboard polling sentinel to auto-intercept copied codes as a safety net.
 
 
 ## ☁️ Google Cloud
