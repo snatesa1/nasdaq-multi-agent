@@ -290,10 +290,14 @@ export default function WeeklyIntelligencePage() {
     if (!authUrl) return;
     
     if (typeof window !== 'undefined' && (window as any).electronAPI?.openSaxoOauth) {
+      setActionLog(prev => [
+        { id: 'AUTH-LAUNCH', msg: '🚀 Google Chrome launched for Saxo Live MFA. Authenticate in Chrome and copy URL to auto-link.', time: new Date().toLocaleTimeString(), type: 'info' },
+        ...prev
+      ]);
       (window as any).electronAPI.openSaxoOauth(authUrl)
         .then(async () => {
           setActionLog(prev => [
-            { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authenticated via Desktop Interceptor!', time: new Date().toLocaleTimeString(), type: 'success' },
+            { id: 'AUTH-OK', msg: '✅ Saxo Live MFA Authenticated via Google Chrome!', time: new Date().toLocaleTimeString(), type: 'success' },
             ...prev
           ]);
           const sRes = await optionsApi.getBrokerSessionStatus();
@@ -308,9 +312,13 @@ export default function WeeklyIntelligencePage() {
       return;
     }
 
-    // Direct browser redirect to Google Chrome / primary browser for Saxo MFA authentication
+    // Direct browser redirect to Google Chrome / primary browser in a new tab for Saxo MFA authentication
     if (typeof window !== 'undefined') {
-      window.location.href = authUrl;
+      window.open(authUrl, '_blank');
+      setActionLog(prev => [
+        { id: 'AUTH-LAUNCH', msg: '🚀 Opened Saxo Live OAuth in a new tab. Complete MFA, then copy URL and click Auto-Link from Clipboard.', time: new Date().toLocaleTimeString(), type: 'info' },
+        ...prev
+      ]);
     }
   };
 

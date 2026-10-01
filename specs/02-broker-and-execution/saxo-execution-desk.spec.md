@@ -23,7 +23,9 @@ Options Lab enforces a **Strict Single Execution Engine Architecture**.
 
 ### `[SPEC-SAXO-DESK-002]`: OAuth 2.0 PKCE & Chrome Browser Redirect
 - Authentication executes via Saxo OpenAPI standard OAuth 2.0 Authorization Code Flow with PKCE (`S256`).
-- Browser redirects trigger directly via Google Chrome / system default browser (`window.location.href = authUrl`) to support hardware MFA and passkeys without pop-up blocking.
+- **Zero In-App Modal Sandboxing**: Desktop environments (`Electron`) are strictly prohibited from trapping authentication inside internal child `BrowserWindow` modals. Authentication MUST launch external **Google Chrome** directly (`chrome.exe` / `shell.openExternal(authUrl)`) to guarantee native support for hardware security keys (FIDO2/WebAuthn), Windows Hello, biometric MFA, and Chrome password autofill.
+- **Web Tab Preservation**: Web clients MUST launch Saxo OAuth in an external tab (`window.open(authUrl, '_blank')`) to prevent destroying active OptionsLab session telemetry when Saxo redirects to the registered external redirect URI (`https://Akpegis-Agent.com.sg`).
+- **Automated Background Clipboard Interceptor**: When Google Chrome is launched, the desktop runtime MUST activate a background clipboard polling sentinel (90s TTL, 500ms cycle) that automatically intercepts any copied Saxo callback URL containing `code=` or UUID, auto-exchanges the code via `POST /api/broker/oauth/set-token`, notifies the renderer, and brings the OptionsLab window to the foreground.
 
 ### `[SPEC-SAXO-DESK-003]`: Multi-Tier Token Persistence
 - OAuth access tokens, refresh tokens, and expiry timestamps persist across three resilient storage tiers:

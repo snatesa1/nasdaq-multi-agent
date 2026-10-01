@@ -192,6 +192,7 @@ export default function Dashboard() {
     
     if (typeof window !== 'undefined' && (window as any).electronAPI?.openSaxoOauth) {
       setActionLoading(true);
+      setSyncNotice('Launching Google Chrome for Saxo Live MFA. Authenticate in Chrome, then copy the address bar URL or let the auto-sentinel link it.');
       (window as any).electronAPI.openSaxoOauth(authUrl)
         .then(() => fetchBrokerData(false))
         .catch((err: any) => console.error('Electron OAuth error:', err))
@@ -199,9 +200,10 @@ export default function Dashboard() {
       return;
     }
 
-    // Direct browser redirect to Google Chrome / primary browser for Saxo MFA authentication
+    // Direct browser redirect to Google Chrome / primary browser in a new tab for Saxo MFA authentication
     if (typeof window !== 'undefined') {
-      window.location.href = authUrl;
+      window.open(authUrl, '_blank');
+      setSyncNotice('Google Chrome / browser opened in a new tab for Saxo MFA. Complete login, then copy the URL and click Auto-Link from Clipboard.');
     }
   };
 

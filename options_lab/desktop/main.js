@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, session, shell } = require('electron');
+const { app, BrowserWindow, Tray, Menu, ipcMain, dialog, session, shell, clipboard } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn, exec } = require('child_process');
@@ -325,64 +325,128 @@ async function createWindow() {
     }
   });
 
-  // Automated Saxo OAuth 2.0 Interceptor (Zero Copy-Paste)
+  // ── 3. Google Chrome Saxo OAuth Launcher & Clipboard Sentinel ──────────────
+  function launchGoogleChrome(targetUrl) {
+    if (process.platform === 'win32') {
+      const possibleChromePaths = [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+        path.join(process.env.LOCALAPPDATA || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        path.join(process.env.PROGRAMFILES || '', 'Google', 'Chrome', 'Application', 'chrome.exe'),
+        path.join(process.env['PROGRAMFILES(X86)'] || '', 'Google', 'Chrome', 'Application', 'chrome.exe')
+      ];
+
+      for (const chromePath of possibleChromePaths) {
+        if (chromePath && fs.existsSync(chromePath)) {
+          console.log(`[OptionsLab Desktop] Launching Google Chrome directly via: ${chromePath}`);
+          try {
+            const chromeProc = spawn(chromePath, [targetUrl], { detached: true, stdio: 'ignore' });
+            chromeProc.unref();
+            return true;
+          } catch (e) {
+            console.warn(`[OptionsLab Desktop] Failed to spawn chrome at ${chromePath}:`, e);
+          }
+        }
+      }
+    }
+
+    // Fallback to shell.openExternal (opens default browser, e.g. Chrome)
+    console.log('[OptionsLab Desktop] Launching auth URL via shell.openExternal...');
+    shell.openExternal(targetUrl);
+    return true;
+  }
+
+  let activeClipboardWatcher = null;
+
   ipcMain.handle('open-saxo-oauth', async (event, authUrl) => {
     return new Promise((resolve, reject) => {
-      const authWin = new BrowserWindow({
-        width: 600,
-        height: 750,
-        title: 'Saxo Bank MFA Authorization',
-        parent: mainWindow,
-        modal: true,
-        webPreferences: { nodeIntegration: false, contextIsolation: true }
-      });
+      // 1. Launch directly in Google Chrome / external browser (Zero in-app modal)
+      launchGoogleChrome(authUrl);
+
+      // 2. Clear any preexisting clipboard watcher
+      if (activeClipboardWatcher) {
+        clearInterval(activeClipboardWatcher);
+        activeClipboardWatcher = null;
+      }
+
+      console.log('[Electron OAuth] Google Chrome launched for Saxo Live MFA. Sentinel active (90s TTL)...');
 
       let handled = false;
-      const handleRedirect = async (targetUrl) => {
-        if (handled) return;
-        if (targetUrl.includes('code=') || targetUrl.includes('Akpegis-Agent.com.sg') || targetUrl.includes('callback')) {
-          try {
-            const urlObj = new URL(targetUrl);
-            const code = urlObj.searchParams.get('code');
-            if (code) {
-              handled = true;
-              console.log('[Electron OAuth] Captured Saxo code automatically:', code);
-              const postData = JSON.stringify({ code: code });
-              const req = http.request({
-                hostname: BACKEND_HOST,
-                port: BACKEND_PORT,
-                path: '/api/broker/oauth/set-token',
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Content-Length': Buffer.byteLength(postData)
-                }
-              }, (res) => {
-                authWin.close();
-                if (mainWindow) {
-                  mainWindow.webContents.send('saxo-auth-success');
-                }
-                resolve({ success: true, code });
-              });
-              req.on('error', (err) => {
-                console.error('[Electron OAuth] Error posting token:', err);
-                authWin.close();
-                reject(err);
-              });
-              req.write(postData);
-              req.end();
-            }
-          } catch (e) {
-            console.error('[Electron OAuth] Parse error:', e);
-          }
+      const startTime = Date.now();
+      const TIMEOUT_MS = 90000;
+
+      const cleanUp = () => {
+        if (activeClipboardWatcher) {
+          clearInterval(activeClipboardWatcher);
+          activeClipboardWatcher = null;
         }
       };
 
-      authWin.webContents.on('will-navigate', (event, url) => handleRedirect(url));
-      authWin.webContents.on('will-redirect', (event, url) => handleRedirect(url));
-      authWin.webContents.on('did-navigate', (event, url) => handleRedirect(url));
+      activeClipboardWatcher = setInterval(() => {
+        if (handled) {
+          cleanUp();
+          return;
+        }
 
-      authWin.loadURL(authUrl);
+        if (Date.now() - startTime > TIMEOUT_MS) {
+          console.log('[Electron OAuth] Clipboard sentinel reached 90s TTL without token.');
+          cleanUp();
+          resolve({ success: false, reason: 'TIMEOUT' });
+          return;
+        }
+
+        try {
+          const text = clipboard.readText();
+          if (!text || text.length < 10) return;
+
+          let code = null;
+          // Check for URL containing code query param
+          if (text.includes('code=')) {
+            const match = text.match(/[?&]code=([a-zA-Z0-9_\-]+)/);
+            if (match && match[1]) {
+              code = match[1];
+            }
+          } else if (text.trim().length === 36 && text.includes('-')) {
+            // Raw UUID code
+            code = text.trim();
+          }
+
+          if (code) {
+            handled = true;
+            cleanUp();
+            console.log('[Electron OAuth] Clipboard sentinel intercepted Saxo authorization code:', code);
+
+            const postData = JSON.stringify({ code: code });
+            const req = http.request({
+              hostname: BACKEND_HOST,
+              port: BACKEND_PORT,
+              path: '/api/broker/oauth/set-token',
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Content-Length': Buffer.byteLength(postData)
+              }
+            }, (res) => {
+              if (mainWindow && !mainWindow.isDestroyed()) {
+                mainWindow.webContents.send('saxo-auth-success');
+                if (mainWindow.isMinimized()) mainWindow.restore();
+                mainWindow.focus();
+              }
+              resolve({ success: true, code });
+            });
+
+            req.on('error', (err) => {
+              console.error('[Electron OAuth] Error posting intercepted token:', err);
+              reject(err);
+            });
+
+            req.write(postData);
+            req.end();
+          }
+        } catch (clipErr) {
+          // Non-critical clipboard reading error
+        }
+      }, 500);
     });
   });
 
